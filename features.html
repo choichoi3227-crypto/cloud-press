@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CloudPress | 기능</title>
+    <meta name="description" content="CloudPress의 모든 기능을 확인하세요. 엣지 캐싱, 자동 백업, 실시간 모니터링, 무료 SSL 등.">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="/style.css">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" rel="stylesheet">
+    <style>
+        body { background-color: #050505; color: white; }
+        .feature-card:hover { transform: translateY(-4px); transition: transform 0.2s; }
+        .gradient-text { background: linear-gradient(135deg, #3b82f6, #8b5cf6); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
+    </style>
+</head>
+<body class="bg-[#050505] text-white">
+
+    <header class="p-5 border-b border-white/10 sticky top-0 bg-[#050505]/90 backdrop-blur-lg z-50">
+        <div class="max-w-7xl mx-auto flex justify-between items-center">
+            <a href="/" class="text-2xl font-black tracking-tighter text-blue-500">CLOUD<span class="text-white">PRESS</span></a>
+            <nav class="hidden md:flex gap-8 items-center text-sm font-medium text-gray-400">
+                <a href="/features.html" class="text-white transition">기능</a>
+                <a href="/pricing.html" class="hover:text-white transition">요금제</a>
+                <a href="/about.html" class="hover:text-white transition">소개</a>
+                <a href="/faq.html" class="hover:text-white transition">FAQ</a>
+                <a href="/contact.html" class="hover:text-white transition">문의하기</a>
+                <a href="/login.html" class="hover:text-white transition">로그인</a>
+                <a href="/signup.html" class="bg-blue-600 px-5 py-2 rounded-full text-white font-bold hover:bg-blue-500 transition">무료 시작</a>
+            </nav>
+        </div>
+    </header>
+
+    <!-- 히어로 -->
+    <section class="py-24 px-6 text-center">
+        <div class="max-w-4xl mx-auto">
+            <div class="text-blue-500 text-sm font-bold uppercase tracking-widest mb-4">기능</div>
+            <h1 class="text-5xl md:text-6xl font-black mb-6"><span class="gradient-text">강력한 기능</span>으로<br>더 빠른 웹사이트</h1>
+            <p class="text-gray-400 text-xl max-w-2xl mx-auto">기존 호스팅의 모든 한계를 뛰어넘는 CloudPress의 핵심 기술을 만나보세요.</p>
+        </div>
+    </section>
+
+    <!-- 성능 -->
+    <section class="py-20 px-6 max-w-7xl mx-auto">
+        <div class="flex items-center gap-3 mb-12">
+            <div class="w-10 h-10 bg-blue-600/20 rounded-xl flex items-center justify-center">
+                <i class="fas fa-bolt text-blue-400"></i>
+            </div>
+            <h2 class="text-2xl font-black">성능 & 속도</h2>
+        </div>
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <div class="feature-card p-7 bg-[#0f0f0f] border border-white/10 rounded-2xl">
+                <h3 class="font-bold text-lg mb-2">엣지 사이드 렌더링</h3>
+                <p class="text-gray-500 text-sm">PHP 실행을 사용자와 가장 가까운 엣지 노드에서 처리합니다. 오리진 서버 왕복 없이 즉각 응답합니다.</p>
+            </div>
+            <div class="feature-card p-7 bg-[#0f0f0f] border border-white/10 rounded-2xl">
+                <h3 class="font-bold text-lg mb-2">스마트 캐싱</h3>
+                <p class="text-gray-500 text-sm">게시글, 이미지, API 응답을 자동으로 캐싱합니다. 관리자 페이지와 동적 콘텐츠는 항상 최신 상태로 유지됩니다.</p>
+            </div>
+            <div class="feature-card p-7 bg-[#0f0f0f] border border-white/10 rounded-2xl">
+                <h3 class="font-bold text-lg mb-2">이미지 자동 최적화</h3>
+                <p class="text-gray-500 text-sm">업로드 시 WebP 변환, 크기 리사이징, 지연 로딩을 자동으로 적용합니다. 평균 이미지 용량 70% 감소.</p>
+            </div>
+        </div>
+    </section>
+
+    <!-- 보안 -->
+    <section class="py-20 px-6 max-w-7xl mx-auto border-t border-white/5">
+        <div class="flex items-center gap-3 mb-12">
+            <div class="w-10 h-10 bg-green-600/20 rounded-xl flex items-center justify-center">
+                <i class="fas fa-shield-alt text-green-400"></i>
+            </div>
+            <h2 class="text-2xl font-black">보안</h2>
+        </div>
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <div class="feature-card p-7 bg-[#0f0f0f] border border-white/10 rounded-2xl">
+                <h3 class="font-bold text-lg mb-2">무료 SSL/TLS 자동화</h3>
+                <p class="text-gray-500 text-sm">모든 도메인에 Let's Encrypt SSL이 자동 발급 및 갱신됩니다. 인증서 만료로 인한 보안 경고를 걱정할 필요가 없습니다.</p>
+            </div>
+            <div class="feature-card p-7 bg-[#0f0f0f] border border-white/10 rounded-2xl">
+                <h3 class="font-bold text-lg mb-2">DDoS 방어</h3>
+                <p class="text-gray-500 text-sm">Cloudflare의 기업급 DDoS 방어 시스템이 기본으로 포함됩니다. 수백만 RPS 규모의 공격도 자동으로 방어합니다.</p>
+            </div>
+            <div class="feature-card p-7 bg-[#0f0f0f] border border-white/10 rounded-2xl">
+                <h3 class="font-bold text-lg mb-2">WAF (웹 방화벽)</h3>
+                <p class="text-gray-500 text-sm">SQL 인젝션, XSS, CSRF 등 웹 공격을 실시간으로 차단합니다. 워드프레스 특화 규칙 셋이 기본 적용됩니다.</p>
+            </div>
+        </div>
+    </section>
+
+    <!-- 관리 -->
+    <section class="py-20 px-6 max-w-7xl mx-auto border-t border-white/5">
+        <div class="flex items-center gap-3 mb-12">
+            <div class="w-10 h-10 bg-purple-600/20 rounded-xl flex items-center justify-center">
+                <i class="fas fa-cog text-purple-400"></i>
+            </div>
+            <h2 class="text-2xl font-black">관리 & 운영</h2>
+        </div>
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <div class="feature-card p-7 bg-[#0f0f0f] border border-white/10 rounded-2xl">
+                <h3 class="font-bold text-lg mb-2">원클릭 배포</h3>
+                <p class="text-gray-500 text-sm">버튼 하나로 완전히 구성된 워드프레스 사이트가 30초 내에 준비됩니다. DB, 스토리지, DNS까지 모두 자동으로 설정됩니다.</p>
+            </div>
+            <div class="feature-card p-7 bg-[#0f0f0f] border border-white/10 rounded-2xl">
+                <h3 class="font-bold text-lg mb-2">자동 백업 & 복원</h3>
+                <p class="text-gray-500 text-sm">매일 자동 스냅샷 생성 및 안전한 클라우드 보관. 원하는 시점으로 1클릭 복원이 가능합니다.</p>
+            </div>
+            <div class="feature-card p-7 bg-[#0f0f0f] border border-white/10 rounded-2xl">
+                <h3 class="font-bold text-lg mb-2">실시간 모니터링</h3>
+                <p class="text-gray-500 text-sm">트래픽, 응답시간, 오류율을 실시간 대시보드에서 한눈에 확인하세요. 이상 감지 시 즉시 이메일/문자 알림을 받습니다.</p>
+            </div>
+            <div class="feature-card p-7 bg-[#0f0f0f] border border-white/10 rounded-2xl">
+                <h3 class="font-bold text-lg mb-2">커스텀 도메인</h3>
+                <p class="text-gray-500 text-sm">보유한 도메인을 간편하게 연결하세요. CNAME 설정만으로 즉시 연결되며 www/naked 도메인을 모두 지원합니다.</p>
+            </div>
+            <div class="feature-card p-7 bg-[#0f0f0f] border border-white/10 rounded-2xl">
+                <h3 class="font-bold text-lg mb-2">PHP 버전 선택</h3>
+                <p class="text-gray-500 text-sm">PHP 8.1, 8.2, 8.3 중 원하는 버전을 선택하세요. 사이트 운영 중에도 다운타임 없이 버전을 변경할 수 있습니다.</p>
+            </div>
+            <div class="feature-card p-7 bg-[#0f0f0f] border border-white/10 rounded-2xl">
+                <h3 class="font-bold text-lg mb-2">파일 관리자</h3>
+                <p class="text-gray-500 text-sm">브라우저에서 직접 파일을 업로드, 편집, 삭제할 수 있습니다. FTP 프로그램 없이 모든 파일 관리가 가능합니다.</p>
+            </div>
+        </div>
+    </section>
+
+    <!-- CTA -->
+    <section class="py-24 px-6 text-center bg-[#080808] border-t border-white/5">
+        <h2 class="text-4xl font-black mb-6">지금 무료로 시작하세요</h2>
+        <a href="/signup.html" class="inline-block bg-blue-600 px-10 py-4 rounded-full font-black text-lg hover:bg-blue-500 transition shadow-xl shadow-blue-600/20">무료 계정 만들기</a>
+    </section>
+
+    <footer class="border-t border-white/10 py-10 px-6 text-center text-gray-600 text-sm">
+        <a href="/" class="text-blue-500 font-black">CLOUD<span class="text-white">PRESS</span></a>
+        <p class="mt-2">© 2025 CloudPress. All rights reserved.</p>
+    </footer>
+</body>
+</html>

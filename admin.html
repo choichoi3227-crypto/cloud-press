@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CloudPress Admin Panel</title>
+    <link rel="stylesheet" href="/style.css">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+</head>
+<body class="flex h-screen bg-[#050505] text-white">
+    <script>
+        // 클라이언트 측 인증 체크
+        const token = localStorage.getItem('admin_token');
+        if (!token) {
+            window.location.href = '/login.html';
+        }
+    </script>
+
+    <!-- Sidebar -->
+    <aside class="w-72 border-r border-white/10 p-6 flex flex-col">
+        <div class="text-3xl font-black text-blue-500 mb-10">CP <span class="text-white">ADMIN</span></div>
+        <nav class="flex-1 space-y-2">
+            <a href="admin.html" class="block p-3 rounded-xl bg-white/10 font-bold"><i class="fas fa-chart-line mr-3"></i> 개요</a>
+            <a href="admin-users.html" class="block p-3 rounded-xl hover:bg-white/5 transition"><i class="fas fa-users mr-3"></i> 사용자 관리</a>
+            <a href="admin-sites.html" class="block p-3 rounded-xl hover:bg-white/5 transition"><i class="fas fa-globe mr-3"></i> 사이트 관리</a>
+            <a href="admin-php-versions.html" class="block p-3 rounded-xl hover:bg-white/5 transition"><i class="fas fa-code mr-3"></i> PHP 버전</a>
+            <a href="admin-traffic.html" class="block p-3 rounded-xl hover:bg-white/5 transition"><i class="fas fa-network-wired mr-3"></i> 트래픽 모니터링</a>
+            <a href="admin-notices.html" class="block p-3 rounded-xl hover:bg-white/5 transition"><i class="fas fa-bullhorn mr-3"></i> 공지 관리</a>
+            <a href="admin-settings.html" class="block p-3 rounded-xl hover:bg-white/5 transition"><i class="fas fa-cog mr-3"></i> 시스템 설정</a>
+        </nav>
+        <button onclick="logout()" class="mt-auto w-full bg-red-600 py-3 rounded-xl font-bold hover:bg-red-500 transition"><i class="fas fa-sign-out-alt mr-2"></i> 로그아웃</button>
+    </aside>
+
+    <!-- Main Content -->
+    <main class="flex-1 p-10 overflow-y-auto">
+        <header class="flex justify-between items-center mb-10">
+            <h1 class="text-3xl font-bold">관리자 개요</h1>
+            <div class="text-sm text-gray-400">관리자님, 환영합니다!</div>
+        </header>
+
+        <section class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-10">
+            <div class="p-6 bg-[#111] rounded-2xl border border-white/5">
+                <div class="text-gray-500 text-xs uppercase mb-2">총 사용자</div>
+                <div class="text-4xl font-bold" id="total-users">0</div>
+            </div>
+            <div class="p-6 bg-[#111] rounded-2xl border border-white/5">
+                <div class="text-gray-500 text-xs uppercase mb-2">총 호스팅</div>
+                <div class="text-4xl font-bold" id="total-hostings">0</div>
+            </div>
+            <div class="p-6 bg-[#111] rounded-2xl border border-white/5">
+                <div class="text-gray-500 text-xs uppercase mb-2">월간 트래픽</div>
+                <div class="text-4xl font-bold" id="monthly-traffic">0 GB</div>
+            </div>
+        </section>
+
+        <!-- 인프라 맵 (36+4 버킷) -->
+        <section class="p-8 bg-[#111] rounded-3xl border border-white/10 mb-10">
+            <div class="flex justify-between items-end mb-8">
+                <div>
+                    <h2 class="text-2xl font-bold text-white">클러스터 동기화 상태</h2>
+                    <p class="text-gray-500 text-sm">36 메인 버킷 + 4 백업 노드</p>
+                </div>
+            </div>
+            <div id="infra-map-container">
+                <!-- JS로 36개 메인 버킷과 4개 백업 버킷 시각화 -->
+            </div>
+        </section>
+
+        <!-- 최근 시스템 알림 -->
+        <section class="p-8 bg-[#111] rounded-3xl border border-white/10">
+            <h2 class="text-2xl font-bold mb-6">최근 시스템 알림</h2>
+            <div id="system-alerts" class="space-y-3">
+                <div class="text-gray-400">알림이 없습니다.</div>
+            </div>
+        </section>
+    </main>
+
+    <script src="/src/auth-frontend.js"></script> <!-- 로그아웃 함수 포함 -->
+    <script>
+        async function loadAdminOverview() {
+            // 실제 D1에서 관리자 통계 데이터 페치
+            // 예시: const res = await fetch('/api/admin/stats', { headers: { 'Authorization': `Bearer ${token}` } });
+            document.getElementById('total-users').innerText = '1,234';
+            document.getElementById('total-hostings').innerText = '567';
+            document.getElementById('monthly-traffic').innerText = '890 GB';
+
+            // 인프라 맵 렌더링 (더미 데이터)
+            const infraMapContainer = document.getElementById('infra-map-container');
+            infraMapContainer.innerHTML = `
+                <h3 class="text-xs font-bold text-gray-400 uppercase tracking-widest mb-4">메인 스토리지 샤드 (36)</h3>
+                <div class="grid grid-cols-12 gap-2 mb-8">
+                    ${Array.from({length: 36}).map((_, i) => `<div class="aspect-square bg-green-500/20 opacity-70 rounded-sm" title="Main Bucket ${i+1}"></div>`).join('')}
+                </div>
+                <h3 class="text-xs font-bold text-gray-400 uppercase tracking-widest mb-4">백업 노드 (4)</h3>
+                <div class="grid grid-cols-4 gap-4">
+                    ${Array.from({length: 4}).map((_, i) => `<div class="h-16 bg-blue-500/10 border border-blue-500/30 rounded-xl flex items-center justify-center"><span class="text-xs font-mono text-blue-500">BACKUP-${i+1}</span></div>`).join('')}
+                </div>
+            `;
+        }
+        loadAdminOverview();
+    </script>
+</body>
+</html>

@@ -1,10 +1,9 @@
 // functions/api/signup.js  →  POST /api/signup
-import { jsonOk, jsonErr, hashPassword, dbGetUserByEmail, dbCreateUser, checkBindings } from "../_shared.js";
+import { jsonOk, jsonErr, hashPassword, dbGetUserByEmail, dbCreateUser, checkBindings, isAdminEmail } from "../_shared.js";
 
 export async function onRequestPost(context) {
   const { request, env } = context;
 
-  // DB, SESSIONS만 필수 체크 (CACHE는 선택적)
   const missing = checkBindings(env, ["DB", "SESSIONS"]);
   if (missing.length) return jsonErr(`바인딩 누락: ${missing.join(", ")}`, 503);
 
@@ -21,11 +20,11 @@ export async function onRequestPost(context) {
     const existing = await dbGetUserByEmail(env.DB, email);
     if (existing) return jsonErr("이미 사용 중인 이메일입니다.", 409);
 
+    // 어드민 이메일이면 자동으로 admin + pro 플랜 (dbCreateUser 내부에서 처리)
     await dbCreateUser(env.DB, {
       id:           crypto.randomUUID(),
       email,
       passwordHash: await hashPassword(password),
-      role:         "user",
     });
 
     return jsonOk({ success: true, message: "회원가입이 완료되었습니다." });

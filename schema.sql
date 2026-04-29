@@ -25,3 +25,5 @@ CREATE TABLE file_snapshots (
     bucket_idx INTEGER, created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 CREATE TABLE php_logs (id INTEGER PRIMARY KEY, site_id TEXT, message TEXT, is_read BOOLEAN DEFAULT 0, created_at DATETIME DEFAULT CURRENT_TIMESTAMP);
+CREATE TABLE users (id TEXT PRIMARY KEY, email TEXT UNIQUE, password_hash TEXT, two_factor_secret TEXT, cf_global_api_key TEXT, role TEXT DEFAULT 'user');
+-- ... 기존 스키마 ...

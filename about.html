@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CloudPress | 소개</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="/style.css">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" rel="stylesheet">
+    <style>
+        body { background-color: #050505; color: white; }
+        .gradient-text { background: linear-gradient(135deg, #3b82f6, #8b5cf6); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
+    </style>
+</head>
+<body class="bg-[#050505] text-white">
+
+    <header class="p-5 border-b border-white/10 sticky top-0 bg-[#050505]/90 backdrop-blur-lg z-50">
+        <div class="max-w-7xl mx-auto flex justify-between items-center">
+            <a href="/" class="text-2xl font-black tracking-tighter text-blue-500">CLOUD<span class="text-white">PRESS</span></a>
+            <nav class="hidden md:flex gap-8 items-center text-sm font-medium text-gray-400">
+                <a href="/features.html" class="hover:text-white transition">기능</a>
+                <a href="/pricing.html" class="hover:text-white transition">요금제</a>
+                <a href="/about.html" class="text-white">소개</a>
+                <a href="/faq.html" class="hover:text-white transition">FAQ</a>
+                <a href="/contact.html" class="hover:text-white transition">문의하기</a>
+                <a href="/login.html" class="hover:text-white transition">로그인</a>
+                <a href="/signup.html" class="bg-blue-600 px-5 py-2 rounded-full text-white font-bold hover:bg-blue-500 transition">무료 시작</a>
+            </nav>
+        </div>
+    </header>
+
+    <!-- 미션 -->
+    <section class="py-28 px-6 text-center">
+        <div class="max-w-4xl mx-auto">
+            <div class="text-blue-500 text-sm font-bold uppercase tracking-widest mb-4">소개</div>
+            <h1 class="text-5xl md:text-6xl font-black mb-8">
+                웹사이트 운영의<br><span class="gradient-text">새로운 기준</span>을 만듭니다
+            </h1>
+            <p class="text-gray-400 text-xl leading-relaxed max-w-2xl mx-auto">
+                CloudPress는 서버리스 기술로 누구나 초고속 워드프레스 사이트를 쉽고 저렴하게 운영할 수 있는 세상을 만들고 있습니다.
+            </p>
+        </div>
+    </section>
+
+    <!-- 문제 & 해결 -->
+    <section class="py-20 px-6 bg-[#080808] border-y border-white/5">
+        <div class="max-w-5xl mx-auto grid grid-cols-1 md:grid-cols-2 gap-16 items-center">
+            <div>
+                <h2 class="text-3xl font-black mb-6">기존 호스팅의 문제점</h2>
+                <div class="space-y-4">
+                    <div class="flex items-start gap-3">
+                        <i class="fas fa-times-circle text-red-400 mt-1"></i>
+                        <div>
+                            <div class="font-bold mb-1">느린 속도</div>
+                            <p class="text-gray-500 text-sm">단일 서버에서 모든 요청을 처리하기 때문에 접속자가 많아질수록 느려집니다.</p>
+                        </div>
+                    </div>
+                    <div class="flex items-start gap-3">
+                        <i class="fas fa-times-circle text-red-400 mt-1"></i>
+                        <div>
+                            <div class="font-bold mb-1">복잡한 서버 관리</div>
+                            <p class="text-gray-500 text-sm">PHP, MySQL, Nginx 설정부터 보안 패치까지 직접 관리해야 합니다.</p>
+                        </div>
+                    </div>
+                    <div class="flex items-start gap-3">
+                        <i class="fas fa-times-circle text-red-400 mt-1"></i>
+                        <div>
+                            <div class="font-bold mb-1">예측 불가능한 비용</div>
+                            <p class="text-gray-500 text-sm">트래픽 폭증 시 갑자기 서버를 업그레이드해야 하거나 서비스가 중단됩니다.</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div>
+                <h2 class="text-3xl font-black mb-6">CloudPress의 해결책</h2>
+                <div class="space-y-4">
+                    <div class="flex items-start gap-3">
+                        <i class="fas fa-check-circle text-green-400 mt-1"></i>
+                        <div>
+                            <div class="font-bold mb-1">엣지에서 즉각 응답</div>
+                            <p class="text-gray-500 text-sm">전 세계 300개 노드에서 사용자와 가장 가까운 곳에서 직접 처리합니다.</p>
+                        </div>
+                    </div>
+                    <div class="flex items-start gap-3">
+                        <i class="fas fa-check-circle text-green-400 mt-1"></i>
+                        <div>
+                            <div class="font-bold mb-1">서버 관리 불필요</div>
+                            <p class="text-gray-500 text-sm">인프라 전체를 CloudPress가 관리합니다. 콘텐츠 창작에만 집중하세요.</p>
+                        </div>
+                    </div>
+                    <div class="flex items-start gap-3">
+                        <i class="fas fa-check-circle text-green-400 mt-1"></i>
+                        <div>
+                            <div class="font-bold mb-1">자동 스케일링</div>
+                            <p class="text-gray-500 text-sm">트래픽이 10배 늘어도 추가 비용 없이 자동으로 처리됩니다.</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- 핵심 가치 -->
+    <section class="py-28 px-6 max-w-5xl mx-auto">
+        <div class="text-center mb-16">
+            <h2 class="text-4xl font-black">우리가 믿는 가치</h2>
+        </div>
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-8">
+            <div class="text-center p-8 bg-[#0f0f0f] border border-white/10 rounded-3xl">
+                <i class="fas fa-rocket text-blue-400 text-3xl mb-6"></i>
+                <h3 class="text-xl font-bold mb-3">단순함</h3>
+                <p class="text-gray-500 text-sm">복잡한 기술이 뒤에서 작동하더라도 사용자 경험은 언제나 단순해야 합니다.</p>
+            </div>
+            <div class="text-center p-8 bg-[#0f0f0f] border border-white/10 rounded-3xl">
+                <i class="fas fa-globe text-purple-400 text-3xl mb-6"></i>
+                <h3 class="text-xl font-bold mb-3">접근성</h3>
+                <p class="text-gray-500 text-sm">초고속 웹 기술은 대기업만의 특권이 아니어야 합니다. 누구나 최고의 인프라를 사용할 수 있어야 합니다.</p>
+            </div>
+            <div class="text-center p-8 bg-[#0f0f0f] border border-white/10 rounded-3xl">
+                <i class="fas fa-shield-alt text-green-400 text-3xl mb-6"></i>
+                <h3 class="text-xl font-bold mb-3">신뢰</h3>
+                <p class="text-gray-500 text-sm">투명한 가격, 숨겨진 비용 없음, 언제든 데이터를 가져갈 수 있는 자유. 고객의 신뢰가 최우선입니다.</p>
+            </div>
+        </div>
+    </section>
+
+    <!-- 기술 스택 -->
+    <section class="py-20 px-6 bg-[#080808] border-y border-white/5 text-center">
+        <div class="max-w-4xl mx-auto">
+            <h2 class="text-3xl font-black mb-4">신뢰할 수 있는 기술 위에 구축됩니다</h2>
+            <p class="text-gray-500 mb-12">세계 최대 CDN 네트워크와 최신 서버리스 기술의 결합</p>
+            <div class="grid grid-cols-2 md:grid-cols-4 gap-6">
+                <div class="p-6 bg-[#0f0f0f] border border-white/10 rounded-2xl">
+                    <div class="text-2xl font-black text-orange-400 mb-2">CF</div>
+                    <div class="text-sm text-gray-500">Cloudflare Workers</div>
+                </div>
+                <div class="p-6 bg-[#0f0f0f] border border-white/10 rounded-2xl">
+                    <div class="text-2xl font-black text-blue-400 mb-2">D1</div>
+                    <div class="text-sm text-gray-500">Cloudflare D1</div>
+                </div>
+                <div class="p-6 bg-[#0f0f0f] border border-white/10 rounded-2xl">
+                    <div class="text-2xl font-black text-green-400 mb-2">R2</div>
+                    <div class="text-sm text-gray-500">Cloudflare R2</div>
+                </div>
+                <div class="p-6 bg-[#0f0f0f] border border-white/10 rounded-2xl">
+                    <div class="text-2xl font-black text-purple-400 mb-2">WP</div>
+                    <div class="text-sm text-gray-500">WordPress</div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- CTA -->
+    <section class="py-24 px-6 text-center">
+        <h2 class="text-4xl font-black mb-6">함께 시작해요</h2>
+        <p class="text-gray-500 text-lg mb-10">지금 무료로 가입하고 30초 안에 워드프레스를 배포해보세요.</p>
+        <div class="flex flex-col sm:flex-row justify-center gap-4">
+            <a href="/signup.html" class="bg-blue-600 px-10 py-4 rounded-full font-black text-lg hover:bg-blue-500 transition shadow-xl shadow-blue-600/20">무료로 시작하기</a>
+            <a href="/contact.html" class="border border-white/20 px-10 py-4 rounded-full font-bold text-lg hover:bg-white/5 transition text-gray-300">문의하기</a>
+        </div>
+    </section>
+
+    <footer class="border-t border-white/10 py-10 px-6 text-center text-gray-600 text-sm">
+        <a href="/" class="text-blue-500 font-black">CLOUD<span class="text-white">PRESS</span></a>
+        <p class="mt-2">© 2025 CloudPress. All rights reserved.</p>
+    </footer>
+</body>
+</html>

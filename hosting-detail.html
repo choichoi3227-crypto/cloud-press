@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <title>호스팅 상세 - Cloud Press</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        .toggle-switch {
+            position: relative;
+            display: inline-block;
+            width: 60px;
+            height: 34px;
+        }
+        .toggle-switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+        .slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: #ccc;
+            -webkit-transition: .4s;
+            transition: .4s;
+            border-radius: 34px;
+        }
+        .slider:before {
+            position: absolute;
+            content: "";
+            height: 26px;
+            width: 26px;
+            left: 4px;
+            bottom: 4px;
+            background-color: white;
+            -webkit-transition: .4s;
+            transition: .4s;
+            border-radius: 50%;
+        }
+        input:checked + .slider {
+            background-color: #2196F3;
+        }
+        input:focus + .slider {
+            box-shadow: 0 0 1px #2196F3;
+        }
+        input:checked + .slider:before {
+            -webkit-transform: translateX(26px);
+            -ms-transform: translateX(26px);
+            transform: translateX(26px);
+        }
+    </style>
+</head>
+<body class="bg-black text-white p-10">
+    <div class="max-w-4xl mx-auto">
+        <h1 class="text-3xl font-bold mb-8" id="site-name-header">호스팅 상세</h1>
+        <div class="space-y-8">
+            <!-- 기본 정보 -->
+            <section class="bg-[#111] p-8 rounded-2xl border border-white/10">
+                <h2 class="text-2xl font-bold mb-6">기본 정보</h2>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div><span class="text-gray-400">사이트 이름:</span> <span id="detail-site-name" class="font-medium"></span></div>
+                    <div><span class="text-gray-400">도메인:</span> <span id="detail-primary-domain" class="font-medium"></span></div>
+                    <div><span class="text-gray-400">상태:</span> <span id="detail-status" class="font-medium"></span></div>
+                    <div><span class="text-gray-400">스토리지 할당량:</span> <span id="detail-storage-limit" class="font-medium"></span> GB</div>
+                </div>
+            </section>
+
+            <!-- PHP 버전 관리 -->
+            <section class="bg-[#111] p-8 rounded-2xl border border-white/10">
+                <h2 class="text-2xl font-bold mb-6">PHP 버전 관리</h2>
+                <div class="flex items-center space-x-4">
+                    <select id="php-version-select" class="w-48 bg-black border border-white/20 rounded-lg p-3">
+                        <option value="8.3">PHP 8.3 (Latest)</option>
+                        <option value="8.2">PHP 8.2 (Stable)</option>
+                        <option value="8.1">PHP 8.1</option>
+                        <option value="7.4">PHP 7.4 (Legacy)</option>
+                    </select>
+                    <button onclick="updatePhpVersion()" class="bg-blue-600 hover:bg-blue-700 font-bold py-3 px-6 rounded-xl transition">PHP 버전 적용</button>
+                </div>
+                <p class="text-xs text-gray-500 mt-2">* 적용 시 공식 홈페이지에서 바이너리를 실시간으로 로드하여 무중단 배포합니다.</p>
+            </section>
+
+            <!-- 캐싱 설정 -->
+            <section class="bg-[#111] p-8 rounded-2xl border border-white/10">
+                <h2 class="text-2xl font-bold mb-6">캐싱 설정</h2>
+                <label class="flex items-center cursor-pointer">
+                    <div class="relative">
+                        <input type="checkbox" id="cache-toggle" class="sr-only" onchange="toggleCaching()">
+                        <div class="block bg-gray-600 w-14 h-8 rounded-full"></div>
+                        <div class="dot absolute left-1 top-1 bg-white w-6 h-6 rounded-full transition"></div>
+                    </div>
+                    <div class="ml-3 text-gray-300 font-medium">사이트 캐싱 활성화</div>
+                </label>
+            </section>
+
+            <!-- SSH/SFTP 접근 -->
+            <section class="bg-[#111] p-8 rounded-2xl border border-white/10">
+                <h2 class="text-2xl font-bold mb-6">SSH / SFTP 접근</h2>
+                <p class="text-gray-400 mb-2">SSH/SFTP는 현재 개발 중입니다. 곧 지원될 예정입니다.</p>
+                <!-- 실제로는 여기에 사용자별 SSH 키 관리, SFTP 계정 정보 등이 표시될 것입니다. -->
+                <div class="bg-black p-4 rounded-lg text-sm text-gray-300">
+                    <p>호스트: <span class="font-mono">ssh.cloudpress.com</span></p>
+                    <p>사용자명: <span class="font-mono" id="ssh-username"></span></p>
+                    <p>포트: <span class="font-mono">22</span></p>
+                </div>
+            </section>
+
+            <!-- 백업 및 복원 -->
+            <section class="bg-[#111] p-8 rounded-2xl border border-white/10">
+                <h2 class="text-2xl font-bold mb-6">백업 및 복원</h2>
+                <button onclick="initiateBackup()" class="bg-green-600 hover:bg-green-700 font-bold py-3 px-6 rounded-xl transition">수동 백업 생성</button>
+                <p class="text-gray-400 mt-4">최근 백업: <span id="last-backup-date">정보 없음</span></p>
+                <!-- 백업 목록 및 복원 버튼 등이 추가될 수 있습니다. -->
+            </section>
+        </div>
+    </div>
+    <script src="/src/auth-frontend.js"></script>
+    <script>
+        let currentSiteId = null;
+
+        document.addEventListener('DOMContentLoaded', async () => {
+            const urlParams = new URLSearchParams(window.location.search);
+            currentSiteId = urlParams.get('id');
+            if (currentSiteId) {
+                await fetchSiteDetails(currentSiteId);
+            } else {
+                alert('사이트 ID가 없습니다.');
+                location.href = '/admin.html';
+            }
+        });
+
+        async function fetchSiteDetails(siteId) {
+            const token = localStorage.getItem('jwt');
+            if (!token) { alert('로그인이 필요합니다.'); location.href = '/login.html'; return; }
+            const res = await fetch(`/api/sites/${siteId}`, {
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
+            if (res.ok) {
+                const site = await res.json();
+                document.getElementById('site-name-header').textContent = `${site.site_name} 상세`;
+                document.getElementById('detail-site-name').textContent = site.site_name;
+                document.getElementById('detail-primary-domain').textContent = site.primary_domain;
+                document.getElementById('detail-status').textContent = site.status;
+                document.getElementById('detail-storage-limit').textContent = site.storage_limit;
+                document.getElementById('php-version-select').value = site.php_version;
+                document.getElementById('cache-toggle').checked = site.cache_enabled;
+                document.getElementById('ssh-username').textContent = `user-${site.id.substring(0, 8)}`; // Example SSH username
+                // last-backup-date는 백엔드에서 가져와야 함
+            } else {
+                alert('사이트 정보를 불러오는데 실패했습니다.');
+                location.href = '/admin.html';
+            }
+        }
+
+        async function updatePhpVersion() {
+            const token = localStorage.getItem('jwt');
+            if (!token) { alert('로그인이 필요합니다.'); location.href = '/login.html'; return; }
+            const newVersion = document.getElementById('php-version-select').value;
+            const res = await fetch('/api/sites/update-php', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                body: JSON.stringify({ site_id: currentSiteId, new_version: newVersion })
+            });
+            if (res.ok) {
+                alert(`PHP 버전이 ${newVersion}으로 업데이트되었습니다.`);
+            } else {
+                alert('PHP 버전 업데이트에 실패했습니다.');
+            }
+        }
+
+        async function toggleCaching() {
+            const token = localStorage.getItem('jwt');
+            if (!token) { alert('로그인이 필요합니다.'); location.href = '/login.html'; return; }
+            const cacheEnabled = document.getElementById('cache-toggle').checked;
+            const res = await fetch(`/api/sites/${currentSiteId}/cache`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                body: JSON.stringify({ cache_enabled: cacheEnabled })
+            });
+            if (res.ok) {
+                alert(`캐싱이 ${cacheEnabled ? '활성화' : '비활성화'}되었습니다.`);
+            } else {
+                alert('캐싱 설정 업데이트에 실패했습니다.');
+                document.getElementById('cache-toggle').checked = !cacheEnabled; // Revert UI on error
+            }
+        }
+
+        async function initiateBackup() {
+            const token = localStorage.getItem('jwt');
+            if (!token) { alert('로그인이 필요합니다.'); location.href = '/login.html'; return; }
+            const res = await fetch(`/api/sites/${currentSiteId}/backup`, {
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
+            if (res.ok) {
+                const data = await res.json();
+                alert(data.message);
+                // 실제로는 data.download_link를 사용하여 다운로드 시작
+            } else {
+                alert('백업 생성에 실패했습니다.');
+            }
+        }
+    </script>
+</body>
+</html>

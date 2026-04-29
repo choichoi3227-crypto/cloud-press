@@ -20,13 +20,20 @@
         code             { font-family: 'Courier New', monospace; }
     </style>
 </head>
-<body class="flex h-screen bg-[#050505] text-white">
+<body class="flex h-screen bg-[#050505] text-white dash-layout">
+    <!-- 모바일 햄버거 버튼 -->
+    <button class="mobile-menu-btn" aria-label="메뉴 열기">
+        <i class="fas fa-bars"></i>
+        <span class="text-xs font-bold">메뉴</span>
+    </button>
+    <!-- 사이드바 오버레이 -->
+    <div class="sidebar-overlay"></div>
     <script>
         if (!localStorage.getItem('admin_token')) window.location.href = '/login.html';
     </script>
 
     <!-- Sidebar -->
-    <aside class="w-64 border-r border-white/10 p-6 flex flex-col flex-shrink-0">
+    <aside class="w-64 border-r border-white/10 p-6 flex flex-col flex-shrink-0 dash-sidebar">
         <div class="text-2xl font-black text-blue-500 mb-10">CLOUD<span class="text-white">PRESS</span></div>
         <nav class="flex-1 space-y-2">
             <a href="/dashboard.html" class="block p-3 rounded-xl hover:bg-white/5 transition"><i class="fas fa-tachometer-alt mr-3"></i> 대시보드</a>
@@ -537,14 +544,19 @@
 
                 list.innerHTML = data.versions.map(v => {
                     const isSelected = v.version.startsWith(selectedPhpVersion?.split('.')[0] + '.' + selectedPhpVersion?.split('.')[1]);
+                    const displayVer = v.display_version || ('PHP ' + v.version.split('.').slice(0,2).join('.'));
+                    const supportLabel = v.support_label || (v.supported ? '지원됨' : 'EOL');
                     return `
                     <div class="php-opt border border-white/10 rounded-xl p-4 ${isSelected ? 'selected' : ''}"
                          onclick="selectPhpVersion('${v.version}', this)">
                         <div class="flex justify-between items-center">
-                            <div class="flex items-center gap-3">
-                                <span class="font-mono font-bold">PHP ${v.version}</span>
+                            <div class="flex items-center gap-2 flex-wrap">
+                                <span class="font-mono font-bold">${displayVer}</span>
+                                <span class="text-xs text-gray-500">(${v.version})</span>
                                 ${v.is_security_release ? '<span class="text-xs bg-green-900/40 border border-green-500/30 text-green-400 px-2 py-0.5 rounded-full">보안</span>' : ''}
-                                ${!v.supported ? '<span class="text-xs bg-red-900/40 border border-red-500/30 text-red-400 px-2 py-0.5 rounded-full">EOL</span>' : ''}
+                                ${!v.supported
+                                    ? '<span class="text-xs bg-red-900/40 border border-red-500/30 text-red-400 px-2 py-0.5 rounded-full">' + supportLabel + '</span>'
+                                    : '<span class="text-xs bg-blue-900/40 border border-blue-500/30 text-blue-400 px-2 py-0.5 rounded-full">' + supportLabel + '</span>'}
                             </div>
                             <div class="flex items-center gap-2">
                                 <span class="text-xs text-gray-600">${v.date || ''}</span>

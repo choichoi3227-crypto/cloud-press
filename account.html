@@ -8,7 +8,7 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
 </head>
-<body class="flex h-screen bg-[#050505] text-white">
+<body class="bg-[#050505] text-white md:flex md:h-screen">
     <script>
         const token = localStorage.getItem('admin_token');
         if (!token) window.location.href = '/login.html';
@@ -59,7 +59,7 @@
         </button>
     </aside>
 
-    <main class="flex-1 p-10 max-w-2xl overflow-y-auto">
+    <main class="flex-1 w-full p-10 max-w-2xl overflow-y-auto">
         <h1 class="text-3xl font-bold mb-10">내 계정 설정</h1>
 
         <div id="alertMsg" class="hidden mb-6 p-3 rounded-xl text-sm text-center"></div>

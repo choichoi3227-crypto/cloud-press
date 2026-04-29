@@ -1,4 +1,4 @@
-name = "cloudpress"
+name = "cloud-press"
 main = "src/index.js"
 compatibility_date = "2024-05-01"
 

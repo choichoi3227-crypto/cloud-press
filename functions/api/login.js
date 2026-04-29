@@ -20,23 +20,19 @@ export async function onRequestPost(context) {
   if (!email || !password) return jsonErr("이메일과 비밀번호를 입력해주세요.", 400);
 
   try {
-    // D1에서 유저 조회
     const user = await dbGetUserByEmail(env.DB, email);
     if (!user) return jsonErr("이메일 또는 비밀번호가 올바르지 않습니다.", 401);
 
-    // 비밀번호 검증
     const hash = await hashPassword(password);
     if (hash !== user.password_hash)
       return jsonErr("이메일 또는 비밀번호가 올바르지 않습니다.", 401);
 
-    // JWT 발급
     const secret = env.JWT_SECRET || "cp_dev_secret_change_me";
     const token  = await generateJWT(
       { id: user.id, email: user.email, role: user.role },
       secret
     );
 
-    // SESSIONS KV에 서버 사이드 세션도 저장 (선택적 무효화용)
     await sessionCreate(env.SESSIONS, user.id, user.email, user.role);
 
     return jsonOk({ success: true, token });

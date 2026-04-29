@@ -3,13 +3,21 @@ main = "src/index.js"
 compatibility_date = "2024-05-01"
 
 # ──────────────────────────────────────────────────────────────────────────────
+# 정적 파일(HTML/CSS/JS) 서빙 - Workers Assets 바인딩
+# HTML, CSS, JS 파일들이 Worker와 같은 도메인에서 서빙되어 /api/* 경로가 정상 동작함
+# ──────────────────────────────────────────────────────────────────────────────
+[assets]
+directory = "."
+binding = "ASSETS"
+
+# ──────────────────────────────────────────────────────────────────────────────
 # 환경 변수 (배포 전 실제 값으로 교체하세요)
 # ──────────────────────────────────────────────────────────────────────────────
 [vars]
 ADMIN_DOMAIN = "admin.cloud-press.co.kr"
-JWT_SECRET = "cp_secure_secret_key_change_me"          # 반드시 강력한 값으로 변경!
-CLOUDFLARE_ZONE_ID = "your_cloudpress_main_zone_id"    # CloudPress 서비스 Zone ID
-CLOUDFLARE_API_TOKEN = "your_cloudpress_api_token"     # Zone Edit 권한 토큰
+JWT_SECRET = "Swsh120327!"          # 반드시 강력한 값으로 변경!
+CLOUDFLARE_ZONE_ID = "cloud-press.co.kr"    # CloudPress 서비스 Zone ID
+CLOUDFLARE_API_TOKEN = "cfut_JN1fIDl5zRN9GJbsO7ntuQpc6QFA1TjJyDxUwrfU140bc101"     # Zone Edit 권한 토큰
 
 # ──────────────────────────────────────────────────────────────────────────────
 # KV Namespace 바인딩

@@ -1,0 +1,36 @@
+# CloudPress — _redirects
+# Cloudflare Pages 리다이렉트 규칙
+# 형식: <출발지> <목적지> <상태코드>
+# https://developers.cloudflare.com/pages/configuration/redirects/
+
+# ── 루트 → 메인 페이지 ──────────────────────────────────────────────────────
+/home          /index.html        301
+/index         /index.html        301
+
+# ── 확장자 없는 URL 정규화 ───────────────────────────────────────────────────
+/login         /login.html        301
+/signup        /signup.html       301
+/dashboard     /dashboard.html    301
+/account       /account.html      301
+/admin         /admin.html        301
+/hosting       /hosting.html      301
+/editor        /editor.html       301
+/traffic       /traffic.html      301
+/storage       /storage.html      301
+/pricing       /pricing.html      301
+/features      /features.html     301
+/about         /about.html        301
+/contact       /contact.html      301
+/faq           /faq.html          301
+
+# ── 구형 경로 → 새 경로 (영구 리다이렉트) ───────────────────────────────────
+/register      /signup.html       301
+/sign-up       /signup.html       301
+/sign-in       /login.html        301
+/logout        /login.html        302
+
+# ── API는 리다이렉트 없이 Functions로 직행 (/api/* 는 여기서 처리 안 함) ──
+
+# ── 404 fallback → 메인 (SPA 스타일 아님, 실제 404 유지) ────────────────────
+# 필요 시 아래 주석 해제:
+# /* /index.html 200

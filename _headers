@@ -1,0 +1,59 @@
+# CloudPress — _headers
+# Cloudflare Pages 정적 파일 응답 헤더 규칙
+# https://developers.cloudflare.com/pages/configuration/headers/
+
+# ── 전체 페이지 기본 보안 헤더 ──────────────────────────────────────────────
+/*
+  X-Frame-Options: DENY
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: strict-origin-when-cross-origin
+  Permissions-Policy: camera=(), microphone=(), geolocation=()
+  X-XSS-Protection: 1; mode=block
+
+# ── API 응답 CORS ────────────────────────────────────────────────────────────
+/api/*
+  Access-Control-Allow-Origin: *
+  Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS
+  Access-Control-Allow-Headers: Content-Type, Authorization
+  Content-Type: application/json
+
+# ── 정적 에셋 장기 캐시 ─────────────────────────────────────────────────────
+/style.css
+  Cache-Control: public, max-age=31536000, immutable
+
+/src/*.js
+  Cache-Control: public, max-age=86400
+
+# ── HTML 페이지 — 캐시 안 함 (로그인 상태 반영) ──────────────────────────
+/*.html
+  Cache-Control: no-cache, no-store, must-revalidate
+  Pragma: no-cache
+
+# ── 인증 필요 페이지 추가 보안 ───────────────────────────────────────────────
+/dashboard.html
+  Cache-Control: no-cache, no-store, must-revalidate
+  X-Robots-Tag: noindex
+
+/account.html
+  Cache-Control: no-cache, no-store, must-revalidate
+  X-Robots-Tag: noindex
+
+/admin.html
+  Cache-Control: no-cache, no-store, must-revalidate
+  X-Robots-Tag: noindex
+
+/hosting.html
+  Cache-Control: no-cache, no-store, must-revalidate
+  X-Robots-Tag: noindex
+
+/editor.html
+  Cache-Control: no-cache, no-store, must-revalidate
+  X-Robots-Tag: noindex
+
+/traffic.html
+  Cache-Control: no-cache, no-store, must-revalidate
+  X-Robots-Tag: noindex
+
+/storage.html
+  Cache-Control: no-cache, no-store, must-revalidate
+  X-Robots-Tag: noindex

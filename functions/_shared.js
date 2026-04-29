@@ -103,7 +103,7 @@ export async function sessionCreate(sessions, userId, email, role) {
   const token = crypto.randomUUID().replace(/-/g, "") + crypto.randomUUID().replace(/-/g, "");
   await sessions.put(
     `session:${token}`,
-    JSON.stringify({ userId, email, role, createdAt: Date.now() }),
+    JSON.stringify({ id: userId, email, role, createdAt: Date.now() }),
     { expirationTtl: 86400 }
   );
   return token;
@@ -124,14 +124,14 @@ export async function dbGetUserById(db, id) {
 }
 
 export async function dbCreateUser(db, { id, email, passwordHash, role = "user", plan = "free" }) {
-  // 어드민 이메일이면 자동으로 admin + pro
   const finalRole = isAdminEmail(email) ? "admin" : role;
-  const finalPlan = isAdminEmail(email) ? "pro" : plan;
+  const finalPlan = isAdminEmail(email) ? "pro"   : plan;
   await db.prepare(
     "INSERT INTO users (id, email, password_hash, role, plan, created_at) VALUES (?, ?, ?, ?, ?, ?)"
   ).bind(id, email.toLowerCase().trim(), passwordHash, finalRole, finalPlan, new Date().toISOString()).run();
 }
 
+// ── CF API 키 업데이트 ──────────────────────────────────────────────────────
 export async function dbUpdateUserCfKey(db, userId, cfApiKey, cfEmail) {
   if (cfEmail) {
     await db.prepare("UPDATE users SET cf_global_api_key = ?, cf_email = ? WHERE id = ?")
@@ -159,14 +159,49 @@ export async function validateCfApiKey(apiKey, email) {
   }
 }
 
-// ── 바인딩 체크 (DB, SESSIONS 필수 / CACHE 선택) ────────────────────────────
+// ── 바인딩 체크 ─────────────────────────────────────────────────────────────
 export function checkBindings(env, required = ["DB", "SESSIONS"]) {
   return required.filter(b => !env[b]);
 }
 
 // ── 플랜별 제한 ──────────────────────────────────────────────────────────────
+// sites         : 생성 가능 사이트 수
+// storage_gb    : 스토리지 한도 (GB)
+// traffic_gb    : 월간 트래픽 한도 (GB, null=무제한)
+// backups       : 자동 백업 허용 여부
+// custom_domain : 커스텀 도메인 허용 여부
+// allowed_php   : 허용 PHP minor 버전 목록 (null=전체)
+// wp_cli        : WP-CLI 접근 허용 여부
+// ssh_access    : SSH 접근 허용 여부
 export const PLAN_LIMITS = {
-  free:    { sites: 1,         storage_gb: 5,  traffic_gb: 100,  backups: false, custom_domain: false },
-  starter: { sites: 5,         storage_gb: 18, traffic_gb: 1000, backups: true,  custom_domain: true  },
-  pro:     { sites: Infinity,  storage_gb: 36, traffic_gb: null, backups: true,  custom_domain: true  },
+  free: {
+    sites:         1,
+    storage_gb:    5,
+    traffic_gb:    100,
+    backups:       false,
+    custom_domain: false,
+    allowed_php:   ["8.2", "8.3"],   // 최신 2개 버전만
+    wp_cli:        false,
+    ssh_access:    false,
+  },
+  starter: {
+    sites:         5,
+    storage_gb:    18,
+    traffic_gb:    1000,
+    backups:       true,
+    custom_domain: true,
+    allowed_php:   null,             // 전체 허용
+    wp_cli:        true,
+    ssh_access:    false,
+  },
+  pro: {
+    sites:         Infinity,
+    storage_gb:    36,
+    traffic_gb:    null,             // 무제한
+    backups:       true,
+    custom_domain: true,
+    allowed_php:   null,
+    wp_cli:        true,
+    ssh_access:    true,
+  },
 };

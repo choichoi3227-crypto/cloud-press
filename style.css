@@ -73,71 +73,11 @@ body { font-family: 'Inter', sans-serif; margin: 0; background-color: #0f172a; c
 
 /* ── 반응형 사이드바 (모바일) ──────────────────────────────────────────────── */
 /* 햄버거 버튼: 모바일에서만 표시 */
-/* ── 햄버거 버튼: 모바일에서만 표시 ─────────────────────────────────────── */
-.mobile-menu-btn {
-  display: none;
-  position: fixed;
-  top: 0.75rem;
-  left: 0.75rem;
-  z-index: 60;
-  background: #111;
-  border: 1px solid rgba(255,255,255,0.15);
-  border-radius: 10px;
-  padding: 0.55rem 0.75rem;
-  color: white;
-  cursor: pointer;
-  align-items: center;
-  gap: 0.4rem;
-  font-size: 0.8rem;
-  font-weight: 700;
-}
-
-/* ── 오버레이 (사이드바 열렸을 때 배경 어둡게) ───────────────────────────── */
-.sidebar-overlay {
-  display: none;
-  position: fixed;
-  inset: 0;
-  background: rgba(0,0,0,0.65);
-  z-index: 49;
-  backdrop-filter: blur(2px);
-}
-
-/* ── 모바일 반응형 (768px 이하) ─────────────────────────────────────────── */
+/* ── 모바일 대시보드 레이아웃 (768px 이하) ──────────────────────────────── */
 @media (max-width: 768px) {
-  /* 햄버거 버튼 표시 */
-  .mobile-menu-btn { display: flex; }
-
-  /* 사이드바: 기본 숨김 → fixed drawer로 */
-  body.dash-layout aside.dash-sidebar {
-    position: fixed !important;
-    top: 0;
-    left: -280px;          /* 완전히 화면 밖 */
-    bottom: 0;
-    width: 260px !important;
-    z-index: 50;
-    overflow-y: auto;
-    background: #0a0a0a;
-    border-right: 1px solid rgba(255,255,255,0.1);
-    transition: left 0.26s cubic-bezier(0.4, 0, 0.2, 1);
-    /* flex 레이아웃에서 공간 차지하지 않도록 */
-    flex-shrink: 0;
-    flex-basis: 0 !important;
-    min-width: 0 !important;
-  }
-
-  /* 열렸을 때: 왼쪽에서 슬라이드인 */
-  body.dash-layout aside.dash-sidebar.open {
-    left: 0;
-  }
-
-  /* 오버레이 활성화 */
-  .sidebar-overlay.active { display: block; }
-
-  /* 메인 콘텐츠: 사이드바 없이 전체 너비, 상단 패딩으로 버튼 공간 확보 */
-  body.dash-layout main {
-    flex: 1 1 100% !important;
-    max-width: 100% !important;
-    padding-top: 4rem !important;
+  /* 메인 콘텐츠: 전체 너비 */
+  body main {
+    width: 100% !important;
     overflow-x: hidden;
   }
 }

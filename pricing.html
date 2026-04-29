@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CloudPress | 요금제</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="/style.css">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" rel="stylesheet">
+    <style>
+        body { background-color: #050505; color: white; }
+        .plan-card { transition: transform 0.2s ease; }
+        .plan-card:hover { transform: translateY(-6px); }
+        .plan-popular { box-shadow: 0 0 0 2px #3b82f6, 0 0 60px rgba(59, 130, 246, 0.15); }
+        .check { color: #4ade80; }
+        .cross { color: #374151; }
+    </style>
+</head>
+<body class="bg-[#050505] text-white">
+
+    <header class="p-5 border-b border-white/10 sticky top-0 bg-[#050505]/90 backdrop-blur-lg z-50">
+        <div class="max-w-7xl mx-auto flex justify-between items-center">
+            <a href="/" class="text-2xl font-black tracking-tighter text-blue-500">CLOUD<span class="text-white">PRESS</span></a>
+            <nav class="hidden md:flex gap-8 items-center text-sm font-medium text-gray-400">
+                <a href="/features.html" class="hover:text-white transition">기능</a>
+                <a href="/pricing.html" class="text-white">요금제</a>
+                <a href="/about.html" class="hover:text-white transition">소개</a>
+                <a href="/faq.html" class="hover:text-white transition">FAQ</a>
+                <a href="/contact.html" class="hover:text-white transition">문의하기</a>
+                <a href="/login.html" class="hover:text-white transition">로그인</a>
+                <a href="/signup.html" class="bg-blue-600 px-5 py-2 rounded-full text-white font-bold hover:bg-blue-500 transition">무료 시작</a>
+            </nav>
+        </div>
+    </header>
+
+    <!-- 히어로 -->
+    <section class="py-24 px-6 text-center">
+        <div class="max-w-3xl mx-auto">
+            <div class="text-blue-500 text-sm font-bold uppercase tracking-widest mb-4">요금제</div>
+            <h1 class="text-5xl md:text-6xl font-black mb-6">투명한 가격</h1>
+            <p class="text-gray-400 text-xl mb-8">숨겨진 비용 없음. 언제든 취소 가능. 무료로 시작하세요.</p>
+            <!-- 월간/연간 토글 -->
+            <div class="inline-flex items-center bg-[#111] border border-white/10 rounded-full p-1 gap-1">
+                <button id="monthlyBtn" onclick="setbilling('monthly')" class="px-5 py-2 rounded-full text-sm font-bold bg-white text-black transition">월간 결제</button>
+                <button id="yearlyBtn" onclick="setbilling('yearly')" class="px-5 py-2 rounded-full text-sm font-bold text-gray-400 transition">연간 결제 <span class="text-green-400">20% 할인</span></button>
+            </div>
+        </div>
+    </section>
+
+    <!-- 요금제 카드 -->
+    <section class="pb-24 px-6 max-w-6xl mx-auto">
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-8 mb-20">
+            <!-- 무료 -->
+            <div class="plan-card p-8 bg-[#0f0f0f] border border-white/10 rounded-3xl">
+                <div class="text-gray-400 text-xs font-bold uppercase tracking-widest mb-4">무료</div>
+                <div class="mb-8">
+                    <span class="text-5xl font-black">₩0</span>
+                    <span class="text-gray-600 text-sm ml-2">영구 무료</span>
+                </div>
+                <ul class="space-y-3 text-sm text-gray-400 mb-10">
+                    <li class="flex items-center gap-3"><i class="fas fa-check check w-4"></i> 워드프레스 사이트 <strong class="text-white">1개</strong></li>
+                    <li class="flex items-center gap-3"><i class="fas fa-check check w-4"></i> 트래픽 <strong class="text-white">100GB</strong>/월</li>
+                    <li class="flex items-center gap-3"><i class="fas fa-check check w-4"></i> 스토리지 <strong class="text-white">5GB</strong></li>
+                    <li class="flex items-center gap-3"><i class="fas fa-check check w-4"></i> 무료 SSL</li>
+                    <li class="flex items-center gap-3"><i class="fas fa-check check w-4"></i> 기본 대시보드</li>
+                    <li class="flex items-center gap-3"><i class="fas fa-times cross w-4"></i> <span class="text-gray-600">커스텀 도메인</span></li>
+                    <li class="flex items-center gap-3"><i class="fas fa-times cross w-4"></i> <span class="text-gray-600">자동 백업</span></li>
+                    <li class="flex items-center gap-3"><i class="fas fa-times cross w-4"></i> <span class="text-gray-600">실시간 모니터링</span></li>
+                </ul>
+                <a href="/signup.html" class="block text-center border border-white/20 py-3.5 rounded-xl font-bold hover:bg-white/5 transition">무료로 시작</a>
+            </div>
+            <!-- 스타터 -->
+            <div class="plan-card plan-popular p-8 bg-[#0d1829] border border-blue-500/50 rounded-3xl relative">
+                <div class="absolute -top-4 left-1/2 -translate-x-1/2 bg-blue-600 px-5 py-1.5 rounded-full text-xs font-bold">가장 인기</div>
+                <div class="text-blue-400 text-xs font-bold uppercase tracking-widest mb-4">스타터</div>
+                <div class="mb-8">
+                    <span id="starterPrice" class="text-5xl font-black">₩9,900</span>
+                    <span class="text-gray-500 text-sm ml-2">/월</span>
+                    <div id="starterOriginal" class="hidden text-gray-600 text-sm mt-1 line-through">₩9,900/월</div>
+                </div>
+                <ul class="space-y-3 text-sm text-gray-300 mb-10">
+                    <li class="flex items-center gap-3"><i class="fas fa-check check w-4"></i> 워드프레스 사이트 <strong class="text-white">5개</strong></li>
+                    <li class="flex items-center gap-3"><i class="fas fa-check check w-4"></i> 트래픽 <strong class="text-white">1TB</strong>/월</li>
+                    <li class="flex items-center gap-3"><i class="fas fa-check check w-4"></i> 스토리지 <strong class="text-white">50GB</strong></li>
+                    <li class="flex items-center gap-3"><i class="fas fa-check check w-4"></i> 무료 SSL</li>
+                    <li class="flex items-center gap-3"><i class="fas fa-check check w-4"></i> 커스텀 도메인</li>
+                    <li class="flex items-center gap-3"><i class="fas fa-check check w-4"></i> 일일 자동 백업</li>
+                    <li class="flex items-center gap-3"><i class="fas fa-check check w-4"></i> 실시간 모니터링</li>
+                    <li class="flex items-center gap-3"><i class="fas fa-times cross w-4"></i> <span class="text-gray-500">팀 계정</span></li>
+                </ul>
+                <a href="/signup.html" class="block text-center bg-blue-600 py-3.5 rounded-xl font-bold hover:bg-blue-500 transition shadow-lg shadow-blue-600/30">시작하기</a>
+            </div>
+            <!-- 프로 -->
+            <div class="plan-card p-8 bg-[#0f0f0f] border border-white/10 rounded-3xl">
+                <div class="text-gray-400 text-xs font-bold uppercase tracking-widest mb-4">프로</div>
+                <div class="mb-8">
+                    <span id="proPrice" class="text-5xl font-black">₩29,900</span>
+                    <span class="text-gray-600 text-sm ml-2">/월</span>
+                    <div id="proOriginal" class="hidden text-gray-600 text-sm mt-1 line-through">₩29,900/월</div>
+                </div>
+                <ul class="space-y-3 text-sm text-gray-400 mb-10">
+                    <li class="flex items-center gap-3"><i class="fas fa-check check w-4"></i> 사이트 <strong class="text-white">무제한</strong></li>
+                    <li class="flex items-center gap-3"><i class="fas fa-check check w-4"></i> 트래픽 <strong class="text-white">무제한</strong></li>
+                    <li class="flex items-center gap-3"><i class="fas fa-check check w-4"></i> 스토리지 <strong class="text-white">500GB</strong></li>
+                    <li class="flex items-center gap-3"><i class="fas fa-check check w-4"></i> 무료 SSL</li>
+                    <li class="flex items-center gap-3"><i class="fas fa-check check w-4"></i> 커스텀 도메인 무제한</li>
+                    <li class="flex items-center gap-3"><i class="fas fa-check check w-4"></i> 시간별 자동 백업</li>
+                    <li class="flex items-center gap-3"><i class="fas fa-check check w-4"></i> 실시간 모니터링 + 알림</li>
+                    <li class="flex items-center gap-3"><i class="fas fa-check check w-4"></i> 팀 계정 (최대 5명)</li>
+                </ul>
+                <a href="/signup.html" class="block text-center border border-white/20 py-3.5 rounded-xl font-bold hover:bg-white/5 transition">시작하기</a>
+            </div>
+        </div>
+
+        <!-- 비교 표 -->
+        <div class="overflow-x-auto">
+            <table class="w-full text-sm">
+                <thead>
+                    <tr class="border-b border-white/10">
+                        <th class="text-left py-4 px-4 text-gray-500 font-medium">기능 비교</th>
+                        <th class="py-4 px-4 font-bold text-center">무료</th>
+                        <th class="py-4 px-4 font-bold text-center text-blue-400">스타터</th>
+                        <th class="py-4 px-4 font-bold text-center">프로</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-white/5">
+                    <tr><td class="py-4 px-4 text-gray-400">워드프레스 사이트 수</td><td class="py-4 px-4 text-center">1</td><td class="py-4 px-4 text-center text-blue-300">5</td><td class="py-4 px-4 text-center">무제한</td></tr>
+                    <tr><td class="py-4 px-4 text-gray-400">월간 트래픽</td><td class="py-4 px-4 text-center">100GB</td><td class="py-4 px-4 text-center text-blue-300">1TB</td><td class="py-4 px-4 text-center">무제한</td></tr>
+                    <tr><td class="py-4 px-4 text-gray-400">스토리지</td><td class="py-4 px-4 text-center">5GB</td><td class="py-4 px-4 text-center text-blue-300">50GB</td><td class="py-4 px-4 text-center">500GB</td></tr>
+                    <tr><td class="py-4 px-4 text-gray-400">무료 SSL</td><td class="py-4 px-4 text-center"><i class="fas fa-check check"></i></td><td class="py-4 px-4 text-center"><i class="fas fa-check check"></i></td><td class="py-4 px-4 text-center"><i class="fas fa-check check"></i></td></tr>
+                    <tr><td class="py-4 px-4 text-gray-400">커스텀 도메인</td><td class="py-4 px-4 text-center"><i class="fas fa-times cross"></i></td><td class="py-4 px-4 text-center"><i class="fas fa-check check"></i></td><td class="py-4 px-4 text-center">무제한</td></tr>
+                    <tr><td class="py-4 px-4 text-gray-400">자동 백업</td><td class="py-4 px-4 text-center"><i class="fas fa-times cross"></i></td><td class="py-4 px-4 text-center">일 1회</td><td class="py-4 px-4 text-center">시간별</td></tr>
+                    <tr><td class="py-4 px-4 text-gray-400">실시간 모니터링</td><td class="py-4 px-4 text-center"><i class="fas fa-times cross"></i></td><td class="py-4 px-4 text-center"><i class="fas fa-check check"></i></td><td class="py-4 px-4 text-center"><i class="fas fa-check check"></i></td></tr>
+                    <tr><td class="py-4 px-4 text-gray-400">팀 계정</td><td class="py-4 px-4 text-center"><i class="fas fa-times cross"></i></td><td class="py-4 px-4 text-center"><i class="fas fa-times cross"></i></td><td class="py-4 px-4 text-center">5명</td></tr>
+                    <tr><td class="py-4 px-4 text-gray-400">기술 지원</td><td class="py-4 px-4 text-center">이메일</td><td class="py-4 px-4 text-center text-blue-300">이메일 + 채팅</td><td class="py-4 px-4 text-center">우선 지원</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <!-- FAQ 미니 -->
+        <div class="mt-20 text-center">
+            <h2 class="text-2xl font-black mb-4">요금 관련 궁금한 점이 있으신가요?</h2>
+            <p class="text-gray-500 mb-6">언제든지 문의하시면 친절하게 안내드립니다.</p>
+            <div class="flex flex-col sm:flex-row justify-center gap-4">
+                <a href="/faq.html" class="border border-white/20 px-8 py-3 rounded-full font-bold hover:bg-white/5 transition text-gray-300">FAQ 보기</a>
+                <a href="/contact.html" class="bg-blue-600 px-8 py-3 rounded-full font-bold hover:bg-blue-500 transition">문의하기</a>
+            </div>
+        </div>
+    </section>
+
+    <footer class="border-t border-white/10 py-10 px-6 text-center text-gray-600 text-sm">
+        <a href="/" class="text-blue-500 font-black">CLOUD<span class="text-white">PRESS</span></a>
+        <p class="mt-2">© 2025 CloudPress. All rights reserved.</p>
+    </footer>
+
+    <script>
+        let billing = 'monthly';
+
+        function setbilling(type) {
+            billing = type;
+            const monthlyBtn = document.getElementById('monthlyBtn');
+            const yearlyBtn = document.getElementById('yearlyBtn');
+
+            if (type === 'monthly') {
+                monthlyBtn.className = 'px-5 py-2 rounded-full text-sm font-bold bg-white text-black transition';
+                yearlyBtn.className = 'px-5 py-2 rounded-full text-sm font-bold text-gray-400 transition';
+                document.getElementById('starterPrice').textContent = '₩9,900';
+                document.getElementById('proPrice').textContent = '₩29,900';
+                document.getElementById('starterOriginal').classList.add('hidden');
+                document.getElementById('proOriginal').classList.add('hidden');
+            } else {
+                yearlyBtn.className = 'px-5 py-2 rounded-full text-sm font-bold bg-white text-black transition';
+                monthlyBtn.className = 'px-5 py-2 rounded-full text-sm font-bold text-gray-400 transition';
+                document.getElementById('starterPrice').textContent = '₩7,920';
+                document.getElementById('proPrice').textContent = '₩23,920';
+                document.getElementById('starterOriginal').textContent = '월 ₩9,900';
+                document.getElementById('proOriginal').textContent = '월 ₩29,900';
+                document.getElementById('starterOriginal').classList.remove('hidden');
+                document.getElementById('proOriginal').classList.remove('hidden');
+            }
+        }
+    </script>
+</body>
+</html>

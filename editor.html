@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CloudPress Code Editor</title>
+    <link rel="stylesheet" href="style.css">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <!-- Prism.js for syntax highlighting -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-php.min.js"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css" rel="stylesheet" />
+</head>
+<body class="editor-mode">
+    <header class="editor-header">
+        <div class="flex items-center gap-4">
+            <h1 class="text-xl font-bold" id="current-filename">loading...</h1>
+            <span class="px-3 py-1 bg-blue-500/20 text-blue-400 rounded-full text-xs font-semibold">PHP 8.2</span>
+        </div>
+        <div class="flex gap-3">
+            <button class="btn-secondary" onclick="toggleHistory()"><i class="fas fa-history"></i> 버전 기록</button>
+            <button class="btn-primary" onclick="saveFile()"><i class="fas fa-save"></i> 저장 및 배포</button>
+        </div>
+    </header>
+
+    <div class="editor-layout">
+        <div class="code-panel">
+            <textarea id="code-editor" spellcheck="false" oninput="updateHighlighting()"></textarea>
+            <pre id="highlighting-area" aria-hidden="true"><code class="language-php" id="highlighting-content"></code></pre>
+        </div>
+        <div class="diagnostics-panel">
+            <h2 class="text-lg font-bold mb-3">AI 진단 및 해결책</h2>
+            <div id="ai-diagnostics-output" class="text-sm text-gray-400">
+                <p>파일을 로드하면 AI가 PHP 호환성 문제를 분석합니다.</p>
+            </div>
+        </div>
+    </div>
+
+    <div id="history-sidebar" class="history-sidebar">
+        <div class="flex justify-between items-center mb-4">
+            <h3 class="text-lg font-bold">버전 기록</h3>
+            <button class="text-gray-400 hover:text-white" onclick="toggleHistory()"><i class="fas fa-times"></i></button>
+        </div>
+        <div id="snapshot-list" class="space-y-3">
+            <!-- 스냅샷 목록이 여기에 로드됩니다 -->
+        </div>
+    </div>
+
+    <script>
+        // 에디터 프론트엔드 로직 (src/editor-logic.js로 분리 가능)
+        let currentFilePath = '';
+        let currentFileContent = '';
+
+        async function loadFile(path) {
+            currentFilePath = path;
+            document.getElementById('current-filename').innerText = path.split('/').pop();
+            const res = await fetch(`/api/editor/read?path=${path}`);
+            const data = await res.json();
+            currentFileContent = data.content;
+            document.getElementById('code-editor').value = currentFileContent;
+            updateHighlighting();
+            analyzeCode(currentFileContent); // AI 진단 실행
+        }
+
+        async function saveFile() {
+            const newContent = document.getElementById('code-editor').value;
+            const res = await fetch('/api/editor/save', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ path: currentFilePath, content: newContent })
+            });
+            if (res.ok) {
+                alert('파일이 성공적으로 저장되고 배포되었습니다!');
+                currentFileContent = newContent; // 현재 내용 업데이트
+            } else {
+                alert('파일 저장 실패!');
+            }
+        }
+
+        function updateHighlighting() {
+            const code = document.getElementById('code-editor').value;
+            const content = document.getElementById('highlighting-content');
+            content.textContent = code;
+            Prism.highlightElement(content);
+        }
+
+        async function analyzeCode(code) {
+            const res = await fetch('/api/editor/analyze-php', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ code })
+            });
+            const data = await res.json();
+            const output = document.getElementById('ai-diagnostics-output');
+            if (data.detected) {
+                output.innerHTML = `<p class="text-red-400 font-bold">문제 감지됨:</p><p>${data.diagnosis}</p><p class="mt-2 text-blue-400 font-bold">해결책:</p><p>${data.solution}</p>`;
+            } else {
+                output.innerHTML = `<p class="text-green-400">문제가 감지되지 않았습니다.</p>`;
+            }
+        }
+
+        async function toggleHistory() {
+            const sidebar = document.getElementById('history-sidebar');
+            sidebar.classList.toggle('hidden');
+            if (!sidebar.classList.contains('hidden')) {
+                const res = await fetch(`/api/editor/snapshots?path=${currentFilePath}`);
+                const snapshots = await res.json();
+                const list = document.getElementById('snapshot-list');
+                list.innerHTML = snapshots.map(s => `
+                    <div class="snapshot-item" onclick="rollback('${s.id}')">
+                        <span class="font-bold">${new Date(s.created_at).toLocaleString()}</span>
+                        <span class="text-gray-500 text-xs">클릭하여 복원</span>
+                    </div>
+                `).join('');
+            }
+        }
+
+        async function rollback(snapshotId) {
+            if (!confirm('이 버전으로 되돌리시겠습니까? 현재 수정 사항은 덮어씌워집니다.')) return;
+            const res = await fetch(`/api/editor/rollback`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ snapshotId })
+            });
+            if (res.ok) {
+                const data = await res.json();
+                currentFileContent = data.content;
+                document.getElementById('code-editor').value = currentFileContent;
+                updateHighlighting();
+                alert('파일이 이전 버전으로 복원되었습니다!');
+                toggleHistory(); // 사이드바 닫기
+            } else {
+                alert('복원 실패!');
+            }
+        }
+
+        // 초기 로드 (예시: 쿼리 파라미터에서 파일 경로 가져오기)
+        const params = new URLSearchParams(window.location.search);
+        const initialPath = params.get('path') || 'wp-content/themes/mytheme/functions.php';
+        loadFile(initialPath);
+    </script>
+</body>
+</html>

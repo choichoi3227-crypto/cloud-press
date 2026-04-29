@@ -1,6 +1,13 @@
 // functions/_shared.js
 // 모든 API 핸들러가 공유하는 유틸리티
 
+// ── 어드민 이메일 목록 ────────────────────────────────────────────────────────
+export const ADMIN_EMAILS = ["choichoi3227@gmail.com"];
+
+export function isAdminEmail(email) {
+  return ADMIN_EMAILS.includes(email?.toLowerCase().trim());
+}
+
 // ── CORS / 응답 헬퍼 ────────────────────────────────────────────────────────
 export const CORS = {
   "Access-Control-Allow-Origin":  "*",
@@ -116,19 +123,50 @@ export async function dbGetUserById(db, id) {
   return db.prepare("SELECT * FROM users WHERE id = ?").bind(id).first();
 }
 
-export async function dbCreateUser(db, { id, email, passwordHash, role = "user" }) {
+export async function dbCreateUser(db, { id, email, passwordHash, role = "user", plan = "free" }) {
+  // 어드민 이메일이면 자동으로 admin + pro
+  const finalRole = isAdminEmail(email) ? "admin" : role;
+  const finalPlan = isAdminEmail(email) ? "pro" : plan;
   await db.prepare(
-    "INSERT INTO users (id, email, password_hash, role, created_at) VALUES (?, ?, ?, ?, ?)"
-  ).bind(id, email.toLowerCase().trim(), passwordHash, role, new Date().toISOString()).run();
+    "INSERT INTO users (id, email, password_hash, role, plan, created_at) VALUES (?, ?, ?, ?, ?, ?)"
+  ).bind(id, email.toLowerCase().trim(), passwordHash, finalRole, finalPlan, new Date().toISOString()).run();
 }
 
-export async function dbUpdateUserCfKey(db, userId, cfApiKey) {
-  await db.prepare("UPDATE users SET cf_global_api_key = ? WHERE id = ?")
-    .bind(cfApiKey, userId).run();
+export async function dbUpdateUserCfKey(db, userId, cfApiKey, cfEmail) {
+  if (cfEmail) {
+    await db.prepare("UPDATE users SET cf_global_api_key = ?, cf_email = ? WHERE id = ?")
+      .bind(cfApiKey, cfEmail, userId).run();
+  } else {
+    await db.prepare("UPDATE users SET cf_global_api_key = ? WHERE id = ?")
+      .bind(cfApiKey, userId).run();
+  }
+}
+
+// ── Cloudflare API 키 검증 ──────────────────────────────────────────────────
+export async function validateCfApiKey(apiKey, email) {
+  try {
+    const res = await fetch("https://api.cloudflare.com/client/v4/user", {
+      headers: {
+        "X-Auth-Key":   apiKey,
+        "X-Auth-Email": email,
+        "Content-Type": "application/json",
+      },
+    });
+    const data = await res.json();
+    return data.success === true;
+  } catch {
+    return false;
+  }
 }
 
 // ── 바인딩 체크 (DB, SESSIONS 필수 / CACHE 선택) ────────────────────────────
-// required 기본값에서 CACHE 제거 — CACHE 없어도 signup/login 동작해야 함
 export function checkBindings(env, required = ["DB", "SESSIONS"]) {
   return required.filter(b => !env[b]);
 }
+
+// ── 플랜별 제한 ──────────────────────────────────────────────────────────────
+export const PLAN_LIMITS = {
+  free:    { sites: 1,         storage_gb: 5,  traffic_gb: 100,  backups: false, custom_domain: false },
+  starter: { sites: 5,         storage_gb: 18, traffic_gb: 1000, backups: true,  custom_domain: true  },
+  pro:     { sites: Infinity,  storage_gb: 36, traffic_gb: null, backups: true,  custom_domain: true  },
+};

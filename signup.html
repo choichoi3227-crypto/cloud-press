@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <title>CloudPress | 회원가입</title>
+    <link rel="stylesheet" href="/style.css">
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-black text-white h-screen flex items-center justify-center p-6">
+    <div class="w-full max-w-md bg-[#111] p-10 rounded-3xl border border-white/10 shadow-2xl">
+        <h2 class="text-3xl font-bold mb-2">Create Account</h2>
+        <p class="text-gray-500 mb-8">CloudPress의 초고속 인프라를 경험하세요.</p>
+        
+        <form id="signupForm" class="space-y-4">
+            <input type="email" id="email" placeholder="Email Address" required class="w-full p-4 bg-white/5 border border-white/10 rounded-xl focus:border-blue-500 outline-none">
+            <input type="password" id="password" placeholder="Password" required class="w-full p-4 bg-white/5 border border-white/10 rounded-xl focus:border-blue-500 outline-none">
+            <button type="submit" class="w-full bg-blue-600 py-4 rounded-xl font-bold hover:bg-blue-500 transition mt-4">회원가입</button>
+        </form>
+        <p class="mt-6 text-center text-gray-500 text-sm">이미 계정이 있나요? <a href="/login.html" class="text-blue-500">로그인</a></p>
+    </div>
+    <script>
+        document.getElementById('signupForm').onsubmit = async (e) => {
+            e.preventDefault();
+            const res = await fetch('/api/signup', {
+                method: 'POST',
+                body: JSON.stringify({ email: e.target.email.value, password: e.target.password.value })
+            });
+            if(res.ok) { alert('가입 성공! 로그인 해주세요.'); location.href='login.html'; }
+        };
+    </script>
+</body>
+</html>

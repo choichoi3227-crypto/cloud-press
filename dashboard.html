@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CloudPress Dashboard | 내 호스팅 관리</title>
+    <link rel="stylesheet" href="/style.css">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body class="dashboard-page">
+    <div id="emergency-alert" class="hidden bg-red-600 text-white px-6 py-3 flex justify-between items-center shadow-2xl">
+        <div class="flex items-center gap-3">
+            <span class="animate-ping inline-flex h-3 w-3 rounded-full bg-white opacity-75"></span>
+            <span class="font-bold text-sm">긴급: 잔여 스토리지가 1GB 미만입니다. 비상 백업 스토리지를 가동하며 자동 최적화를 시작합니다.</span>
+        </div>
+        <div class="text-xs opacity-80 font-mono" id="optimization-status">최적화 대기 중...</div>
+    </div>
+
+    <aside class="sidebar">
+        <div class="logo">CLOUD<span class="text-blue-500">PRESS</span></div>
+        <nav class="main-nav">
+            <a href="#" class="nav-item active"><i class="fas fa-tachometer-alt"></i> 대시보드</a>
+            <a href="#" class="nav-item"><i class="fas fa-globe"></i> 내 사이트</a>
+            <a href="#" class="nav-item"><i class="fas fa-chart-line"></i> 트래픽</a>
+            <a href="#" class="nav-item"><i class="fas fa-hdd"></i> 스토리지</a>
+            <a href="#" class="nav-item"><i class="fas fa-user-circle"></i> 내 계정</a>
+            <a href="#" class="nav-item"><i class="fas fa-sign-out-alt"></i> 로그아웃</a>
+        </nav>
+    </aside>
+
+    <main class="main-content">
+        <header class="content-header">
+            <h1>대시보드 개요</h1>
+            <div class="user-info">
+                <span>환영합니다, 사용자님!</span>
+                <img src="https://via.placeholder.com/30" alt="User Avatar" class="avatar">
+            </div>
+        </header>
+
+        <section class="stats-grid">
+            <div class="stat-card">
+                <h3>총 사이트</h3>
+                <p>3</p>
+            </div>
+            <div class="stat-card">
+                <h3>활성 워커</h3>
+                <p>36</p>
+            </div>
+            <div class="stat-card">
+                <h3>잔여 스토리지</h3>
+                <p id="remaining-gb">0.00</p> GB
+                <div class="progress-bar"><div id="bar-fill"></div></div>
+            </div>
+            <div class="stat-card">
+                <h3>평균 응답 시간</h3>
+                <p>18<small>ms</small></p>
+            </div>
+        </section>
+
+        <section class="site-management">
+            <h2>내 호스팅 사이트</h2>
+            <button class="btn-primary" onclick="addDomainToSite()">+ 새 사이트 추가</button>
+            <div id="site-list" class="site-list">
+                <!-- 사이트 목록이 여기에 동적으로 로드됩니다 -->
+                <div class="site-item">
+                    <h3>myblog.com</h3>
+                    <p>PHP 8.2 | 상태: 활성</p>
+                    <div class="site-actions">
+                        <button class="btn-secondary">관리</button>
+                        <button class="btn-primary">WP Admin</button>
+                        <button class="btn-tertiary" onclick="checkSslStatus(1)">SSL 상태 확인</button>
+                        <span class="ssl-status text-green-500"><i class="fas fa-lock"></i> SSL 활성</span>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section class="account-settings">
+            <h2>내 계정 설정</h2>
+            <div class="form-group">
+                <label for="email">이메일</label>
+                <input type="email" id="email" value="user@example.com" disabled>
+            </div>
+            <div class="form-group">
+                <label for="cf-api-key">Cloudflare Global API Key</label>
+                <input type="text" id="cf-api-key" placeholder="Cloudflare Global API Key 입력">
+                <button class="btn-primary">저장</button>
+            </div>
+        </section>
+    </main>
+    <script src="src/dashboard-logic.js"></script>
+</body>
+</html>

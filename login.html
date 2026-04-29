@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CloudPress | 로그인</title>
+    <link rel="stylesheet" href="/style.css">
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="login-page">
+    <div class="login-container">
+        <h2 class="text-3xl font-bold mb-6 text-center">CloudPress 로그인</h2>
+        <form id="loginForm" class="space-y-4">
+            <input type="email" id="email" placeholder="이메일" required>
+            <input type="password" id="password" placeholder="비밀번호" required>
+            <div class="otp-section">
+                <label for="otp">2단계 인증 코드 (OTP)</label>
+                <input type="text" id="otp" maxlength="6" placeholder="000000">
+            </div>
+            <button type="submit" class="btn-primary w-full">로그인</button>
+        </form>
+        <p class="text-center mt-4">계정이 없으신가요? <a href="/signup.html" class="text-blue-500 hover:underline">회원가입</a></p>
+    </div>
+    <script src="/src/auth-frontend.js"></script> <!-- 로그인 처리 전용 JS -->
+</body>
+</html>

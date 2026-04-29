@@ -20,7 +20,7 @@
         code             { font-family: 'Courier New', monospace; }
     </style>
 </head>
-<body class="flex h-screen bg-[#050505] text-white">
+<body class="bg-[#050505] text-white md:flex md:h-screen">
     <script>
         if (!localStorage.getItem('admin_token')) window.location.href = '/login.html';
     <!-- ── 모바일 헤더 (md 이상에서 숨김) ── -->
@@ -71,7 +71,7 @@
     </aside>
 
     <!-- Main -->
-    <main class="flex-1 overflow-y-auto">
+    <main class="flex-1 w-full overflow-y-auto">
         <div class="p-8 max-w-5xl mx-auto">
 
             <!-- 헤더 -->

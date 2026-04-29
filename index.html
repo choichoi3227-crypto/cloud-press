@@ -3,89 +3,58 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>CloudPress | 차세대 워드프레스 호스팅</title>
+    <title>클라우드프레스
+    차세세 워드프레스 호스팅</title>
     <link rel="stylesheet" href="/style.css">
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
 </head>
-<body class="landing-page">
-    <!-- Header -->
-    <header class="header">
-        <div class="container flex justify-between items-center">
-            <a href="#" class="logo">CLOUD<span class="text-blue-500">PRESS</span></a>
-            <nav class="nav-menu">
-                <a href="#features">기능</a>
-                <a href="#pricing">요금</a>
-                <a href="#faq">FAQ</a>
-                <a href="/login.html" class="btn-secondary">로그인</a>
-                <a href="/signup.html" class="btn-primary">무료 시작</a>
+<body class="bg-[#050505] text-white font-sans">
+    <header class="p-6 border-b border-white/10 sticky top-0 bg-[#050505]/80 backdrop-blur-md z-50">
+        <div class="max-w-7xl mx-auto flex justify-between items-center">
+            <a href="/" class="text-2xl font-black tracking-tighter text-blue-500">CLOUD<span class="text-white">PRESS</span></a>
+            <nav class="hidden md:flex gap-8 items-center text-sm font-medium text-gray-400">
+                <a href="#features" class="hover:text-white transition">기능</a>
+                <a href="#faq" class="hover:text-white transition">FAQ</a>
+                <a href="login.html" class="hover:text-white transition">로그인</a>
+                <a href="signup.html" class="bg-blue-600 px-5 py-2 rounded-full text-white font-bold hover:bg-blue-500 transition">무료 시작</a>
             </nav>
         </div>
     </header>
 
-    <!-- Hero Section -->
-    <section class="hero-section">
-        <div class="container text-center">
-            <h1>Cloudflare Edge에서 구동되는<br>가장 빠른 워드프레스 호스팅</h1>
-            <p class="hero-subtitle">전 세계 300개 이상의 엣지 로케이션에서 워드프레스가 즉시 로드됩니다. VPS보다 빠르고, 서버리스보다 강력합니다.</p>
-            <a href="/signup.html" class="btn-primary btn-lg">지금 바로 시작하기</a>
-            <p class="hero-small-text">신용카드 필요 없음. 30초 만에 배포.</p>
+    <section class="py-32 px-6 text-center">
+        <h1 class="text-5xl md:text-7xl font-black mb-8 leading-tight">Serverless 기반<br><span class="text-blue-600">초고속 워드프레스</span></h1>
+        <p class="max-w-2xl mx-auto text-gray-400 text-lg mb-12">전 세계 300개 엣지 노드에서 구동되는 차세대 호스팅. VPS의 성능 한계를 뛰어넘으세요.</p>
+        <div class="flex justify-center gap-4">
+            <a href="signup.html" class="bg-white text-black px-8 py-4 rounded-full font-black hover:bg-gray-200 transition">지금 배포하기</a>
         </div>
     </section>
 
-    <!-- Features Section -->
-    <section id="features" class="features-section">
-        <div class="container">
-            <h2 class="section-title">CloudPress의 혁신적인 기능</h2>
-            <div class="feature-grid">
-                <div class="feature-item">
-                    <i class="fas fa-rocket feature-icon"></i>
-                    <h3>초고속 성능</h3>
-                    <p>Cloudflare Anycast IP 기반으로 전 세계 어디서든 10ms 이내의 응답 속도를 경험하세요.</p>
-                </div>
-                <div class="feature-item">
-                    <i class="fas fa-shield-alt feature-icon"></i>
-                    <h3>강력한 보안</h3>
-                    <p>자동 WAF, DDoS 방어, SSL for SaaS로 모든 사이트를 안전하게 보호합니다.</p>
-                </div>
-                <div class="feature-item">
-                    <i class="fas fa-database feature-icon"></i>
-                    <h3>무한 스토리지</h3>
-                    <p>36개 Supabase 버킷 샤딩과 4개 백업 노드로 데이터 손실 걱정 없이 무제한 확장하세요.</p>
-                </div>
-                <div class="feature-item">
-                    <i class="fas fa-code feature-icon"></i>
-                    <h3>WASM PHP</h3>
-                    <p>PHP 코드를 WebAssembly로 변환하여 서버리스 환경에서 네이티브에 가까운 속도로 실행합니다.</p>
+    <section id="faq" class="py-24 max-w-3xl mx-auto px-6">
+        <h2 class="text-3xl font-bold mb-12 text-center">자주 묻는 질문</h2>
+        <div class="space-y-4">
+            <div class="faq-item border border-white/10 rounded-2xl overflow-hidden">
+                <button class="w-full p-6 text-left flex justify-between items-center bg-white/5 hover:bg-white/10 transition">
+                    <span class="font-bold">기존 호스팅과 무엇이 다른가요?</span>
+                    <i class="fas fa-plus text-xs text-gray-500"></i>
+                </button>
+                <div class="faq-content hidden p-6 text-gray-400 text-sm border-t border-white/5">
+                    CloudPress는 서버가 아닌 Cloudflare의 엣지 네트워크에서 PHP WASM 런타임을 통해 워드프레스를 실행합니다. 전 세계 어디서든 동일한 속도를 보장합니다.
                 </div>
             </div>
         </div>
     </section>
 
-    <!-- FAQ Section -->
-    <section id="faq" class="faq-section">
-        <div class="container">
-            <h2 class="section-title">자주 묻는 질문</h2>
-            <div class="faq-list">
-                <div class="faq-item">
-                    <div class="faq-item-header">CloudPress는 어떻게 작동하나요? <i class="fas fa-chevron-down"></i></div>
-                    <div class="faq-item-content">CloudPress는 Cloudflare Workers의 엣지 네트워크에서 PHP WASM 런타임을 실행하여 워드프레스를 구동합니다. 모든 파일은 Supabase의 분산 버킷에 저장되며, D1 데이터베이스를 사용합니다.</div>
-                </div>
-                <div class="faq-item">
-                    <div class="faq-item-header">정말 무료인가요? <i class="fas fa-chevron-down"></i></div>
-                    <div class="faq-item-content">네, CloudPress는 Cloudflare Workers, D1, KV, 그리고 Supabase의 무료 플랜만을 활용하여 운영됩니다. 사용자는 추가 비용 없이 서비스를 이용할 수 있습니다.</div>
-                </div>
-            </div>
-        </div>
-    </section>
-
-    <!-- Footer -->
-    <footer class="footer">
-        <div class="container text-center">
-            <p>&copy; 2024 CloudPress. All rights reserved.</p>
-        </div>
-    </footer>
-
-    <script src="src/landing-page.js"></script>
+    <script>
+        document.querySelectorAll('.faq-item button').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const content = btn.nextElementSibling;
+                const icon = btn.querySelector('i');
+                content.classList.toggle('hidden');
+                icon.classList.toggle('fa-plus');
+                icon.classList.toggle('fa-minus');
+            });
+        });
+    </script>
 </body>
 </html>

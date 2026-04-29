@@ -86,3 +86,12 @@ async function loadDashboardData() {
 }
 
 loadDashboardData();
+  // "제공 예정" 알림 제거 및 페이지 이동 처리
+  window.createHosting = function() {
+      location.href = '/create-hosting.html';
+  };
+
+  // 호스팅 상세 페이지로 이동
+  window.viewSiteDetails = function(siteId) {
+      location.href = `/hosting-detail.html?id=${siteId}`;
+  };

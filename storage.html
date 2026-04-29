@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>스토리지 | CloudPress</title>
+    <link rel="stylesheet" href="/style.css">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+</head>
+<body class="flex h-screen bg-[#050505] text-white">
+    <script>
+        const token = localStorage.getItem('admin_token');
+        if (!token) {
+            window.location.href = '/login.html';
+        }
+    </script>
+    <!-- Sidebar (dashboard.html과 동일) -->
+    <aside class="w-64 border-r border-white/10 p-6 flex flex-col">
+        <div class="text-2xl font-black text-blue-500 mb-10">CLOUD<span class="text-white">PRESS</span></div>
+        <nav class="flex-1 space-y-2">
+            <a href="/dashboard.html" class="block p-3 rounded-xl hover:bg-white/5 transition"><i class="fas fa-tachometer-alt mr-3"></i> 대시보드</a>
+            <a href="/hosting.html" class="block p-3 rounded-xl hover:bg-white/5 transition"><i class="fas fa-globe mr-3"></i> 내 호스팅</a>
+            <a href="/traffic.html" class="block p-3 rounded-xl hover:bg-white/5 transition"><i class="fas fa-chart-line mr-3"></i> 트래픽</a>
+            <a href="/storage.html" class="block p-3 rounded-xl bg-white/10 font-bold"><i class="fas fa-hdd mr-3"></i> 스토리지</a>
+            <a href="/account.html" class="block p-3 rounded-xl hover:bg-white/5 transition"><i class="fas fa-user-circle mr-3"></i> 내 계정</a>
+        </nav>
+        <button onclick="logout()" class="mt-auto w-full bg-red-600 py-3 rounded-xl font-bold hover:bg-red-500 transition"><i class="fas fa-sign-out-alt mr-2"></i> 로그아웃</button>
+    </aside>
+    <main class="flex-1 p-10 overflow-y-auto">
+        <h1 class="text-3xl font-bold mb-10">스토리지 현황</h1>
+        <section class="p-8 bg-[#111] rounded-3xl border border-white/10 mb-10">
+            <h2 class="text-2xl font-bold mb-6">잔여 스토리지</h2>
+            <div class="quota-monitor">
+                <div class="mb-4">
+                    <div class="text-3xl font-bold text-white"><span id="remaining-gb">0.00</span> <span class="text-lg text-gray-500">GB</span></div>
+                    <div class="text-xs text-gray-500 mt-1">총 18GB 중 사용 가능 용량</div>
+                </div>
+                <div class="w-full h-2 bg-white/5 rounded-full overflow-hidden">
+                    <div id="quota-bar" class="h-full bg-blue-600 transition-all duration-1000" style="width: 0%"></div>
+                </div>
+            </div>
+        </section>
+        <!-- 스토리지 사용량 상세 그래프 등 -->
+    </main>
+    <script src="/src/auth-frontend.js"></script>
+    <script>
+        // 스토리지 데이터 로드 및 렌더링 로직
+        async function updateStorageStats() {
+            const res = await fetch('/api/admin/quota-stats', { headers: { 'Authorization': `Bearer ${token}` } });
+            const data = await res.json();
+            
+            const totalGB = 18; // 36 버킷 * 0.5GB (무료 플랜 기준)
+            const usedBytes = data.usedBytes || 0;
+            const usedGB = usedBytes / (1024 * 1024 * 1024);
+            const remainingGB = Math.max(0, totalGB - usedGB);
+            const usedPercent = (usedGB / totalGB) * 100;
+
+            document.getElementById('remaining-gb').innerText = remainingGB.toFixed(2);
+            document.getElementById('quota-bar').style.width = `${usedPercent}%`;
+        }
+        updateStorageStats();
+    </script>
+</body>
+</html>

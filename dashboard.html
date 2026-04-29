@@ -2,48 +2,76 @@
 <html lang="ko">
 <head>
     <meta charset="UTF-8">
-    <title>CloudPress Dashboard</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CloudPress Dashboard | 개요</title>
     <link rel="stylesheet" href="/style.css">
     <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
-<body class="flex h-screen bg-black text-white">
+<body class="flex h-screen bg-[#050505] text-white">
+    <script>
+        // 클라이언트 측 인증 체크
+        const token = localStorage.getItem('admin_token'); // 사용자 토큰도 'admin_token'으로 통일
+        if (!token) {
+            window.location.href = '/login.html';
+        }
+    </script>
+
     <!-- Sidebar -->
     <aside class="w-64 border-r border-white/10 p-6 flex flex-col">
         <div class="text-2xl font-black text-blue-500 mb-10">CLOUD<span class="text-white">PRESS</span></div>
         <nav class="flex-1 space-y-2">
-            <a href="dashboard.html" class="block p-3 rounded-xl bg-white/10 font-bold">대시보드</a>
-            <a href="hosting.html" class="block p-3 rounded-xl hover:bg-white/5 transition">내 호스팅</a>
-            <a href="traffic.html" class="block p-3 rounded-xl hover:bg-white/5 transition">트래픽</a>
-            <a href="storage.html" class="block p-3 rounded-xl hover:bg-white/5 transition">스토리지</a>
-            <a href="account.html" class="block p-3 rounded-xl hover:bg-white/5 transition">내 계정</a>
+            <a href="/dashboard.html" class="block p-3 rounded-xl bg-white/10 font-bold"><i class="fas fa-tachometer-alt mr-3"></i> 대시보드</a>
+            <a href="/hosting.html" class="block p-3 rounded-xl hover:bg-white/5 transition"><i class="fas fa-globe mr-3"></i> 내 호스팅</a>
+            <a href="/traffic.html" class="block p-3 rounded-xl hover:bg-white/5 transition"><i class="fas fa-chart-line mr-3"></i> 트래픽</a>
+            <a href="/storage.html" class="block p-3 rounded-xl hover:bg-white/5 transition"><i class="fas fa-hdd mr-3"></i> 스토리지</a>
+            <a href="/account.html" class="block p-3 rounded-xl hover:bg-white/5 transition"><i class="fas fa-user-circle mr-3"></i> 내 계정</a>
         </nav>
+        <button onclick="logout()" class="mt-auto w-full bg-red-600 py-3 rounded-xl font-bold hover:bg-red-500 transition"><i class="fas fa-sign-out-alt mr-2"></i> 로그아웃</button>
     </aside>
 
     <!-- Main Content -->
     <main class="flex-1 p-10 overflow-y-auto">
         <header class="flex justify-between items-center mb-10">
-            <h1 class="text-3xl font-bold">Overview</h1>
-            <div id="user-display" class="text-sm text-gray-400">Loading...</div>
+            <h1 class="text-3xl font-bold">대시보드 개요</h1>
+            <div id="user-display" class="text-sm text-gray-400">환영합니다, <span id="user-email">사용자님</span>!</div>
         </header>
 
-        <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+        <section class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-10">
             <div class="p-6 bg-[#111] rounded-2xl border border-white/5">
                 <div class="text-gray-500 text-xs uppercase mb-2">활성 호스팅</div>
-                <div class="text-3xl font-bold" id="hosting-count">0</div>
+                <div class="text-4xl font-bold" id="active-hostings">0</div>
             </div>
-            <!-- 기타 지표 카드들 -->
+            <div class="p-6 bg-[#111] rounded-2xl border border-white/5">
+                <div class="text-gray-500 text-xs uppercase mb-2">월간 트래픽</div>
+                <div class="text-4xl font-bold" id="monthly-traffic">0 GB</div>
+            </div>
+            <div class="p-6 bg-[#111] rounded-2xl border border-white/5">
+                <div class="text-gray-500 text-xs uppercase mb-2">잔여 스토리지</div>
+                <div class="text-4xl font-bold" id="remaining-storage">0 GB</div>
+            </div>
+        </section>
+
+        <!-- 긴급 알림 바 -->
+        <div id="emergency-alert" class="hidden bg-red-600 text-white px-6 py-3 flex justify-between items-center shadow-2xl rounded-xl mb-10">
+            <div class="flex items-center gap-3">
+                <span class="animate-ping inline-flex h-3 w-3 rounded-full bg-white opacity-75"></span>
+                <span class="font-bold text-sm">긴급: 잔여 스토리지가 1GB 미만입니다. 비상 백업 스토리지를 가동하며 자동 최적화를 시작합니다.</span>
+            </div>
+            <div class="text-xs opacity-80 font-mono" id="optimization-status">최적화 대기 중...</div>
         </div>
+
+        <!-- 트래픽 그래프 (예시) -->
+        <section class="p-8 bg-[#111] rounded-3xl border border-white/10 mb-10">
+            <h2 class="text-2xl font-bold mb-6">최근 24시간 트래픽</h2>
+            <div class="h-64">
+                <canvas id="trafficChart"></canvas>
+            </div>
+        </section>
     </main>
 
-    <script>
-        // 인증 체크 로직
-        const token = localStorage.getItem('admin_token');
-        if(!token) location.href = '/login.html';
-
-        async function loadOverview() {
-            // 실제 D1에서 호스팅 개수 및 사용자 정보 페치
-        }
-        loadOverview();
-    </script>
+    <script src="/src/auth-frontend.js"></script> <!-- 로그아웃 함수 포함 -->
+    <script src="/src/dashboard-logic.js"></script> <!-- 대시보드 데이터 로드 및 차트 -->
 </body>
 </html>

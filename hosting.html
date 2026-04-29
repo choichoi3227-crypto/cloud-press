@@ -2,24 +2,62 @@
 <html lang="ko">
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>내 호스팅 | CloudPress</title>
     <link rel="stylesheet" href="/style.css">
     <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
 </head>
-<body class="flex h-screen bg-black text-white">
-    <!-- 사이드바 동일 -->
-    <main class="flex-1 p-10">
-        <div class="flex justify-between items-center mb-10">
+<body class="flex h-screen bg-[#050505] text-white">
+    <script>
+        const token = localStorage.getItem('admin_token');
+        if (!token) {
+            window.location.href = '/login.html';
+        }
+    </script>
+
+    <!-- Sidebar (dashboard.html과 동일) -->
+    <aside class="w-64 border-r border-white/10 p-6 flex flex-col">
+        <div class="text-2xl font-black text-blue-500 mb-10">CLOUD<span class="text-white">PRESS</span></div>
+        <nav class="flex-1 space-y-2">
+            <a href="/dashboard.html" class="block p-3 rounded-xl hover:bg-white/5 transition"><i class="fas fa-tachometer-alt mr-3"></i> 대시보드</a>
+            <a href="/hosting.html" class="block p-3 rounded-xl bg-white/10 font-bold"><i class="fas fa-globe mr-3"></i> 내 호스팅</a>
+            <a href="/traffic.html" class="block p-3 rounded-xl hover:bg-white/5 transition"><i class="fas fa-chart-line mr-3"></i> 트래픽</a>
+            <a href="/storage.html" class="block p-3 rounded-xl hover:bg-white/5 transition"><i class="fas fa-hdd mr-3"></i> 스토리지</a>
+            <a href="/account.html" class="block p-3 rounded-xl hover:bg-white/5 transition"><i class="fas fa-user-circle mr-3"></i> 내 계정</a>
+        </nav>
+        <button onclick="logout()" class="mt-auto w-full bg-red-600 py-3 rounded-xl font-bold hover:bg-red-500 transition"><i class="fas fa-sign-out-alt mr-2"></i> 로그아웃</button>
+    </aside>
+
+    <!-- Main Content -->
+    <main class="flex-1 p-10 overflow-y-auto">
+        <header class="flex justify-between items-center mb-10">
             <h1 class="text-3xl font-bold">내 호스팅</h1>
-            <button onclick="launchNewHosting()" class="bg-blue-600 px-6 py-2 rounded-full font-bold">새 호스팅 생성</button>
-        </div>
+            <button onclick="launchNewHosting()" class="bg-blue-600 px-6 py-2 rounded-full text-white font-bold hover:bg-blue-500 transition">새 호스팅 생성</button>
+        </header>
         
         <div id="hosting-list" class="space-y-4">
-            <!-- 더미 데이터 제거됨. 실제 데이터가 이곳에 렌더링됩니다. -->
             <div class="text-center py-20 text-gray-500">
                 <p>현재 운영 중인 호스팅이 없습니다.</p>
+                <p class="mt-2">새 호스팅을 생성하여 워드프레스를 시작하세요!</p>
             </div>
         </div>
     </main>
+
+    <script src="/src/auth-frontend.js"></script>
+    <script>
+        async function loadHostings() {
+            // 실제 API에서 사용자 호스팅 목록을 가져와 렌더링
+            // 예시: const res = await fetch('/api/user/hostings', { headers: { 'Authorization': `Bearer ${token}` } });
+            // const hostings = await res.json();
+            // ... UI 업데이트 로직 ...
+        }
+        loadHostings();
+
+        function launchNewHosting() {
+            alert('새 호스팅 생성 기능은 곧 제공됩니다!');
+            // 실제 호스팅 생성 모달 또는 페이지로 이동
+        }
+    </script>
 </body>
 </html>

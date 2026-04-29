@@ -2,49 +2,88 @@
 <html lang="ko">
 <head>
     <meta charset="UTF-8">
-    <title>CloudPress | Login</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CloudPress | 로그인</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="/style.css">
+    <style>
+        body { background-color: #050505; color: white; margin: 0; }
+    </style>
 </head>
 <body class="bg-[#050505] text-white min-h-screen flex items-center justify-center p-6">
     <div class="w-full max-w-md bg-[#111] p-10 rounded-3xl border border-white/10 shadow-2xl">
         <div class="text-center mb-10">
-            <a href="/" class="text-2xl font-black text-blue-500">CLOUD<span class="text-white">PRESS</span></a>
-            <h2 class="text-xl font-bold mt-4">Welcome Back</h2>
+            <a href="/" class="text-3xl font-black tracking-tighter text-blue-500">CLOUD<span class="text-white">PRESS</span></a>
+            <h2 class="text-xl font-bold mt-4 text-white">다시 오셨군요!</h2>
+            <p class="text-gray-500 mt-1 text-sm">계정에 로그인하세요.</p>
         </div>
         
+        <div id="errorMsg" class="hidden mb-4 p-3 bg-red-900/40 border border-red-500/40 rounded-xl text-red-400 text-sm text-center"></div>
+
         <form id="loginForm" class="space-y-4">
-            <input type="email" id="email" placeholder="Email" required class="w-full p-4 bg-white/5 border border-white/10 rounded-xl focus:border-blue-500 outline-none">
-            <input type="password" id="password" placeholder="Password" required class="w-full p-4 bg-white/5 border border-white/10 rounded-xl focus:border-blue-500 outline-none">
-            <button type="submit" class="w-full bg-blue-600 py-4 rounded-xl font-bold hover:bg-blue-500 transition mt-6">Login</button>
+            <div class="space-y-1">
+                <label class="text-xs text-gray-400 ml-1">이메일 주소</label>
+                <input type="email" id="email" placeholder="example@email.com" required
+                    class="w-full p-4 bg-white/5 border border-white/10 rounded-xl focus:border-blue-500 outline-none transition text-white">
+            </div>
+            <div class="space-y-1">
+                <label class="text-xs text-gray-400 ml-1">비밀번호</label>
+                <input type="password" id="password" placeholder="••••••••" required
+                    class="w-full p-4 bg-white/5 border border-white/10 rounded-xl focus:border-blue-500 outline-none transition text-white">
+            </div>
+            <button type="submit" id="submitBtn"
+                class="w-full bg-blue-600 py-4 rounded-xl font-bold hover:bg-blue-500 transition mt-6 text-white">
+                로그인
+            </button>
         </form>
 
         <div class="mt-8 text-center text-sm text-gray-500">
-            신규 사용자이신가요? <a href="/signup.html" class="text-blue-500 hover:underline">회원가입</a>
+            아직 계정이 없으신가요? <a href="/signup.html" class="text-blue-500 hover:underline font-medium">무료 가입</a>
         </div>
     </div>
 
     <script>
-        document.getElementById('loginForm').onsubmit = async (e) => {
-            e.preventDefault();
-            const res = await fetch('/api/login', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    email: e.target.email.value,
-                    password: e.target.password.value
-                })
-            });
+        const form = document.getElementById('loginForm');
+        const btn = document.getElementById('submitBtn');
+        const errDiv = document.getElementById('errorMsg');
 
-            if (res.ok) {
-                const { token } = await res.json();
-                localStorage.setItem('admin_token', token);
-                location.href = '/dashboard.html';
-            } else {
-                alert('로그인 실패: 정보를 확인하세요.');
+        function showError(msg) {
+            errDiv.textContent = msg;
+            errDiv.classList.remove('hidden');
+        }
+
+        form.onsubmit = async (e) => {
+            e.preventDefault();
+            errDiv.classList.add('hidden');
+            btn.textContent = '로그인 중...';
+            btn.disabled = true;
+
+            try {
+                const res = await fetch('/api/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        email: document.getElementById('email').value,
+                        password: document.getElementById('password').value
+                    })
+                });
+
+                const data = await res.json();
+
+                if (res.ok && data.token) {
+                    localStorage.setItem('admin_token', data.token);
+                    location.href = '/dashboard.html';
+                } else {
+                    showError(data.error || '로그인에 실패했습니다. 정보를 확인해주세요.');
+                }
+            } catch (err) {
+                console.error(err);
+                showError('서버에 연결할 수 없습니다. 잠시 후 다시 시도해주세요.');
+            } finally {
+                btn.textContent = '로그인';
+                btn.disabled = false;
             }
         };
     </script>
-    <script src="/src/index.js"></script>
 </body>
 </html>

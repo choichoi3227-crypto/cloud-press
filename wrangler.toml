@@ -3,16 +3,16 @@ main = "src/index.js"
 compatibility_date = "2024-05-01"
 
 [vars]
-ADMIN_DOMAIN = "admin.cloudpress.io"
+ADMIN_DOMAIN = "admin.cloud-press.co.kr"
 JWT_SECRET = "cp_secure_secret_key"
 CLOUDFLARE_ZONE_ID = "your_cloudpress_main_zone_id" # CloudPress 서비스가 호스팅되는 Cloudflare Zone ID
 CLOUDFLARE_API_TOKEN = "your_cloudpress_api_token" # Zone Edit 권한을 가진 Cloudflare API Token
 
 [[kv_namespaces]]
 binding = "CONFIG_KV"
-id = "xxxx_config_kv"
+id = "b31e68eb8d69407ab72351cd5d43232c"
 
 [[d1_databases]]
 binding = "DB"
 database_name = "cloudpress_db"
-database_id = "xxxx-xxxx-xxxx"
+database_id = "271e8d9a-ff7d-4c9b-8e72-523bd225d7d0"

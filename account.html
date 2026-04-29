@@ -2,21 +2,65 @@
 <html lang="ko">
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>내 계정 | CloudPress</title>
     <link rel="stylesheet" href="/style.css">
     <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
 </head>
-<body class="flex h-screen bg-black text-white">
-    <!-- 사이드바 동일 -->
-    <main class="flex-1 p-10 max-w-2xl">
+<body class="flex h-screen bg-[#050505] text-white">
+    <script>
+        const token = localStorage.getItem('admin_token');
+        if (!token) {
+            window.location.href = '/login.html';
+        }
+    </script>
+    <!-- Sidebar (dashboard.html과 동일) -->
+    <aside class="w-64 border-r border-white/10 p-6 flex flex-col">
+        <div class="text-2xl font-black text-blue-500 mb-10">CLOUD<span class="text-white">PRESS</span></div>
+        <nav class="flex-1 space-y-2">
+            <a href="/dashboard.html" class="block p-3 rounded-xl hover:bg-white/5 transition"><i class="fas fa-tachometer-alt mr-3"></i> 대시보드</a>
+            <a href="/hosting.html" class="block p-3 rounded-xl hover:bg-white/5 transition"><i class="fas fa-globe mr-3"></i> 내 호스팅</a>
+            <a href="/traffic.html" class="block p-3 rounded-xl hover:bg-white/5 transition"><i class="fas fa-chart-line mr-3"></i> 트래픽</a>
+            <a href="/storage.html" class="block p-3 rounded-xl hover:bg-white/5 transition"><i class="fas fa-hdd mr-3"></i> 스토리지</a>
+            <a href="/account.html" class="block p-3 rounded-xl bg-white/10 font-bold"><i class="fas fa-user-circle mr-3"></i> 내 계정</a>
+        </nav>
+        <button onclick="logout()" class="mt-auto w-full bg-red-600 py-3 rounded-xl font-bold hover:bg-red-500 transition"><i class="fas fa-sign-out-alt mr-2"></i> 로그아웃</button>
+    </aside>
+    <main class="flex-1 p-10 max-w-2xl overflow-y-auto">
         <h1 class="text-3xl font-bold mb-10">내 계정 설정</h1>
         <div class="space-y-6">
+            <div class="space-y-2">
+                <label class="text-sm text-gray-500">이메일</label>
+                <input type="email" id="user-email-display" class="w-full p-4 bg-white/5 border border-white/10 rounded-xl outline-none focus:border-blue-500" disabled>
+            </div>
             <div class="space-y-2">
                 <label class="text-sm text-gray-500">Cloudflare Global API Key</label>
                 <input type="password" id="cf_api" class="w-full p-4 bg-white/5 border border-white/10 rounded-xl outline-none focus:border-blue-500" placeholder="API 키를 입력하세요">
             </div>
-            <button onclick="saveProfile()" class="bg-white text-black px-8 py-3 rounded-full font-bold">설정 저장</button>
+            <button onclick="saveProfile()" class="bg-blue-600 px-8 py-3 rounded-full text-white font-bold hover:bg-blue-500 transition">설정 저장</button>
         </div>
     </main>
+    <script src="/src/auth-frontend.js"></script>
+    <script>
+        async function loadAccountInfo() {
+            const token = localStorage.getItem('admin_token');
+            if (token) {
+                // JWT 디코딩 또는 API 호출로 사용자 이메일 가져오기
+                const payload = JSON.parse(atob(token.split('.')[1]));
+                document.getElementById('user-email-display').value = payload.email;
+                
+                // Cloudflare API 키 로드 (실제로는 API로 가져와야 함)
+                // document.getElementById('cf_api').value = '********'; 
+            }
+        }
+        loadAccountInfo();
+
+        async function saveProfile() {
+            const cfApiKey = document.getElementById('cf_api').value;
+            // API 호출로 Cloudflare API 키 저장
+            alert('설정이 저장되었습니다!');
+        }
+    </script>
 </body>
 </html>

@@ -1,37 +1,50 @@
-// dashboard.html에서 사용될 JavaScript 로직
-async function updateQuotaMonitor() { /* ... 기존 로직 ... */ }
-async function loadSites() {
-    // 사용자 사이트 목록 로드 및 UI 렌더링
-    // 각 사이트별 도메인 및 SSL 상태 표시
-}
-async function addDomainToSite(siteId) {
-    const domain = prompt("추가할 도메인을 입력하세요:");
-    if (!domain) return;
-    const res = await fetch('/api/user/add-domain', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ siteId, domain })
+// src/dashboard-logic.js
+async function loadDashboardData() {
+    const token = localStorage.getItem('admin_token');
+    if (!token) return; // 이미 auth-frontend.js에서 리다이렉트되지만, 안전 장치
+
+    // 사용자 활성 호스팅 수 로드
+    // const hostingRes = await fetch('/api/user/active-hostings', { headers: { 'Authorization': `Bearer ${token}` } });
+    // const hostingData = await hostingRes.json();
+    document.getElementById('active-hostings').innerText = '5'; // 더미 데이터
+
+    // 월간 트래픽 로드
+    // const trafficRes = await fetch('/api/user/monthly-traffic', { headers: { 'Authorization': `Bearer ${token}` } });
+    // const trafficData = await trafficRes.json();
+    document.getElementById('monthly-traffic').innerText = '120 GB'; // 더미 데이터
+
+    // 잔여 스토리지 로드
+    // const storageRes = await fetch('/api/user/remaining-storage', { headers: { 'Authorization': `Bearer ${token}` } });
+    // const storageData = await storageRes.json();
+    document.getElementById('remaining-storage').innerText = '15.3'; // 더미 데이터
+
+    // 긴급 알림 바 상태 업데이트 (src/auth-frontend.js의 checkSystemHealth 호출)
+    // checkSystemHealth(); 
+
+    // 트래픽 차트 렌더링 (더미 데이터)
+    const ctx = document.getElementById('trafficChart').getContext('2d');
+    new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: ['00:00', '02:00', '04:00', '06:00', '08:00', '10:00', '12:00', '14:00', '16:00', '18:00', '20:00', '22:00'],
+            datasets: [{
+                label: '요청 수',
+                data: [120, 150, 130, 200, 220, 250, 300, 280, 350, 320, 400, 380],
+                borderColor: '#3b82f6',
+                backgroundColor: 'rgba(59, 130, 246, 0.2)',
+                fill: true,
+                tension: 0.4
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: { legend: { display: false } },
+            scales: {
+                x: { grid: { color: 'rgba(255,255,255,0.1)' }, ticks: { color: '#94a3b8' } },
+                y: { grid: { color: 'rgba(255,255,255,0.1)' }, ticks: { color: '#94a3b8' } }
+            }
+        }
     });
-    const data = await res.json();
-    if (data.success) {
-        alert(`도메인 ${domain}이 추가되었습니다. Cloudflare DNS에 다음 CNAME 레코드를 추가하세요:\n이름: ${data.cfResult.ownership_verification.cname_name}\n값: ${data.cfResult.ownership_verification.cname_target}`);
-        loadSites(); // 목록 새로고침
-    } else {
-        alert(`도메인 추가 실패: ${data.error}`);
-    }
 }
-async function checkSslStatus(domainId) {
-    const res = await fetch('/api/user/check-ssl-status', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ domainId })
-    });
-    const data = await res.json();
-    if (data.success) {
-        alert(`SSL 상태: ${data.status}`);
-        loadSites();
-    } else {
-        alert(`SSL 상태 확인 실패: ${data.error}`);
-    }
-}
-// ... 기타 대시보드 관련 로직 ...
+loadDashboardData();

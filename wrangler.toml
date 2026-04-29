@@ -2,16 +2,30 @@ name = "cloud-press"
 main = "src/index.js"
 compatibility_date = "2024-05-01"
 
+# ──────────────────────────────────────────────────────────────────────────────
+# 환경 변수 (배포 전 실제 값으로 교체하세요)
+# ──────────────────────────────────────────────────────────────────────────────
 [vars]
 ADMIN_DOMAIN = "admin.cloud-press.co.kr"
-JWT_SECRET = "cp_secure_secret_key"
-CLOUDFLARE_ZONE_ID = "your_cloudpress_main_zone_id" # CloudPress 서비스가 호스팅되는 Cloudflare Zone ID
-CLOUDFLARE_API_TOKEN = "your_cloudpress_api_token" # Zone Edit 권한을 가진 Cloudflare API Token
+JWT_SECRET = "cp_secure_secret_key_change_me"          # 반드시 강력한 값으로 변경!
+CLOUDFLARE_ZONE_ID = "your_cloudpress_main_zone_id"    # CloudPress 서비스 Zone ID
+CLOUDFLARE_API_TOKEN = "your_cloudpress_api_token"     # Zone Edit 권한 토큰
 
+# ──────────────────────────────────────────────────────────────────────────────
+# KV Namespace 바인딩
+# 생성: wrangler kv:namespace create CONFIG_KV
+# id는 생성 후 출력된 값으로 교체하세요
+# ──────────────────────────────────────────────────────────────────────────────
 [[kv_namespaces]]
 binding = "CONFIG_KV"
 id = "b31e68eb8d69407ab72351cd5d43232c"
 
+# ──────────────────────────────────────────────────────────────────────────────
+# D1 Database 바인딩
+# 생성: wrangler d1 create cloudpress_db
+# 마이그레이션: wrangler d1 execute cloudpress_db --file=./schema.sql
+# database_id는 생성 후 출력된 값으로 교체하세요
+# ──────────────────────────────────────────────────────────────────────────────
 [[d1_databases]]
 binding = "DB"
 database_name = "cloudpress_db"

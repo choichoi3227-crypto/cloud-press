@@ -15,7 +15,7 @@
         .site-card { transition: all 0.2s ease; }
     </style>
 </head>
-<body class="flex h-screen bg-[#050505] text-white">
+<body class="bg-[#050505] text-white md:flex md:h-screen">
     <script>
         const token = localStorage.getItem('admin_token');
         if (!token) window.location.href = '/login.html';
@@ -67,7 +67,7 @@
     </aside>
 
     <!-- Main -->
-    <main class="flex-1 overflow-y-auto">
+    <main class="flex-1 w-full overflow-y-auto">
         <div class="p-8 max-w-6xl mx-auto">
             <header class="flex justify-between items-center mb-8">
                 <div>

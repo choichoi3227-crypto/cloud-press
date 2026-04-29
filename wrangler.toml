@@ -1,40 +1,60 @@
+# CloudPress v20.0 — wrangler.toml
+# Originless Edge CMS (WordPress on Cloudflare Workers)
+# 스토리지: Supabase (Primary + Secondary) + D1 (플랫폼 DB) + KV (세션/캐시)
+
 name = "cloud-press"
-main = "/src/index.js"
-compatibility_date = "2024-05-01"
+main = "src/index.js"
+compatibility_date = "2025-04-01"
+compatibility_flags = ["nodejs_compat"]
 
-# ──────────────────────────────────────────────────────────────────────────────
-# 정적 파일(HTML/CSS/JS) 서빙 - Workers Assets 바인딩
-# HTML, CSS, JS 파일들이 Worker와 같은 도메인에서 서빙되어 /api/* 경로가 정상 동작함
-# ──────────────────────────────────────────────────────────────────────────────
+# ── 정적 파일 서빙 (HTML/CSS/JS → Workers Assets) ──────────────────────────────
+# signup.html, login.html 등이 Worker와 동일 오리진에서 서빙되어
+# fetch('/api/signup') 같은 상대경로가 Worker로 정상 도달함
 [assets]
-directory = "."
-binding = "ASSETS"
+directory = "./"
+binding   = "ASSETS"
 
-# ──────────────────────────────────────────────────────────────────────────────
-# 환경 변수 (배포 전 실제 값으로 교체하세요)
-# ──────────────────────────────────────────────────────────────────────────────
-[vars]
-ADMIN_DOMAIN = "admin.cloud-press.co.kr"
-JWT_SECRET = "Swsh120327!"          # 반드시 강력한 값으로 변경!
-CLOUDFLARE_ZONE_ID = "cloud-press.co.kr"    # CloudPress 서비스 Zone ID
-CLOUDFLARE_API_TOKEN = "cfut_JN1fIDl5zRN9GJbsO7ntuQpc6QFA1TjJyDxUwrfU140bc101"     # Zone Edit 권한 토큰
-
-# ──────────────────────────────────────────────────────────────────────────────
-# KV Namespace 바인딩
-# 생성: wrangler kv:namespace create CONFIG_KV
-# id는 생성 후 출력된 값으로 교체하세요
-# ──────────────────────────────────────────────────────────────────────────────
-[[kv_namespaces]]
-binding = "CONFIG_KV"
-id = "b31e68eb8d69407ab72351cd5d43232c"
-
-# ──────────────────────────────────────────────────────────────────────────────
-# D1 Database 바인딩
-# 생성: wrangler d1 create cloudpress_db
-# 마이그레이션: wrangler d1 execute cloudpress_db --file=./schema.sql
-# database_id는 생성 후 출력된 값으로 교체하세요
-# ──────────────────────────────────────────────────────────────────────────────
+# ── D1: 플랫폼 메인 DB ──────────────────────────────────────────────────────────
 [[d1_databases]]
-binding = "DB"
-database_name = "cloudpress_db"
-database_id = "271e8d9a-ff7d-4c9b-8e72-523bd225d7d0"
+binding       = "DB"
+database_name = "cloudpress-db"
+database_id   = "a04d0702-b6d8-49d3-8e57-b81ee5028ac7"
+
+# ── KV: 세션 ────────────────────────────────────────────────────────────────────
+[[kv_namespaces]]
+binding = "SESSIONS"
+id      = "19e5e273e99941fbb963300e56dbdf9e"
+
+# ── KV: 이중 캐시 (Edge + KV) ───────────────────────────────────────────────────
+# page:{prefix}:{path}      → HTML 캐시
+# site_domain:{hostname}    → 사이트 정보 캐시
+# opt:{prefix}:{key}        → WordPress 옵션 캐시
+# rl:{ip}:{window}          → Rate Limit 카운터
+# ddos_ban:{ip}             → DDoS 밴 목록
+# wp_session:{token}        → WordPress 로그인 세션
+# media:{path}              → 소형 미디어 D1 fallback
+[[kv_namespaces]]
+binding = "CACHE"
+id      = "9b8370d20a9646b9aa73f63c9200379f"
+
+# ── 환경 변수 ────────────────────────────────────────────────────────────────────
+# 아래 secret들은 반드시 wrangler secret put 으로 주입하세요:
+#   wrangler secret put JWT_SECRET
+#   wrangler secret put SUPABASE_URL
+#   wrangler secret put SUPABASE_KEY
+#   wrangler secret put SUPABASE_URL2
+#   wrangler secret put SUPABASE_KEY2
+#   wrangler secret put PURGE_KEY
+#   wrangler secret put ENCRYPTION_KEY
+#   wrangler secret put CF_API_TOKEN
+[vars]
+CF_ACCOUNT_ID = ""
+
+# ── CPU 한도 ─────────────────────────────────────────────────────────────────────
+[limits]
+cpu_ms = 50000
+
+# ── 개발 환경 ────────────────────────────────────────────────────────────────────
+[dev]
+port           = 8788
+local_protocol = "http"

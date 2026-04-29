@@ -2,43 +2,49 @@
 <html lang="ko">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>CloudPress | Login</title>
-    <link rel="stylesheet" href="style.css">
     <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="/style.css">
 </head>
 <body class="bg-[#050505] text-white min-h-screen flex items-center justify-center p-6">
     <div class="w-full max-w-md bg-[#111] p-10 rounded-3xl border border-white/10 shadow-2xl">
         <div class="text-center mb-10">
-            <a href="/" class="text-3xl font-black tracking-tighter text-blue-500">CLOUD<span class="text-white">PRESS</span></a>
-            <p class="text-gray-500 mt-2 text-sm">계정에 로그인하여 인프라를 관리하세요.</p>
+            <a href="/" class="text-2xl font-black text-blue-500">CLOUD<span class="text-white">PRESS</span></a>
+            <h2 class="text-xl font-bold mt-4">Welcome Back</h2>
         </div>
         
         <form id="loginForm" class="space-y-4">
-            <div class="space-y-1">
-                <label class="text-xs text-gray-500 ml-1">Email</label>
-                <input type="email" id="email" required class="w-full p-4 bg-white/5 border border-white/10 rounded-xl focus:border-blue-500 outline-none transition">
-            </div>
-            <div class="space-y-1">
-                <label class="text-xs text-gray-500 ml-1">Password</label>
-                <input type="password" id="password" required class="w-full p-4 bg-white/5 border border-white/10 rounded-xl focus:border-blue-500 outline-none transition">
-            </div>
-            
-            <div id="otp-area" class="space-y-1 pt-4 border-t border-white/5 hidden">
-                <label class="text-xs text-blue-500 ml-1">2FA Code</label>
-                <input type="text" id="otp" maxlength="6" class="w-full p-4 bg-blue-500/5 border border-blue-500/20 rounded-xl text-center text-2xl tracking-[0.5em] outline-none">
-            </div>
-
-            <button type="submit" class="w-full bg-blue-600 py-4 rounded-xl font-bold hover:bg-blue-500 transition-all shadow-lg shadow-blue-600/20 mt-6">
-                Login
-            </button>
+            <input type="email" id="email" placeholder="Email" required class="w-full p-4 bg-white/5 border border-white/10 rounded-xl focus:border-blue-500 outline-none">
+            <input type="password" id="password" placeholder="Password" required class="w-full p-4 bg-white/5 border border-white/10 rounded-xl focus:border-blue-500 outline-none">
+            <button type="submit" class="w-full bg-blue-600 py-4 rounded-xl font-bold hover:bg-blue-500 transition mt-6">Login</button>
         </form>
 
         <div class="mt-8 text-center text-sm text-gray-500">
-            계정이 없으신가요? <a href="signup.html" class="text-blue-500 hover:underline">회원가입</a>
+            신규 사용자이신가요? <a href="/signup.html" class="text-blue-500 hover:underline">회원가입</a>
         </div>
     </div>
 
-    <script src="src/auth-frontend.js"></script>
+    <script>
+        document.getElementById('loginForm').onsubmit = async (e) => {
+            e.preventDefault();
+            const res = await fetch('/api/login', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    email: e.target.email.value,
+                    password: e.target.password.value
+                })
+            });
+
+            if (res.ok) {
+                const { token } = await res.json();
+                localStorage.setItem('admin_token', token);
+                location.href = '/dashboard.html';
+            } else {
+                alert('로그인 실패: 정보를 확인하세요.');
+            }
+        };
+    </script>
+    <script src="/src/index.js"></script>
 </body>
 </html>

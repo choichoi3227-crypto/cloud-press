@@ -9,7 +9,14 @@
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
-<body class="flex h-screen bg-[#050505] text-white">
+<body class="flex h-screen bg-[#050505] text-white dash-layout">
+    <!-- 모바일 햄버거 버튼 -->
+    <button class="mobile-menu-btn" aria-label="메뉴 열기">
+        <i class="fas fa-bars"></i>
+        <span class="text-xs font-bold">메뉴</span>
+    </button>
+    <!-- 사이드바 오버레이 -->
+    <div class="sidebar-overlay"></div>
     <script>
         const token = localStorage.getItem('admin_token');
         if (!token) {
@@ -17,7 +24,7 @@
         }
     </script>
     <!-- Sidebar (dashboard.html과 동일) -->
-    <aside class="w-64 border-r border-white/10 p-6 flex flex-col">
+    <aside class="w-64 border-r border-white/10 p-6 flex flex-col dash-sidebar">
         <div class="text-2xl font-black text-blue-500 mb-10">CLOUD<span class="text-white">PRESS</span></div>
         <nav class="flex-1 space-y-2">
             <a href="/dashboard.html" class="block p-3 rounded-xl hover:bg-white/5 transition"><i class="fas fa-tachometer-alt mr-3"></i> 대시보드</a>

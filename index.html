@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CloudPress | 차세대 워드프레스 호스팅</title>
+    <link rel="stylesheet" href="/style.css">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+</head>
+<body class="landing-page">
+    <!-- Header -->
+    <header class="header">
+        <div class="container flex justify-between items-center">
+            <a href="#" class="logo">CLOUD<span class="text-blue-500">PRESS</span></a>
+            <nav class="nav-menu">
+                <a href="#features">기능</a>
+                <a href="#pricing">요금</a>
+                <a href="#faq">FAQ</a>
+                <a href="/login.html" class="btn-secondary">로그인</a>
+                <a href="/signup.html" class="btn-primary">무료 시작</a>
+            </nav>
+        </div>
+    </header>
+
+    <!-- Hero Section -->
+    <section class="hero-section">
+        <div class="container text-center">
+            <h1>Cloudflare Edge에서 구동되는<br>가장 빠른 워드프레스 호스팅</h1>
+            <p class="hero-subtitle">전 세계 300개 이상의 엣지 로케이션에서 워드프레스가 즉시 로드됩니다. VPS보다 빠르고, 서버리스보다 강력합니다.</p>
+            <a href="/signup.html" class="btn-primary btn-lg">지금 바로 시작하기</a>
+            <p class="hero-small-text">신용카드 필요 없음. 30초 만에 배포.</p>
+        </div>
+    </section>
+
+    <!-- Features Section -->
+    <section id="features" class="features-section">
+        <div class="container">
+            <h2 class="section-title">CloudPress의 혁신적인 기능</h2>
+            <div class="feature-grid">
+                <div class="feature-item">
+                    <i class="fas fa-rocket feature-icon"></i>
+                    <h3>초고속 성능</h3>
+                    <p>Cloudflare Anycast IP 기반으로 전 세계 어디서든 10ms 이내의 응답 속도를 경험하세요.</p>
+                </div>
+                <div class="feature-item">
+                    <i class="fas fa-shield-alt feature-icon"></i>
+                    <h3>강력한 보안</h3>
+                    <p>자동 WAF, DDoS 방어, SSL for SaaS로 모든 사이트를 안전하게 보호합니다.</p>
+                </div>
+                <div class="feature-item">
+                    <i class="fas fa-database feature-icon"></i>
+                    <h3>무한 스토리지</h3>
+                    <p>36개 Supabase 버킷 샤딩과 4개 백업 노드로 데이터 손실 걱정 없이 무제한 확장하세요.</p>
+                </div>
+                <div class="feature-item">
+                    <i class="fas fa-code feature-icon"></i>
+                    <h3>WASM PHP</h3>
+                    <p>PHP 코드를 WebAssembly로 변환하여 서버리스 환경에서 네이티브에 가까운 속도로 실행합니다.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- FAQ Section -->
+    <section id="faq" class="faq-section">
+        <div class="container">
+            <h2 class="section-title">자주 묻는 질문</h2>
+            <div class="faq-list">
+                <div class="faq-item">
+                    <div class="faq-item-header">CloudPress는 어떻게 작동하나요? <i class="fas fa-chevron-down"></i></div>
+                    <div class="faq-item-content">CloudPress는 Cloudflare Workers의 엣지 네트워크에서 PHP WASM 런타임을 실행하여 워드프레스를 구동합니다. 모든 파일은 Supabase의 분산 버킷에 저장되며, D1 데이터베이스를 사용합니다.</div>
+                </div>
+                <div class="faq-item">
+                    <div class="faq-item-header">정말 무료인가요? <i class="fas fa-chevron-down"></i></div>
+                    <div class="faq-item-content">네, CloudPress는 Cloudflare Workers, D1, KV, 그리고 Supabase의 무료 플랜만을 활용하여 운영됩니다. 사용자는 추가 비용 없이 서비스를 이용할 수 있습니다.</div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="footer">
+        <div class="container text-center">
+            <p>&copy; 2024 CloudPress. All rights reserved.</p>
+        </div>
+    </footer>
+
+    <script src="src/landing-page.js"></script>
+</body>
+</html>

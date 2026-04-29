@@ -4,11 +4,10 @@ import { jsonOk, jsonErr, hashPassword, dbGetUserByEmail, dbCreateUser, checkBin
 export async function onRequestPost(context) {
   const { request, env } = context;
 
-  // 바인딩 체크
-  const missing = checkBindings(env, ["DB", "CACHE"]);
+  // DB, SESSIONS만 필수 체크 (CACHE는 선택적)
+  const missing = checkBindings(env, ["DB", "SESSIONS"]);
   if (missing.length) return jsonErr(`바인딩 누락: ${missing.join(", ")}`, 503);
 
-  // 요청 파싱
   let body;
   try { body = await request.json(); }
   catch { return jsonErr("요청 형식이 올바르지 않습니다 (JSON 파싱 실패).", 400); }
@@ -19,11 +18,9 @@ export async function onRequestPost(context) {
   if (password.length < 8)       return jsonErr("비밀번호는 8자 이상이어야 합니다.", 400);
 
   try {
-    // 중복 확인 (D1)
     const existing = await dbGetUserByEmail(env.DB, email);
     if (existing) return jsonErr("이미 사용 중인 이메일입니다.", 409);
 
-    // 저장 (D1)
     await dbCreateUser(env.DB, {
       id:           crypto.randomUUID(),
       email,
@@ -38,6 +35,4 @@ export async function onRequestPost(context) {
   }
 }
 
-// GET /api/signup → 405
-export const onRequestGet = () =>
-  jsonErr("Method Not Allowed", 405);
+export const onRequestGet = () => jsonErr("Method Not Allowed", 405);

@@ -15,14 +15,21 @@
         .site-card { transition: all 0.2s ease; }
     </style>
 </head>
-<body class="flex h-screen bg-[#050505] text-white">
+<body class="flex h-screen bg-[#050505] text-white dash-layout">
+    <!-- 모바일 햄버거 버튼 -->
+    <button class="mobile-menu-btn" aria-label="메뉴 열기">
+        <i class="fas fa-bars"></i>
+        <span class="text-xs font-bold">메뉴</span>
+    </button>
+    <!-- 사이드바 오버레이 -->
+    <div class="sidebar-overlay"></div>
     <script>
         const token = localStorage.getItem('admin_token');
         if (!token) window.location.href = '/login.html';
     </script>
 
     <!-- Sidebar -->
-    <aside class="w-64 border-r border-white/10 p-6 flex flex-col flex-shrink-0">
+    <aside class="w-64 border-r border-white/10 p-6 flex flex-col flex-shrink-0 dash-sidebar">
         <div class="text-2xl font-black text-blue-500 mb-10">CLOUD<span class="text-white">PRESS</span></div>
         <nav class="flex-1 space-y-2">
             <a href="/dashboard.html" class="block p-3 rounded-xl hover:bg-white/5 transition"><i class="fas fa-tachometer-alt mr-3"></i> 대시보드</a>

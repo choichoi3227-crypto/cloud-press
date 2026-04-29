@@ -1,0 +1,72 @@
+/* Global Styles */
+body { font-family: 'Inter', sans-serif; margin: 0; background-color: #0f172a; color: #f8fafc; }
+.container { max-width: 1200px; margin: 0 auto; padding: 0 20px; }
+.btn-primary { background-color: #3b82f6; color: white; padding: 10px 20px; border-radius: 8px; font-weight: 600; transition: background-color 0.2s; }
+.btn-primary:hover { background-color: #2563eb; }
+.btn-secondary { background-color: transparent; color: #3b82f6; border: 1px solid #3b82f6; padding: 10px 20px; border-radius: 8px; font-weight: 600; transition: all 0.2s; }
+.btn-secondary:hover { background-color: #3b82f6; color: white; }
+
+/* Landing Page Specific Styles */
+.landing-page .header { background-color: #1e293b; padding: 1rem 0; border-bottom: 1px solid #334155; }
+.landing-page .logo { font-size: 1.8rem; font-weight: 800; letter-spacing: -0.05em; }
+.landing-page .nav-menu a { margin-left: 1.5rem; color: #cbd5e1; transition: color 0.2s; }
+.landing-page .nav-menu a:hover { color: #f8fafc; }
+.landing-page .hero-section { text-align: center; padding: 8rem 0; background: linear-gradient(to bottom, #1e293b, #0f172a); }
+.landing-page .hero-section h1 { font-size: 3.5rem; font-weight: 800; line-height: 1.2; margin-bottom: 1.5rem; }
+.landing-page .hero-subtitle { font-size: 1.25rem; color: #94a3b8; max-width: 700px; margin: 0 auto 2.5rem; }
+.landing-page .features-section, .landing-page .faq-section { padding: 6rem 0; background-color: #0f172a; }
+.landing-page .section-title { font-size: 2.5rem; font-weight: 700; text-align: center; margin-bottom: 4rem; }
+.landing-page .feature-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 2.5rem; }
+.landing-page .feature-item { background-color: #1e293b; padding: 2.5rem; border-radius: 12px; text-align: center; border: 1px solid #334155; }
+.landing-page .feature-icon { font-size: 3rem; color: #3b82f6; margin-bottom: 1.5rem; }
+.landing-page .feature-item h3 { font-size: 1.5rem; font-weight: 700; margin-bottom: 1rem; }
+.landing-page .faq-list { max-width: 800px; margin: 0 auto; }
+.landing-page .faq-item { background-color: #1e293b; border: 1px solid #334155; border-radius: 8px; margin-bottom: 1rem; overflow: hidden; }
+.landing-page .faq-item-header { padding: 1.25rem; font-weight: 600; cursor: pointer; display: flex; justify-content: space-between; align-items: center; }
+.landing-page .faq-item-content { padding: 0 1.25rem 1.25rem; max-height: 0; overflow: hidden; transition: max-height 0.3s ease-out; color: #cbd5e1; }
+.landing-page .faq-item.active .faq-item-content { max-height: 200px; } /* Adjust as needed */
+.landing-page .faq-item.active .faq-item-header .fa-chevron-down { transform: rotate(180deg); }
+.landing-page .footer { background-color: #1e293b; padding: 2rem 0; color: #94a3b8; border-top: 1px solid #334155; }
+
+/* Dashboard Page Specific Styles */
+.dashboard-page { display: flex; min-height: 100vh; }
+.dashboard-page .sidebar { width: 280px; background-color: #1e293b; padding: 2rem; border-right: 1px solid #334155; display: flex; flex-direction: column; }
+.dashboard-page .sidebar .logo { font-size: 1.8rem; font-weight: 800; letter-spacing: -0.05em; margin-bottom: 2.5rem; }
+.dashboard-page .main-nav .nav-item { display: flex; align-items: center; padding: 1rem 1.25rem; border-radius: 8px; color: #cbd5e1; transition: background-color 0.2s, color 0.2s; margin-bottom: 0.75rem; }
+.dashboard-page .main-nav .nav-item:hover, .dashboard-page .main-nav .nav-item.active { background-color: #3b82f6; color: white; }
+.dashboard-page .main-nav .nav-item i { margin-right: 1rem; font-size: 1.25rem; }
+.dashboard-page .main-content { flex-grow: 1; padding: 2.5rem; }
+.dashboard-page .content-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 2.5rem; }
+.dashboard-page .content-header h1 { font-size: 2.25rem; font-weight: 700; }
+.dashboard-page .user-info { display: flex; align-items: center; gap: 0.75rem; color: #94a3b8; }
+.dashboard-page .user-info .avatar { width: 40px; height: 40px; border-radius: 50%; }
+.dashboard-page .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1.5rem; margin-bottom: 3rem; }
+.dashboard-page .stat-card { background-color: #1e293b; padding: 1.5rem; border-radius: 12px; border: 1px solid #334155; }
+.dashboard-page .stat-card h3 { font-size: 1rem; color: #94a3b8; margin-bottom: 0.5rem; }
+.dashboard-page .stat-card p { font-size: 2rem; font-weight: 700; }
+.dashboard-page .site-management h2, .dashboard-page .account-settings h2 { font-size: 1.75rem; font-weight: 700; margin-bottom: 1.5rem; }
+.dashboard-page .site-list { display: grid; grid-template-columns: 1fr; gap: 1rem; margin-top: 1.5rem; }
+.dashboard-page .site-item { background-color: #1e293b; padding: 1.5rem; border-radius: 12px; border: 1px solid #334155; display: flex; flex-direction: column; gap: 0.75rem; }
+.dashboard-page .site-item h3 { font-size: 1.25rem; font-weight: 600; }
+.dashboard-page .site-item p { color: #94a3b8; font-size: 0.9rem; }
+.dashboard-page .site-actions { display: flex; gap: 0.75rem; margin-top: 1rem; }
+.dashboard-page .btn-tertiary { background-color: #475569; color: white; padding: 8px 15px; border-radius: 6px; font-weight: 500; transition: background-color 0.2s; }
+.dashboard-page .btn-tertiary:hover { background-color: #334155; }
+.dashboard-page .form-group { margin-bottom: 1.5rem; }
+.dashboard-page .form-group label { display: block; color: #cbd5e1; margin-bottom: 0.5rem; font-size: 0.9rem; }
+.dashboard-page .form-group input { width: 100%; background-color: #1e293b; border: 1px solid #334155; padding: 0.75rem; border-radius: 8px; color: #f8fafc; outline: none; }
+.dashboard-page .form-group input:focus { border-color: #3b82f6; }
+
+/* Login Page Specific Styles */
+.login-page { display: flex; align-items: center; justify-content: center; background-color: #0f172a; }
+.login-container { background-color: #1e293b; padding: 3rem; border-radius: 12px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); width: 100%; max-width: 400px; border: 1px solid #334155; }
+.login-container input { width: 100%; background-color: #0f172a; border: 1px solid #334155; padding: 0.75rem; border-radius: 8px; color: #f8fafc; outline: none; }
+.login-container input:focus { border-color: #3b82f6; }
+.login-container .otp-section label { display: block; color: #cbd5e1; margin-bottom: 0.5rem; font-size: 0.9rem; }
+.login-container .otp-section input { text-align: center; font-size: 1.5rem; letter-spacing: 0.5rem; }
+
+/* Editor Page Specific Styles */
+.editor-mode { background-color: #1a202c; color: #a0aec0; }
+.editor-mode header { background-color: #2d3748; padding: 1rem; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #4a5568; }
+.editor-mode #code-editor { width: 100%; height: calc(100vh - 60px); background-color: #1a202c; color: #e2e8f0; border: none; outline: none; font-family: 'Fira Code', monospace; font-size: 1rem; padding: 1rem; resize: none; }
+.editor-mode #ai-diagnostics { background-color: #2d3748; padding: 1rem; border-top: 1px solid #4a5568; }

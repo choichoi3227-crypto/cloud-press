@@ -4,61 +4,85 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>CloudPress | 회원가입</title>
-    <!-- Tailwind CSS CDN -->
     <script src="https://cdn.tailwindcss.com"></script>
-    <!-- 공통 스타일 시트 -->
     <link rel="stylesheet" href="/style.css">
     <style>
-        /* CDN 로딩 실패를 대비한 기본 배경색 설정 */
-        body {
-            background-color: #050505;
-            color: white;
-            margin: 0;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            min-height: 100vh;
-        }
+        body { background-color: #050505; color: white; margin: 0; }
     </style>
 </head>
-<body>
+<body class="bg-[#050505] text-white min-h-screen flex items-center justify-center p-6">
     <div class="w-full max-w-md bg-[#111] p-10 rounded-3xl border border-white/10 shadow-2xl">
         <div class="text-center mb-10">
             <a href="/" class="text-3xl font-black tracking-tighter text-blue-500">CLOUD<span class="text-white">PRESS</span></a>
             <p class="text-gray-500 mt-2 text-sm">초고속 클라우드프레스에 가입하세요.</p>
         </div>
-        
+
+        <div id="errorMsg" class="hidden mb-4 p-3 bg-red-900/40 border border-red-500/40 rounded-xl text-red-400 text-sm text-center"></div>
+        <div id="successMsg" class="hidden mb-4 p-3 bg-green-900/40 border border-green-500/40 rounded-xl text-green-400 text-sm text-center"></div>
+
         <form id="signupForm" class="space-y-4">
             <div class="space-y-1">
                 <label class="text-xs text-gray-400 ml-1">이메일 주소</label>
-                <input type="email" id="email" required placeholder="example@email.com" 
+                <input type="email" id="email" required placeholder="example@email.com"
                     class="w-full p-4 bg-white/5 border border-white/10 rounded-xl focus:border-blue-500 outline-none transition text-white">
             </div>
             <div class="space-y-1">
-                <label class="text-xs text-gray-400 ml-1">비밀번호</label>
-                <input type="password" id="password" required placeholder="••••••••" 
+                <label class="text-xs text-gray-400 ml-1">비밀번호 <span class="text-gray-600">(8자 이상)</span></label>
+                <input type="password" id="password" required placeholder="••••••••"
                     class="w-full p-4 bg-white/5 border border-white/10 rounded-xl focus:border-blue-500 outline-none transition text-white">
             </div>
-            
-            <button type="submit" id="submitBtn" 
+            <div class="space-y-1">
+                <label class="text-xs text-gray-400 ml-1">비밀번호 확인</label>
+                <input type="password" id="passwordConfirm" required placeholder="••••••••"
+                    class="w-full p-4 bg-white/5 border border-white/10 rounded-xl focus:border-blue-500 outline-none transition text-white">
+            </div>
+
+            <button type="submit" id="submitBtn"
                 class="w-full bg-blue-600 py-4 rounded-xl font-bold hover:bg-blue-500 transition-all shadow-lg shadow-blue-600/20 mt-6 text-white">
                 무료 계정 생성
             </button>
         </form>
 
         <div class="mt-8 text-center text-sm text-gray-500">
-            이미 계정이 있나요? <a href="login.html" class="text-blue-500 hover:underline font-medium">로그인</a>
+            이미 계정이 있나요? <a href="/login.html" class="text-blue-500 hover:underline font-medium">로그인</a>
         </div>
     </div>
 
     <script>
-        document.getElementById('signupForm').onsubmit = async (e) => {
-            e.preventDefault();
-            const btn = document.getElementById('submitBtn');
-            const email = document.getElementById('email').value;
-            const password = document.getElementById('password').value;
+        const form = document.getElementById('signupForm');
+        const btn = document.getElementById('submitBtn');
+        const errDiv = document.getElementById('errorMsg');
+        const sucDiv = document.getElementById('successMsg');
 
-            btn.innerText = "처리 중...";
+        function showError(msg) {
+            errDiv.textContent = msg;
+            errDiv.classList.remove('hidden');
+            sucDiv.classList.add('hidden');
+        }
+
+        function showSuccess(msg) {
+            sucDiv.textContent = msg;
+            sucDiv.classList.remove('hidden');
+            errDiv.classList.add('hidden');
+        }
+
+        form.onsubmit = async (e) => {
+            e.preventDefault();
+            errDiv.classList.add('hidden');
+
+            const email = document.getElementById('email').value.trim();
+            const password = document.getElementById('password').value;
+            const passwordConfirm = document.getElementById('passwordConfirm').value;
+
+            // 클라이언트 유효성 검사
+            if (password.length < 8) {
+                return showError('비밀번호는 8자 이상이어야 합니다.');
+            }
+            if (password !== passwordConfirm) {
+                return showError('비밀번호가 일치하지 않습니다.');
+            }
+
+            btn.textContent = '처리 중...';
             btn.disabled = true;
 
             try {
@@ -68,19 +92,28 @@
                     body: JSON.stringify({ email, password })
                 });
 
-                const data = await res.json();
+                let data;
+                try {
+                    data = await res.json();
+                } catch {
+                    throw new Error('서버 응답을 처리할 수 없습니다.');
+                }
 
-                if (res.ok) {
-                    alert('가입이 완료되었습니다! 로그인 페이지로 이동합니다.');
-                    location.href = 'login.html';
+                if (res.ok && data.success) {
+                    showSuccess('가입이 완료되었습니다! 로그인 페이지로 이동합니다...');
+                    setTimeout(() => { location.href = '/login.html'; }, 1500);
                 } else {
-                    alert('가입 실패: ' + (data.error || '알 수 없는 오류'));
+                    showError(data.error || '가입에 실패했습니다. 다시 시도해주세요.');
                 }
             } catch (err) {
-                console.error(err);
-                alert('네트워크 오류가 발생했습니다. 서버 설정을 확인해주세요.');
+                console.error('[signup] 오류:', err);
+                if (err.name === 'TypeError' && err.message.includes('fetch')) {
+                    showError('서버에 연결할 수 없습니다. 인터넷 연결을 확인해주세요.');
+                } else {
+                    showError(err.message || '오류가 발생했습니다. 잠시 후 다시 시도해주세요.');
+                }
             } finally {
-                btn.innerText = "무료 계정 생성";
+                btn.textContent = '무료 계정 생성';
                 btn.disabled = false;
             }
         };

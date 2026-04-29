@@ -207,7 +207,14 @@ export default {
       return jsonResponse({ id: payload.id, email: payload.email, role: payload.role });
     }
 
-    // ── 정적 파일 / 404 ───────────────────────────────────────────────────
+    // ── 정적 파일 서빙 (Workers Assets 바인딩) ────────────────────────────
+    // HTML, CSS, JS 등 모든 정적 파일을 ASSETS 바인딩을 통해 서빙한다.
+    // 덕분에 signup.html / login.html 등이 Worker와 동일 오리진에서 제공되므로
+    // fetch('/api/signup') 같은 상대 경로 요청이 정상적으로 이 Worker에 도달한다.
+    if (env.ASSETS) {
+      return env.ASSETS.fetch(request);
+    }
+
     return new Response("찾을 수 없습니다.", { status: 404 });
   },
 };

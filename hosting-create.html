@@ -17,7 +17,7 @@
         .php-card.eol       { opacity: 0.5; }
     </style>
 </head>
-<body class="flex h-screen bg-[#050505] text-white">
+<body class="bg-[#050505] text-white md:flex md:h-screen">
     <script>
         if (!localStorage.getItem('admin_token')) window.location.href = '/login.html';
     <!-- ── 모바일 헤더 (md 이상에서 숨김) ── -->
@@ -68,7 +68,7 @@
     </aside>
 
     <!-- Main -->
-    <main class="flex-1 overflow-y-auto p-8">
+    <main class="flex-1 w-full overflow-y-auto p-8">
         <div class="max-w-2xl mx-auto">
             <!-- 헤더 -->
             <div class="flex items-center gap-4 mb-8">

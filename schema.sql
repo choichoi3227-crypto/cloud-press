@@ -65,6 +65,7 @@ CREATE TABLE IF NOT EXISTS domain_aliases (
     cf_ssl_status         TEXT,
     cf_cname_target       TEXT,
     cf_cname_name         TEXT,
+    server_ip             TEXT,          -- 이 도메인이 가리켜야 할 서버 IP
     FOREIGN KEY(site_id) REFERENCES sites(id)
 );
 

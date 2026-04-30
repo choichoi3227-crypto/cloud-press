@@ -356,30 +356,64 @@
 
             <!-- 도메인 -->
             <div id="tab-domain" class="tab-content hidden space-y-4">
-                <div class="section-card space-y-4">
-                    <div class="flex justify-between items-center mb-2">
-                        <h3 class="font-bold flex items-center gap-2"><i class="fas fa-globe text-blue-400"></i> 도메인 관리</h3>
-                    </div>
 
+                <!-- 서버 IP 안내 카드 -->
+                <div class="section-card bg-blue-900/20 border-blue-500/30 space-y-3">
+                    <h3 class="font-bold flex items-center gap-2 text-blue-300">
+                        <i class="fas fa-network-wired"></i> DNS 설정 안내
+                    </h3>
+                    <p class="text-sm text-gray-400">
+                        도메인을 이 호스팅에 연결하려면 도메인 DNS에서 아래 IP로 <strong class="text-white">A 레코드</strong>를 추가하세요.<br>
+                        A 레코드 설정 후 <strong class="text-green-400">[A레코드 확인]</strong> 버튼을 누르면 자동으로 활성화됩니다.
+                    </p>
+                    <div class="flex items-center gap-3 p-3 bg-black/30 border border-blue-500/20 rounded-xl">
+                        <div>
+                            <p class="text-xs text-gray-500 mb-1">이 호스팅의 공개 IP (Cloudflare Anycast)</p>
+                            <p id="server-ip-display" class="font-mono text-xl font-bold text-white">로딩 중...</p>
+                        </div>
+                        <button onclick="copyServerIp()" class="ml-auto text-xs border border-white/20 px-3 py-2 rounded-xl hover:bg-white/5 transition">
+                            <i class="fas fa-copy mr-1"></i> 복사
+                        </button>
+                    </div>
+                    <div class="text-xs text-gray-500 space-y-1">
+                        <p><i class="fas fa-info-circle mr-1 text-blue-400"></i> 레코드 유형: <strong class="text-white">A</strong></p>
+                        <p><i class="fas fa-info-circle mr-1 text-blue-400"></i> 이름(Name): <strong class="text-white">@ (루트) 또는 www</strong></p>
+                        <p><i class="fas fa-info-circle mr-1 text-blue-400"></i> 값(Value): <strong class="text-white" id="server-ip-inline">-</strong></p>
+                        <p><i class="fas fa-info-circle mr-1 text-blue-400"></i> TTL: <strong class="text-white">Auto (또는 300)</strong></p>
+                    </div>
+                </div>
+
+                <!-- 등록된 도메인 목록 -->
+                <div class="section-card space-y-4">
+                    <h3 class="font-bold flex items-center gap-2">
+                        <i class="fas fa-globe text-blue-400"></i> 도메인 목록
+                    </h3>
                     <div id="domain-list" class="space-y-2">
                         <div class="text-center py-6 text-gray-500 text-sm">
                             <i class="fas fa-spinner fa-spin mr-2"></i> 로딩 중...
                         </div>
                     </div>
+                </div>
 
-                    <div class="border-t border-white/10 pt-4 space-y-3">
-                        <p class="text-sm font-bold">도메인 추가</p>
-                        <p class="text-xs text-gray-500">도메인 추가 후 DNS에서 CNAME 레코드를 설정해야 합니다.</p>
-                        <div class="flex gap-3">
-                            <input id="new-domain" type="text" placeholder="예: www.example.com"
-                                class="flex-1 p-3 bg-white/5 border border-white/10 rounded-xl outline-none focus:border-blue-500 transition text-sm font-mono">
-                            <button onclick="addDomain()"
-                                class="bg-blue-700 px-5 py-2 rounded-xl font-bold hover:bg-blue-600 transition text-sm">
-                                추가
-                            </button>
-                        </div>
+                <!-- 도메인 추가 -->
+                <div class="section-card space-y-4">
+                    <h3 class="font-bold flex items-center gap-2">
+                        <i class="fas fa-plus-circle text-green-400"></i> 도메인 추가
+                    </h3>
+                    <p class="text-xs text-gray-500">
+                        추가 후 위의 IP로 A 레코드를 설정하면 자동으로 활성화됩니다.
+                    </p>
+                    <div id="domain-add-alert" class="hidden p-3 rounded-xl text-sm"></div>
+                    <div class="flex gap-3">
+                        <input id="new-domain" type="text" placeholder="예: example.com 또는 www.example.com"
+                            class="flex-1 p-3 bg-white/5 border border-white/10 rounded-xl outline-none focus:border-blue-500 transition text-sm font-mono">
+                        <button onclick="addDomain()" id="add-domain-btn"
+                            class="bg-blue-700 px-5 py-2 rounded-xl font-bold hover:bg-blue-600 transition text-sm whitespace-nowrap">
+                            <i class="fas fa-plus mr-1"></i> 추가
+                        </button>
                     </div>
                 </div>
+
             </div>
 
             <!-- 로그 -->
@@ -844,14 +878,69 @@
         }
 
         async function addDomain() {
-            const domain = document.getElementById('new-domain').value.trim();
-            if (!domain) { showAlert('도메인을 입력해주세요.', 'error'); return; }
-            showAlert('도메인 추가 기능은 Cloudflare API 연동 후 이용 가능합니다.', 'error');
+            const domain  = document.getElementById('new-domain').value.trim();
+            const alertEl = document.getElementById('domain-add-alert');
+            const btn     = document.getElementById('add-domain-btn');
+
+            if (!domain) { showDomainAlert('도메인을 입력해주세요.', 'error'); return; }
+
+            btn.disabled = true;
+            btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-1"></i> 추가 중...';
+
+            try {
+                const res  = await fetch('/api/domains', {
+                    method:  'POST',
+                    headers: { ...HEADERS, 'Content-Type': 'application/json' },
+                    body:    JSON.stringify({ site_id: siteId, domain }),
+                });
+                const data = await res.json();
+
+                if (data.error) {
+                    showDomainAlert(data.error, 'error');
+                } else {
+                    document.getElementById('new-domain').value = '';
+                    showDomainAlert(`✅ 도메인이 등록되었습니다. IP <strong>${escHtml(data.server_ip)}</strong>로 A 레코드를 설정하세요.`, 'success');
+                    await renderDomains();
+                }
+            } catch {
+                showDomainAlert('도메인 추가 중 오류가 발생했습니다.', 'error');
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = '<i class="fas fa-plus mr-1"></i> 추가';
+            }
+        }
+
+        function showDomainAlert(msg, type) {
+            const el = document.getElementById('domain-add-alert');
+            el.className = `p-3 rounded-xl text-sm ${type === 'error' ? 'bg-red-900/30 border border-red-500/30 text-red-400' : 'bg-green-900/30 border border-green-500/30 text-green-400'}`;
+            el.innerHTML = msg;
+            el.classList.remove('hidden');
+            setTimeout(() => el.classList.add('hidden'), 6000);
+        }
+
+        async function verifyDomain(domain) {
+            showAlert('A 레코드 확인 중...', 'info');
+            try {
+                const res  = await fetch(`/api/domains?site_id=${siteId}&domain=${encodeURIComponent(domain)}&verify=1`, { headers: HEADERS });
+                const data = await res.json();
+                showAlert(data.message || 'DNS 확인 완료', data.verified ? 'success' : 'error');
+                if (data.verified) await renderDomains();
+            } catch {
+                showAlert('DNS 확인 중 오류가 발생했습니다.', 'error');
+            }
         }
 
         async function removeDomain(id) {
             if (!confirm('이 도메인을 삭제하시겠습니까?')) return;
-            showAlert('도메인 삭제 기능은 Cloudflare API 연동 후 이용 가능합니다.', 'error');
+            try {
+                const res  = await fetch(`/api/domains?id=${id}`, { method: 'DELETE', headers: HEADERS });
+                const data = await res.json();
+                if (data.error) { showAlert(data.error, 'error'); return; }
+                showAlert('도메인이 삭제되었습니다.', 'success');
+                await renderDomains();
+            } catch {
+                showAlert('도메인 삭제 중 오류가 발생했습니다.', 'error');
+            }
         }
 
         // ── 로그 ─────────────────────────────────────────────────────────────────

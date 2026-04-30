@@ -110,14 +110,9 @@
                             class="w-full p-4 bg-white/5 border border-white/10 rounded-xl outline-none focus:border-blue-500 transition">
                     </div>
 
-                    <div class="space-y-2">
-                        <label class="text-sm text-gray-400">도메인 <span class="text-red-400">*</span></label>
-                        <input id="primary_domain" type="text" placeholder="예: myblog.com 또는 sub.myblog.com"
-                            class="w-full p-4 bg-white/5 border border-white/10 rounded-xl outline-none focus:border-blue-500 transition font-mono">
-                        <p class="text-xs text-gray-600 ml-1">
-                            <i class="fas fa-info-circle mr-1"></i>
-                            cloudflare.com 같은 루트 도메인이나 서브도메인 모두 가능합니다.
-                        </p>
+                    <div class="p-4 bg-blue-900/20 border border-blue-500/30 rounded-xl text-sm text-blue-300">
+                        <i class="fas fa-info-circle mr-2"></i>
+                        도메인은 호스팅 생성 후 <strong>호스팅 상세 &gt; 도메인 탭</strong>에서 추가할 수 있습니다.
                     </div>
                 </div>
 
@@ -197,7 +192,7 @@
                 <div class="p-5 bg-blue-900/20 border border-blue-500/30 rounded-2xl text-sm space-y-2">
                     <h3 class="font-bold text-blue-300 mb-3"><i class="fas fa-list-check mr-2"></i>생성 요약</h3>
                     <div class="flex justify-between"><span class="text-gray-400">사이트 이름</span><span id="sum-name" class="font-mono">-</span></div>
-                    <div class="flex justify-between"><span class="text-gray-400">도메인</span><span id="sum-domain" class="font-mono text-blue-300">-</span></div>
+
                     <div class="flex justify-between"><span class="text-gray-400">PHP 버전</span><span id="sum-php" class="font-mono text-indigo-300">-</span></div>
                     <div class="flex justify-between"><span class="text-gray-400">스토리지</span><span class="text-green-300">자동 할당</span></div>
                     <div class="flex justify-between"><span class="text-gray-400">SSL</span><span class="text-green-300">자동 발급</span></div>
@@ -256,8 +251,6 @@
         function goStep(n) {
             if (n === 2) {
                 const name   = document.getElementById('site_name').value.trim();
-                const domain = document.getElementById('primary_domain').value.trim();
-                if (!name)   { showAlert('사이트 이름을 입력해주세요.'); return; }
                 if (!domain) { showAlert('도메인을 입력해주세요.'); return; }
                 if (!/^[a-zA-Z0-9][a-zA-Z0-9\-\.]+\.[a-zA-Z]{2,}$/.test(domain)) {
                     showAlert('올바른 도메인 형식이 아닙니다.'); return;
@@ -266,7 +259,6 @@
             }
             if (n === 3) {
                 document.getElementById('sum-name').textContent   = document.getElementById('site_name').value;
-                document.getElementById('sum-domain').textContent = document.getElementById('primary_domain').value;
                 document.getElementById('sum-php').textContent    = `PHP ${selectedPhp}`;
             }
 
@@ -355,7 +347,7 @@
 
         async function createHosting() {
             const site_name     = document.getElementById('site_name').value.trim();
-            const primary_domain= document.getElementById('primary_domain').value.trim();
+
             const wp_admin_user = document.getElementById('wp_admin_user').value.trim();
             const wp_admin_pass = document.getElementById('wp_admin_pass').value;
             const wp_admin_email= document.getElementById('wp_admin_email').value.trim();
@@ -375,7 +367,7 @@
                     method:  'POST',
                     headers: HEADERS,
                     body:    JSON.stringify({
-                        site_name, primary_domain,
+                        site_name, // 도메인은 상세에서 추가
                         php_version: selectedPhp,
                         wp_admin_user, wp_admin_pass, wp_admin_email,
                     }),
@@ -385,7 +377,7 @@
                 if (res.ok && data.success) {
                     [1, 2, 3].forEach(i => document.getElementById(`step-${i}`).classList.add('hidden'));
                     document.getElementById('step-done').classList.remove('hidden');
-                    document.getElementById('done-domain').textContent = `https://${primary_domain}`;
+                    document.getElementById('done-domain').textContent = '호스팅 상세에서 도메인을 추가하세요';
                     document.getElementById('done-detail-link').href = `/hosting-detail.html?id=${data.id}`;
                 } else {
                     showAlert(data.error || '호스팅 생성에 실패했습니다.');

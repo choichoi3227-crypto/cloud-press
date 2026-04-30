@@ -105,15 +105,14 @@ export async function onRequestPost(context) {
 
   const {
     site_name,
-    primary_domain,
     php_version = "8.2",
     wp_admin_user,
     wp_admin_pass,
     wp_admin_email,
   } = body;
 
-  if (!site_name || !primary_domain)
-    return jsonErr("사이트 이름과 도메인을 입력해주세요.", 400);
+  if (!site_name)
+    return jsonErr("사이트 이름을 입력해주세요.", 400);
   if (!wp_admin_user || !wp_admin_pass)
     return jsonErr("WordPress 관리자 아이디와 비밀번호를 입력해주세요.", 400);
   if (!wp_admin_email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(wp_admin_email))
@@ -138,16 +137,7 @@ export async function onRequestPost(context) {
       );
     }
 
-    // 커스텀 도메인 제한 (free 플랜)
-    if (!limits.custom_domain) {
-      // free 플랜은 .cloudpress.app 서브도메인만 허용
-      if (!primary_domain.endsWith(".cloudpress.app")) {
-        return jsonErr(
-          `무료(Free) 플랜에서는 커스텀 도메인을 사용할 수 없습니다. .cloudpress.app 도메인을 사용하거나 플랜을 업그레이드하세요.`,
-          403
-        );
-      }
-    }
+    // 도메인은 호스팅 상세에서 별도 추가 (생성 시 불필요)
   } catch (e) {
     console.error("[sites/post] plan check:", e);
   }
@@ -198,15 +188,19 @@ export async function onRequestPost(context) {
     const sshPort = 2200 + Math.floor(Math.random() * 8000);
     const sftpPort = sshPort + 1;
 
-    // DB 이름/사용자는 UUID 기반 생성 (실제 DB 프로비저닝 시 활용)
+    // 임시 내부 도메인 (실제 도메인은 호스팅 상세에서 추가)
+    const shortId       = id.replace(/-/g, "").slice(0, 8);
+    const internal_host = `${shortId}.internal.cloudpress.app`;
+
+    // DB 이름/사용자는 UUID 기반 생성
     const dbName  = `wp_${id.replace(/-/g, "").slice(0, 16)}`;
     const dbUser  = `u_${id.replace(/-/g, "").slice(0, 12)}`;
     const dbPass  = crypto.randomUUID().replace(/-/g, "");
     const dbHost  = env.DEFAULT_DB_HOST || "localhost";
 
-    // WP-CLI 설치 스크립트 생성
+    // WP-CLI 설치 스크립트 생성 (임시 도메인으로)
     const wpScript = buildWpCliScript({
-      domain:     primary_domain,
+      domain:     internal_host,
       adminUser:  wp_admin_user,
       adminPass:  wp_admin_pass,
       adminEmail: wp_admin_email,
@@ -226,7 +220,7 @@ export async function onRequestPost(context) {
          wp_install_script, cache_enabled, created_at)
        VALUES (?, ?, ?, ?, ?, 'provisioning', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)`
     ).bind(
-      id, payload.id, site_name, primary_domain, php_version,
+      id, payload.id, site_name, internal_host, php_version,
       bucketName,        // NULL이어도 OK
       supabaseAccountNo, // NULL이어도 OK
       sshPort, sftpPort,
@@ -236,10 +230,7 @@ export async function onRequestPost(context) {
       new Date().toISOString()
     ).run();
 
-    // 기본 도메인 별칭 등록
-    await env.DB.prepare(
-      "INSERT INTO domain_aliases (site_id, domain, is_primary) VALUES (?, ?, 1)"
-    ).bind(id, primary_domain).run();
+    // 도메인은 호스팅 상세 > 도메인 탭에서 별도 추가
 
     // WP 설치 작업을 큐에 등록 (INSTALL_QUEUE KV가 있을 때만)
     if (env.INSTALL_QUEUE) {
@@ -257,13 +248,13 @@ export async function onRequestPost(context) {
     }
 
     return jsonOk({
-      success:    true,
+      success:       true,
       id,
-      message:    "호스팅이 생성되었습니다. WordPress 설치가 진행 중입니다.",
-      ssh_port:   sshPort,
-      sftp_port:  sftpPort,
-      bucket:     bucketName,     // null이면 Supabase 미연결 상태
-      has_supabase: !!bucketName,
+      message:       "호스팅이 생성되었습니다. 호스팅 상세 > 도메인 탭에서 도메인을 추가하세요.",
+      ssh_port:      sshPort,
+      sftp_port:     sftpPort,
+      has_supabase:  !!bucketName,
+      internal_host,
     });
   } catch (e) {
     return jsonErr("호스팅 생성 오류: " + e.message, 500);

@@ -375,7 +375,7 @@
                 if (res.ok && data.success) {
                     [1, 2, 3].forEach(i => document.getElementById(`step-${i}`).classList.add('hidden'));
                     document.getElementById('step-done').classList.remove('hidden');
-                    document.getElementById('done-domain').textContent = '호스팅 상세에서 도메인을 추가하세요';
+                    document.getElementById('done-domain').textContent = 'Cloudflare Worker/D1/KV 및 Supabase 버킷이 자동 생성 중입니다. 도메인 탭에서 커스텀 도메인을 연결하세요.';
                     document.getElementById('done-detail-link').href = `/hosting-detail.html?id=${data.id}`;
                 } else {
                     showAlert(data.error || '호스팅 생성에 실패했습니다.');

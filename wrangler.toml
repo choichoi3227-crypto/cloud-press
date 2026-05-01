@@ -37,18 +37,26 @@ id      = "19e5e273e99941fbb963300e56dbdf9e"
 binding = "CACHE"
 id      = "9b8370d20a9646b9aa73f63c9200379f"
 
+# ── KV: WP 설치 작업 큐 ──────────────────────────────────────────────────────────
+[[kv_namespaces]]
+binding = "INSTALL_QUEUE"
+id      = "INSTALL_QUEUE_KV_ID_여기에_입력"
+
 # ── 환경 변수 ────────────────────────────────────────────────────────────────────
 # 아래 secret들은 반드시 wrangler secret put 으로 주입하세요:
-#   wrangler secret put JWT_SECRET
-#   wrangler secret put SUPABASE_URL
-#   wrangler secret put SUPABASE_KEY
-#   wrangler secret put SUPABASE_URL2
-#   wrangler secret put SUPABASE_KEY2
+#   wrangler secret put JWT_SECRET        ← 필수 (JWT 서명 키)
+#   wrangler secret put SERVER_IP           ← 필수 (서버 공인 IP, 도메인 A레코드 대상)
+#   wrangler secret put SUPABASE_URL        ← 스토리지용
+#   wrangler secret put SUPABASE_KEY        ← 스토리지용
+#   wrangler secret put SUPABASE_URL2       ← 보조 스토리지
+#   wrangler secret put SUPABASE_KEY2       ← 보조 스토리지
+#   wrangler secret put DEFAULT_DB_HOST     ← WordPress DB 호스트
 #   wrangler secret put PURGE_KEY
 #   wrangler secret put ENCRYPTION_KEY
-#   wrangler secret put CF_API_TOKEN
 [vars]
-CF_ACCOUNT_ID = ""
+CF_ACCOUNT_ID  = ""
+DEFAULT_DB_HOST = "127.0.0.1"
+# SERVER_IP — wrangler secret put SERVER_IP (실제 서버 공인 IP)
 
 # ── CPU 한도 ─────────────────────────────────────────────────────────────────────
 [limits]

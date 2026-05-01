@@ -1,0 +1,13 @@
+# CloudPress PHP Runner Worker
+# wrangler deploy --config wrangler-php.toml
+
+name = "cloudpress-php"
+main = "php-runner.js"
+compatibility_date = "2025-04-01"
+compatibility_flags = ["nodejs_compat"]
+
+[limits]
+cpu_ms = 50000
+
+[dev]
+port = 8789

@@ -530,9 +530,11 @@
                 document.getElementById('site-domain').querySelector('span').textContent = site.primary_domain;
 
                 const statusMap = {
-                    active: { cls: 'bg-green-900/30 border-green-500/50 text-green-400', label: '운영 중' },
-                    suspended: { cls: 'bg-red-900/30 border-red-500/50 text-red-400', label: '중단됨' },
-                    creating:  { cls: 'bg-blue-900/30 border-blue-500/50 text-blue-400', label: '생성 중' },
+                    active:       { cls: 'bg-green-900/30 border-green-500/50 text-green-400', label: '운영 중' },
+                    suspended:    { cls: 'bg-red-900/30 border-red-500/50 text-red-400', label: '중단됨' },
+                    creating:     { cls: 'bg-blue-900/30 border-blue-500/50 text-blue-400', label: '생성 중' },
+                    provisioning: { cls: 'bg-yellow-900/30 border-yellow-500/50 text-yellow-400', label: '⏳ 설치 중' },
+                    error:        { cls: 'bg-red-900/30 border-red-500/50 text-red-400', label: '❌ 오류' },
                 };
                 const s = statusMap[site.status] || statusMap.creating;
                 const badge = document.getElementById('site-status-badge');
@@ -553,7 +555,7 @@
                 document.getElementById('info-domain').textContent  = site.primary_domain;
                 document.getElementById('info-ssh').textContent     = site.ssh_port || '-';
                 document.getElementById('info-sftp').textContent    = site.sftp_port || '-';
-                document.getElementById('info-bucket').textContent  = site.supabase_bucket || '미할당';
+                document.getElementById('info-bucket').textContent  = site.supabase_bucket || (site.status === 'provisioning' ? '⏳ 자동 생성 중...' : '미연결 (Supabase 설정 필요)');
                 document.getElementById('info-wpadmin').textContent = site.wp_admin_user || '-';
 
                 // PHP 현재 버전 배지
@@ -563,6 +565,25 @@
                 // 캐시 설정 초기화
                 document.getElementById('cache-toggle').checked = !!site.cache_enabled;
                 document.getElementById('cache-ttl').value = site.cache_ttl || 3600;
+
+                // ── 프로비저닝 중이면 자동 갱신 ──────────────────────────────
+                if (site.status === 'provisioning' || site.status === 'creating') {
+                    if (!window._provisioningPoll) {
+                        window._provisioningPoll = setInterval(async () => {
+                            await loadSiteInfo();
+                            if (siteData && siteData.status === 'active') {
+                                clearInterval(window._provisioningPoll);
+                                window._provisioningPoll = null;
+                                showAlert('✅ 호스팅 생성이 완료되었습니다!', 'success');
+                            }
+                        }, 4000);
+                    }
+                } else {
+                    if (window._provisioningPoll) {
+                        clearInterval(window._provisioningPoll);
+                        window._provisioningPoll = null;
+                    }
+                }
 
             } catch (e) {
                 console.error('[detail] 로드 실패:', e);

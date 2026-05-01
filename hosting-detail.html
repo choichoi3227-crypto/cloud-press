@@ -327,29 +327,24 @@
             <!-- 도메인 -->
             <div id="tab-domain" class="tab-content hidden space-y-4">
 
-                <!-- 서버 IP 안내 카드 -->
+                <!-- Cloudflare 네임서버 방식 안내 -->
                 <div class="section-card bg-blue-900/20 border-blue-500/30 space-y-3">
                     <h3 class="font-bold flex items-center gap-2 text-blue-300">
-                        <i class="fas fa-network-wired"></i> DNS 설정 안내
+                        <i class="fas fa-server"></i> Cloudflare 네임서버 인증 방식
                     </h3>
                     <p class="text-sm text-gray-400">
-                        도메인을 이 호스팅에 연결하려면 도메인 DNS에서 아래 IP로 <strong class="text-white">A 레코드</strong>를 추가하세요.<br>
-                        A 레코드 설정 후 <strong class="text-green-400">[A레코드 확인]</strong> 버튼을 누르면 자동으로 활성화됩니다.
+                        도메인을 등록하면 <strong class="text-white">Cloudflare Zone이 자동 생성</strong>되며 네임서버(NS) 정보가 제공됩니다.<br>
+                        도메인 등록기(가비아, 후이즈, GoDaddy 등)에서 네임서버를 Cloudflare NS로 변경하면 자동 활성화됩니다.
                     </p>
-                    <div class="flex items-center gap-3 p-3 bg-black/30 border border-blue-500/20 rounded-xl">
-                        <div>
-                            <p class="text-xs text-gray-500 mb-1">이 호스팅의 공개 IP (Cloudflare Anycast)</p>
-                            <p id="server-ip-display" class="font-mono text-xl font-bold text-white">로딩 중...</p>
+                    <div class="flex items-start gap-3 p-3 bg-black/30 border border-blue-500/20 rounded-xl">
+                        <i class="fas fa-shield-alt text-blue-400 mt-1 text-lg"></i>
+                        <div class="text-xs text-gray-400 space-y-1.5">
+                            <p class="text-white font-semibold">인증 절차</p>
+                            <p>① 아래 입력란에 도메인 입력 후 [추가] 클릭</p>
+                            <p>② 제공된 <strong class="text-white">Cloudflare 네임서버 2개</strong>를 도메인 등록기에서 변경</p>
+                            <p>③ [네임서버 확인] 버튼으로 전환 완료 확인</p>
+                            <p class="text-yellow-400"><i class="fas fa-clock mr-1"></i> DNS 전파는 최대 24~48시간 소요됩니다.</p>
                         </div>
-                        <button onclick="copyServerIp()" class="ml-auto text-xs border border-white/20 px-3 py-2 rounded-xl hover:bg-white/5 transition">
-                            <i class="fas fa-copy mr-1"></i> 복사
-                        </button>
-                    </div>
-                    <div class="text-xs text-gray-500 space-y-1">
-                        <p><i class="fas fa-info-circle mr-1 text-blue-400"></i> 레코드 유형: <strong class="text-white">A</strong></p>
-                        <p><i class="fas fa-info-circle mr-1 text-blue-400"></i> 이름(Name): <strong class="text-white">@ (루트) 또는 www</strong></p>
-                        <p><i class="fas fa-info-circle mr-1 text-blue-400"></i> 값(Value): <strong class="text-white" id="server-ip-inline">-</strong></p>
-                        <p><i class="fas fa-info-circle mr-1 text-blue-400"></i> TTL: <strong class="text-white">Auto (또는 300)</strong></p>
                     </div>
                 </div>
 
@@ -371,7 +366,7 @@
                         <i class="fas fa-plus-circle text-green-400"></i> 도메인 추가
                     </h3>
                     <p class="text-xs text-gray-500">
-                        추가 후 위의 IP로 A 레코드를 설정하면 자동으로 활성화됩니다.
+                        추가하면 Cloudflare Zone이 자동 생성되고 네임서버 정보가 제공됩니다.
                     </p>
                     <div id="domain-add-alert" class="hidden p-3 rounded-xl text-sm"></div>
                     <div class="flex gap-3">
@@ -389,14 +384,33 @@
             <!-- 로그 -->
             <div id="tab-logs" class="tab-content hidden space-y-4">
                 <div class="section-card">
-                    <div class="flex justify-between items-center mb-4">
-                        <h3 class="font-bold flex items-center gap-2"><i class="fas fa-scroll text-gray-400"></i> PHP / 시스템 로그</h3>
-                        <button onclick="loadLogs()"
-                            class="text-xs border border-white/20 px-3 py-1.5 rounded-xl hover:bg-white/5 transition">
-                            <i class="fas fa-refresh mr-1"></i> 새로고침
-                        </button>
+                    <div class="flex flex-wrap justify-between items-center gap-3 mb-4">
+                        <div class="flex items-center gap-3">
+                            <h3 class="font-bold flex items-center gap-2"><i class="fas fa-scroll text-gray-400"></i> 시스템 로그</h3>
+                            <div class="flex gap-1" id="log-level-btns">
+                                <button onclick="loadLogs()" class="text-xs px-2 py-1 rounded-lg bg-white/10 text-white transition log-filter-btn" data-level="">전체</button>
+                                <button onclick="loadLogs('info')" class="text-xs px-2 py-1 rounded-lg bg-white/5 text-blue-400 hover:bg-white/10 transition log-filter-btn" data-level="info">INFO</button>
+                                <button onclick="loadLogs('warning')" class="text-xs px-2 py-1 rounded-lg bg-white/5 text-yellow-400 hover:bg-white/10 transition log-filter-btn" data-level="warning">WARN</button>
+                                <button onclick="loadLogs('error')" class="text-xs px-2 py-1 rounded-lg bg-white/5 text-red-400 hover:bg-white/10 transition log-filter-btn" data-level="error">ERROR</button>
+                            </div>
+                        </div>
+                        <div class="flex gap-2">
+                            <button onclick="loadLogs(currentLogLevel)"
+                                class="text-xs border border-white/20 px-3 py-1.5 rounded-xl hover:bg-white/5 transition">
+                                <i class="fas fa-refresh mr-1"></i> 새로고침
+                            </button>
+                            <button onclick="clearLogs()"
+                                class="text-xs border border-red-500/30 text-red-400 px-3 py-1.5 rounded-xl hover:bg-red-900/20 transition">
+                                <i class="fas fa-trash mr-1"></i> 전체 삭제
+                            </button>
+                        </div>
                     </div>
-                    <div id="log-list" class="space-y-2 max-h-96 overflow-y-auto">
+                    <div id="log-meta" class="flex gap-3 mb-3 text-xs hidden">
+                        <span class="text-blue-400"><i class="fas fa-info-circle mr-1"></i><span id="log-cnt-info">0</span> INFO</span>
+                        <span class="text-yellow-400"><i class="fas fa-exclamation-triangle mr-1"></i><span id="log-cnt-warning">0</span> WARN</span>
+                        <span class="text-red-400"><i class="fas fa-times-circle mr-1"></i><span id="log-cnt-error">0</span> ERROR</span>
+                    </div>
+                    <div id="log-list" class="space-y-2 max-h-[500px] overflow-y-auto">
                         <div class="text-center py-6 text-gray-500 text-sm">
                             <i class="fas fa-spinner fa-spin mr-2"></i> 로그 로딩 중...
                         </div>
@@ -855,7 +869,6 @@
         // ── 도메인 ────────────────────────────────────────────────────────────
         function renderDomains() {
             if (!siteData) return;
-            // 실제 도메인 목록은 /api/sites?id= 응답에 포함됨
             fetch(`/api/sites?id=${siteId}`, { headers: HEADERS })
                 .then(r => r.json())
                 .then(data => {
@@ -865,18 +878,35 @@
                         el.innerHTML = '<p class="text-sm text-gray-500 text-center py-3">등록된 도메인이 없습니다.</p>';
                         return;
                     }
-                    el.innerHTML = domains.map(d => `
-                        <div class="flex items-center justify-between p-3 bg-white/5 border border-white/10 rounded-xl text-sm">
-                            <div class="flex items-center gap-3">
-                                <span class="font-mono text-blue-300">${escHtml(d.domain)}</span>
-                                ${d.is_primary ? '<span class="text-xs bg-blue-900/40 border border-blue-500/30 text-blue-300 px-2 py-0.5 rounded-full">기본</span>' : ''}
-                                <span class="text-xs ${d.cf_ssl_status === 'active' ? 'text-green-400' : 'text-yellow-400'}">
-                                    <i class="fas fa-lock mr-1"></i>${d.cf_ssl_status || 'pending'}
-                                </span>
+                    el.innerHTML = domains.map(d => {
+                        const isActive  = d.cf_ssl_status === 'active';
+                        const nsArr     = d.cf_nameservers ? d.cf_nameservers.split(',').filter(Boolean) : [];
+                        const nsHtml    = nsArr.length
+                            ? `<div class="mt-2 p-2 bg-black/30 border border-yellow-500/20 rounded-lg text-xs text-yellow-300 space-y-0.5">
+                                <p class="font-semibold text-gray-400">네임서버를 아래로 변경하세요:</p>
+                                ${nsArr.map(ns => `<p class="font-mono">• ${escHtml(ns)}</p>`).join('')}
+                               </div>`
+                            : '';
+                        return `
+                        <div class="p-3 bg-white/5 border border-white/10 rounded-xl text-sm space-y-1">
+                            <div class="flex items-center justify-between">
+                                <div class="flex items-center gap-2 flex-wrap">
+                                    <span class="font-mono text-blue-300">${escHtml(d.domain)}</span>
+                                    ${d.is_primary ? '<span class="text-xs bg-blue-900/40 border border-blue-500/30 text-blue-300 px-2 py-0.5 rounded-full">기본</span>' : ''}
+                                    <span class="text-xs ${isActive ? 'text-green-400' : 'text-yellow-400'}">
+                                        <i class="fas fa-${isActive ? 'check-circle' : 'clock'} mr-1"></i>${isActive ? '활성' : '네임서버 변경 대기'}
+                                    </span>
+                                </div>
+                                <div class="flex gap-2">
+                                    ${!isActive ? `<button onclick="verifyDomain('${escHtml(d.domain)}')" class="text-xs bg-blue-900/40 border border-blue-500/30 text-blue-300 px-2 py-1 rounded-lg hover:bg-blue-800/40 transition">
+                                        <i class="fas fa-check mr-1"></i>네임서버 확인
+                                    </button>` : ''}
+                                    ${!d.is_primary ? `<button onclick="removeDomain(${d.id})" class="text-red-400 hover:text-red-300 transition text-xs p-1"><i class="fas fa-trash"></i></button>` : ''}
+                                </div>
                             </div>
-                            ${!d.is_primary ? `<button onclick="removeDomain(${d.id})" class="text-red-400 hover:text-red-300 transition text-xs"><i class="fas fa-trash"></i></button>` : ''}
-                        </div>
-                    `).join('');
+                            ${!isActive ? nsHtml : ''}
+                        </div>`;
+                    }).join('');
                 }).catch(() => {});
         }
 
@@ -902,7 +932,10 @@
                     showDomainAlert(data.error, 'error');
                 } else {
                     document.getElementById('new-domain').value = '';
-                    showDomainAlert(`✅ 도메인이 등록되었습니다. IP <strong>${escHtml(data.server_ip)}</strong>로 A 레코드를 설정하세요.`, 'success');
+                    const nsText = data.nameservers && data.nameservers.length
+                            ? `<br><br><strong>네임서버를 아래로 변경하세요:</strong><br>${data.nameservers.map(ns => `• <code>${ns}</code>`).join('<br>')}`
+                            : '';
+                    showDomainAlert(`✅ 도메인이 등록되었습니다. Cloudflare Zone이 생성되었습니다.${nsText}`, 'success');
                     await renderDomains();
                 }
             } catch {
@@ -922,14 +955,15 @@
         }
 
         async function verifyDomain(domain) {
-            showAlert('A 레코드 확인 중...', 'info');
+            showAlert('Cloudflare 네임서버 전환 확인 중...', 'info');
             try {
                 const res  = await fetch(`/api/domains?site_id=${siteId}&domain=${encodeURIComponent(domain)}&verify=1`, { headers: HEADERS });
                 const data = await res.json();
-                showAlert(data.message || 'DNS 확인 완료', data.verified ? 'success' : 'error');
+                const type = data.verified ? 'success' : 'info';
+                showAlert(data.message || '네임서버 확인 완료', type);
                 if (data.verified) await renderDomains();
             } catch {
-                showAlert('DNS 확인 중 오류가 발생했습니다.', 'error');
+                showAlert('네임서버 확인 중 오류가 발생했습니다.', 'error');
             }
         }
 
@@ -947,28 +981,66 @@
         }
 
         // ── 로그 ─────────────────────────────────────────────────────────────────
-        async function loadLogs() {
+        let currentLogLevel = '';
+
+        async function loadLogs(level) {
+            if (level !== undefined) currentLogLevel = level || '';
             const el = document.getElementById('log-list');
             el.innerHTML = '<div class="text-center py-6 text-gray-500 text-sm"><i class="fas fa-spinner fa-spin mr-2"></i> 로딩 중...</div>';
+
+            // 필터 버튼 활성화
+            document.querySelectorAll('.log-filter-btn').forEach(btn => {
+                const isActive = btn.dataset.level === currentLogLevel;
+                btn.className = `text-xs px-2 py-1 rounded-lg transition log-filter-btn ${
+                    isActive ? 'bg-white/10 text-white' : 'bg-white/5 hover:bg-white/10 ' +
+                    (btn.dataset.level === 'info' ? 'text-blue-400' :
+                     btn.dataset.level === 'warning' ? 'text-yellow-400' :
+                     btn.dataset.level === 'error' ? 'text-red-400' : 'text-gray-400')
+                }`;
+            });
+
             try {
-                const res  = await fetch(`/api/logs?site_id=${siteId}`, { headers: HEADERS });
+                const params = new URLSearchParams({ site_id: siteId, limit: '200' });
+                if (currentLogLevel) params.set('level', currentLogLevel);
+                const res  = await fetch(`/api/logs?${params}`, { headers: HEADERS });
                 const data = await res.json();
                 const logs = data.logs || [];
+
+                // 레벨 카운트 표시
+                const meta = data.meta?.level_counts;
+                if (meta) {
+                    document.getElementById('log-cnt-info').textContent    = meta.info    || 0;
+                    document.getElementById('log-cnt-warning').textContent = meta.warning || 0;
+                    document.getElementById('log-cnt-error').textContent   = meta.error   || 0;
+                    document.getElementById('log-meta').classList.remove('hidden');
+                }
+
                 if (!logs.length) {
                     el.innerHTML = '<p class="text-sm text-gray-500 text-center py-6">로그가 없습니다.</p>';
                     return;
                 }
-                el.innerHTML = logs.map(l => {
-                    const lvlMap = { error: 'text-red-400', warning: 'text-yellow-400', info: 'text-blue-400' };
-                    return `
-                    <div class="p-3 bg-black/30 border border-white/5 rounded-xl text-xs font-mono">
-                        <span class="${lvlMap[l.level] || 'text-gray-400'} font-bold mr-2">[${(l.level || 'info').toUpperCase()}]</span>
-                        <span class="text-gray-500 mr-2">${new Date(l.created_at).toLocaleString('ko-KR')}</span>
-                        <span class="text-gray-300">${escHtml(l.message)}</span>
-                    </div>`;
-                }).join('');
+                const lvlMap = { error: 'text-red-400', warning: 'text-yellow-400', info: 'text-blue-400' };
+                el.innerHTML = logs.map(l => `
+                    <div class="p-3 bg-black/30 border border-white/5 rounded-xl text-xs font-mono flex gap-2 items-start">
+                        <span class="${lvlMap[l.level] || 'text-gray-400'} font-bold shrink-0">[${(l.level || 'info').toUpperCase()}]</span>
+                        <span class="text-gray-500 shrink-0">${new Date(l.created_at).toLocaleString('ko-KR')}</span>
+                        <span class="text-gray-300 break-all">${escHtml(l.message)}</span>
+                    </div>`).join('');
             } catch {
                 el.innerHTML = '<p class="text-sm text-red-400 text-center py-6">로그를 불러오지 못했습니다.</p>';
+            }
+        }
+
+        async function clearLogs() {
+            if (!confirm('모든 로그를 삭제하시겠습니까?')) return;
+            try {
+                const res  = await fetch(`/api/logs?site_id=${siteId}`, { method: 'DELETE', headers: HEADERS });
+                const data = await res.json();
+                if (data.error) { showAlert(data.error, 'error'); return; }
+                showAlert(data.message || '로그가 삭제되었습니다.', 'success');
+                await loadLogs();
+            } catch {
+                showAlert('로그 삭제 중 오류가 발생했습니다.', 'error');
             }
         }
 

@@ -292,40 +292,11 @@
             <!-- SSH / SFTP -->
             <div id="tab-ssh" class="tab-content hidden space-y-4">
                 <!-- SSH 접속 정보 -->
-                <div class="section-card space-y-4">
-                    <h3 class="font-bold flex items-center gap-2"><i class="fas fa-terminal text-cyan-400"></i> SSH 접속</h3>
-                    <div class="bg-black/40 rounded-xl p-4 font-mono text-sm">
-                        <div class="text-gray-500 text-xs mb-2"># SSH 접속 명령어</div>
-                        <div id="ssh-cmd" class="text-green-400 break-all">로딩 중...</div>
-                        <button onclick="copyText('ssh-cmd')" class="copy-btn mt-2 text-xs text-gray-500 hover:text-white transition">
-                            <i class="fas fa-copy mr-1"></i> 복사
-                        </button>
-                    </div>
-
-                    <div class="bg-black/40 rounded-xl p-4 font-mono text-sm">
-                        <div class="text-gray-500 text-xs mb-2"># SFTP 접속 명령어</div>
-                        <div id="sftp-cmd" class="text-cyan-400 break-all">로딩 중...</div>
-                        <button onclick="copyText('sftp-cmd')" class="copy-btn mt-2 text-xs text-gray-500 hover:text-white transition">
-                            <i class="fas fa-copy mr-1"></i> 복사
-                        </button>
-                    </div>
-
-                    <div class="grid grid-cols-2 gap-3 text-sm">
-                        <div class="bg-white/5 rounded-xl p-3">
-                            <div class="text-gray-500 text-xs mb-1">SSH 호스트</div>
-                            <div id="ssh-host" class="font-mono text-xs">-</div>
-                        </div>
-                        <div class="bg-white/5 rounded-xl p-3">
-                            <div class="text-gray-500 text-xs mb-1">SSH 포트</div>
-                            <div id="ssh-port" class="font-mono text-xs">-</div>
-                        </div>
-                        <div class="bg-white/5 rounded-xl p-3">
-                            <div class="text-gray-500 text-xs mb-1">SFTP 포트</div>
-                            <div id="sftp-port" class="font-mono text-xs">-</div>
-                        </div>
-                        <div class="bg-white/5 rounded-xl p-3">
-                            <div class="text-gray-500 text-xs mb-1">루트 경로</div>
-                            <div class="font-mono text-xs">/var/www/html</div>
+                <div id="ssh-info-card" class="section-card space-y-4">
+                    <h3 class="font-bold flex items-center gap-2"><i class="fas fa-terminal text-cyan-400"></i> SSH / SFTP 접속</h3>
+                    <div id="ssh-info-content">
+                        <div class="text-center py-6 text-gray-500 text-sm">
+                            <i class="fas fa-spinner fa-spin mr-2"></i> 접속 정보 로딩 중...
                         </div>
                     </div>
                 </div>
@@ -333,13 +304,12 @@
                 <!-- SSH 공개키 등록 -->
                 <div class="section-card space-y-4">
                     <h3 class="font-bold flex items-center gap-2"><i class="fas fa-key text-yellow-400"></i> SSH 공개키 관리</h3>
-
+                    <p class="text-xs text-gray-500">등록한 공개키로 비밀번호 없이 SSH/SFTP 접속이 가능합니다.</p>
                     <div id="ssh-keys-list" class="space-y-2 mb-4">
                         <div class="text-center py-4 text-gray-500 text-sm">
                             <i class="fas fa-spinner fa-spin mr-2"></i> 키 목록 로딩 중...
                         </div>
                     </div>
-
                     <div class="border-t border-white/10 pt-4 space-y-3">
                         <p class="text-sm font-bold">공개키 등록</p>
                         <input id="key-name" type="text" placeholder="키 이름 (예: MacBook)"
@@ -537,6 +507,7 @@
                 if (!data.success) { showAlert('사이트를 찾을 수 없습니다.', 'error'); return; }
 
                 siteData = data.site;
+                siteData._domains = data.domains || [];
                 const site = siteData;
 
                 // 헤더 업데이트
@@ -781,41 +752,73 @@
 
         // ── SSH 정보 ────────────────────────────────────────────────────────────
         async function loadSshInfo() {
+            // SSH 키 목록 로드
             try {
                 const res  = await fetch(`/api/ssh-keys?site_id=${siteId}`, { headers: HEADERS });
                 const data = await res.json();
-                if (data.success) {
-                    const keys = data.keys || [];
-                    const el   = document.getElementById('ssh-keys-list');
-                    if (!keys.length) {
-                        el.innerHTML = '<p class="text-sm text-gray-500 text-center py-3">등록된 SSH 키가 없습니다.</p>';
-                    } else {
-                        el.innerHTML = keys.map(k => `
-                            <div class="flex items-center justify-between p-3 bg-white/5 border border-white/10 rounded-xl text-sm">
-                                <div>
-                                    <p class="font-bold">${escHtml(k.key_name)}</p>
-                                    <p class="text-xs text-gray-500">${new Date(k.created_at).toLocaleDateString('ko-KR')}</p>
-                                </div>
-                                <button onclick="deleteSshKey(${k.id})" class="text-red-400 hover:text-red-300 transition text-xs">
-                                    <i class="fas fa-trash mr-1"></i> 삭제
-                                </button>
+                const keys = data.keys || [];
+                const el   = document.getElementById('ssh-keys-list');
+                if (!keys.length) {
+                    el.innerHTML = '<p class="text-sm text-gray-500 text-center py-3">등록된 SSH 키가 없습니다.</p>';
+                } else {
+                    el.innerHTML = keys.map(k => `
+                        <div class="flex items-center justify-between p-3 bg-white/5 border border-white/10 rounded-xl text-sm">
+                            <div>
+                                <p class="font-bold">${escHtml(k.key_name)}</p>
+                                <p class="text-xs text-gray-500">${new Date(k.created_at).toLocaleDateString('ko-KR')}</p>
                             </div>
-                        `).join('');
-                    }
+                            <button onclick="deleteSshKey(${k.id})" class="text-red-400 hover:text-red-300 transition text-xs">
+                                <i class="fas fa-trash mr-1"></i> 삭제
+                            </button>
+                        </div>
+                    `).join('');
                 }
             } catch {}
 
             if (!siteData) return;
             const site = siteData;
-            const sshUser = `wp-${site.id.slice(0, 8)}`;
-            const sshCmd  = `ssh -p ${site.ssh_port || 22} ${sshUser}@${site.primary_domain}`;
-            const sftpCmd = `sftp -P ${site.sftp_port || 2222} ${sshUser}@${site.primary_domain}`;
+            const infoEl = document.getElementById('ssh-info-content');
 
-            document.getElementById('ssh-cmd').textContent  = sshCmd;
-            document.getElementById('sftp-cmd').textContent = sftpCmd;
-            document.getElementById('ssh-host').textContent = site.primary_domain;
-            document.getElementById('ssh-port').textContent = site.ssh_port || 22;
-            document.getElementById('sftp-port').textContent= site.sftp_port || 2222;
+            // 활성 도메인이 있는 경우에만 SSH 정보 표시
+            const activeDomains = (siteData._domains || []).filter(d => d.cf_ssl_status === 'active');
+            const sshHost = activeDomains.length > 0 ? activeDomains[0].domain : null;
+
+            if (!sshHost) {
+                infoEl.innerHTML = `
+                    <div class="p-4 bg-yellow-900/20 border border-yellow-500/30 rounded-xl text-sm text-yellow-300">
+                        <i class="fas fa-exclamation-triangle mr-2"></i>
+                        SSH/SFTP 접속은 <strong>도메인 탭에서 도메인을 추가하고 A레코드를 활성화</strong>한 후 이용할 수 있습니다.
+                    </div>`;
+                return;
+            }
+
+            const sshUser = `wp-${site.id.slice(0, 8)}`;
+            const sshPort  = site.ssh_port || 22;
+            const sftpPort = site.sftp_port || 2222;
+            const sshCmd   = `ssh -p ${sshPort} ${sshUser}@${sshHost}`;
+            const sftpCmd  = `sftp -P ${sftpPort} ${sshUser}@${sshHost}`;
+
+            infoEl.innerHTML = `
+                <div class="bg-black/40 rounded-xl p-4 font-mono text-sm mb-3">
+                    <div class="text-gray-500 text-xs mb-2"># SSH 접속 명령어</div>
+                    <div id="ssh-cmd" class="text-green-400 break-all">${escHtml(sshCmd)}</div>
+                    <button onclick="copyText('ssh-cmd')" class="mt-2 text-xs text-gray-500 hover:text-white transition">
+                        <i class="fas fa-copy mr-1"></i> 복사
+                    </button>
+                </div>
+                <div class="bg-black/40 rounded-xl p-4 font-mono text-sm mb-3">
+                    <div class="text-gray-500 text-xs mb-2"># SFTP 접속 명령어</div>
+                    <div id="sftp-cmd" class="text-cyan-400 break-all">${escHtml(sftpCmd)}</div>
+                    <button onclick="copyText('sftp-cmd')" class="mt-2 text-xs text-gray-500 hover:text-white transition">
+                        <i class="fas fa-copy mr-1"></i> 복사
+                    </button>
+                </div>
+                <div class="grid grid-cols-2 gap-3 text-sm">
+                    <div class="bg-white/5 rounded-xl p-3"><div class="text-gray-500 text-xs mb-1">호스트</div><div class="font-mono text-xs">${escHtml(sshHost)}</div></div>
+                    <div class="bg-white/5 rounded-xl p-3"><div class="text-gray-500 text-xs mb-1">SSH 포트</div><div class="font-mono text-xs">${sshPort}</div></div>
+                    <div class="bg-white/5 rounded-xl p-3"><div class="text-gray-500 text-xs mb-1">SFTP 포트</div><div class="font-mono text-xs">${sftpPort}</div></div>
+                    <div class="bg-white/5 rounded-xl p-3"><div class="text-gray-500 text-xs mb-1">사용자</div><div class="font-mono text-xs">${escHtml(sshUser)}</div></div>
+                </div>`;
         }
 
         async function addSshKey() {

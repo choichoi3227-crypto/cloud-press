@@ -3,102 +3,155 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>CloudPress Admin Panel</title>
+    <title>CloudPress Admin</title>
     <link rel="stylesheet" href="/style.css">
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
 </head>
-<body class="flex h-screen bg-[#050505] text-white">
-    <script>
-        // 클라이언트 측 인증 체크
-        const token = localStorage.getItem('admin_token');
-        if (!token) {
-            window.location.href = '/login.html';
+<body class="bg-[#050505] text-white md:flex md:h-screen">
+<script>
+    const token = localStorage.getItem('admin_token');
+    if (!token) window.location.href = '/login.html';
+</script>
+
+<!-- 모바일 헤더 -->
+<header class="md:hidden sticky top-0 z-50 bg-[#050505]/95 backdrop-blur-lg border-b border-white/10">
+    <div class="flex justify-between items-center px-4 py-3">
+        <span class="text-xl font-black text-blue-500">CP <span class="text-white">ADMIN</span></span>
+        <button id="mobileMenuBtn" class="text-gray-400 hover:text-white p-2"><i class="fas fa-bars text-xl"></i></button>
+    </div>
+    <div id="mobileMenu" class="hidden border-t border-white/10 py-2 px-2 space-y-1">
+        <a href="/admin.html"           class="flex items-center gap-3 px-4 py-3 rounded-xl bg-white/10 font-bold"><i class="fas fa-chart-line w-5 text-center"></i> 개요</a>
+        <a href="/admin-users.html"     class="flex items-center gap-3 px-4 py-3 rounded-xl hover:bg-white/5 transition text-gray-400"><i class="fas fa-users w-5 text-center"></i> 사용자 관리</a>
+        <a href="/admin-sites.html"     class="flex items-center gap-3 px-4 py-3 rounded-xl hover:bg-white/5 transition text-gray-400"><i class="fas fa-globe w-5 text-center"></i> 사이트 관리</a>
+        <a href="/admin-settings.html"  class="flex items-center gap-3 px-4 py-3 rounded-xl hover:bg-white/5 transition text-gray-400"><i class="fas fa-cog w-5 text-center"></i> 시스템 설정</a>
+        <div class="border-t border-white/10 mt-2 pt-2">
+            <button onclick="logout()" class="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-red-400 hover:bg-red-900/20 transition"><i class="fas fa-sign-out-alt w-5 text-center"></i> 로그아웃</button>
+        </div>
+    </div>
+</header>
+<script>
+    document.getElementById('mobileMenuBtn').addEventListener('click', () => {
+        document.getElementById('mobileMenu').classList.toggle('hidden');
+    });
+</script>
+
+<!-- 사이드바 -->
+<aside class="w-64 border-r border-white/10 p-6 flex flex-col hidden md:flex flex-shrink-0">
+    <div class="text-2xl font-black text-blue-500 mb-10">CP <span class="text-white">ADMIN</span></div>
+    <nav class="flex-1 space-y-1">
+        <a href="/admin.html"          class="flex items-center gap-3 p-3 rounded-xl bg-white/10 font-bold text-sm"><i class="fas fa-chart-line w-5 text-center"></i> 개요</a>
+        <a href="/admin-users.html"    class="flex items-center gap-3 p-3 rounded-xl hover:bg-white/5 transition text-gray-400 text-sm"><i class="fas fa-users w-5 text-center"></i> 사용자 관리</a>
+        <a href="/admin-sites.html"    class="flex items-center gap-3 p-3 rounded-xl hover:bg-white/5 transition text-gray-400 text-sm"><i class="fas fa-globe w-5 text-center"></i> 사이트 관리</a>
+        <a href="/admin-settings.html" class="flex items-center gap-3 p-3 rounded-xl hover:bg-white/5 transition text-gray-400 text-sm"><i class="fas fa-cog w-5 text-center"></i> 시스템 설정</a>
+    </nav>
+    <button onclick="logout()" class="mt-auto w-full bg-red-600/20 border border-red-500/30 text-red-400 py-3 rounded-xl font-bold hover:bg-red-600/30 transition text-sm">
+        <i class="fas fa-sign-out-alt mr-2"></i> 로그아웃
+    </button>
+</aside>
+
+<!-- 메인 -->
+<main class="flex-1 w-full overflow-y-auto p-6 md:p-10">
+    <div class="flex justify-between items-center mb-8">
+        <h1 class="text-2xl md:text-3xl font-bold">관리자 개요</h1>
+        <button onclick="loadStats()" class="text-sm text-gray-400 hover:text-white transition"><i class="fas fa-sync-alt mr-1"></i> 새로고침</button>
+    </div>
+
+    <!-- 통계 카드 -->
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+        <div class="p-5 bg-[#111] rounded-2xl border border-white/5">
+            <div class="text-gray-500 text-xs uppercase mb-2">총 사용자</div>
+            <div class="text-3xl font-bold" id="stat-users"><i class="fas fa-spinner fa-spin text-gray-600"></i></div>
+        </div>
+        <div class="p-5 bg-[#111] rounded-2xl border border-white/5">
+            <div class="text-gray-500 text-xs uppercase mb-2">총 사이트</div>
+            <div class="text-3xl font-bold" id="stat-sites"><i class="fas fa-spinner fa-spin text-gray-600"></i></div>
+        </div>
+        <div class="p-5 bg-[#111] rounded-2xl border border-white/5">
+            <div class="text-gray-500 text-xs uppercase mb-2">활성 사이트</div>
+            <div class="text-3xl font-bold text-green-400" id="stat-active"><i class="fas fa-spinner fa-spin text-gray-600"></i></div>
+        </div>
+        <div class="p-5 bg-[#111] rounded-2xl border border-white/5">
+            <div class="text-gray-500 text-xs uppercase mb-2">서버 IP</div>
+            <div class="text-sm font-mono font-bold text-blue-300" id="stat-ip">-</div>
+        </div>
+    </div>
+
+    <!-- 플랜 분포 -->
+    <div class="p-6 bg-[#111] rounded-2xl border border-white/5 mb-6">
+        <h2 class="font-bold mb-4 flex items-center gap-2"><i class="fas fa-layer-group text-blue-400"></i> 플랜 분포</h2>
+        <div id="plan-dist" class="grid grid-cols-3 gap-4"></div>
+    </div>
+
+    <!-- 최근 사이트 -->
+    <div class="p-6 bg-[#111] rounded-2xl border border-white/5">
+        <div class="flex justify-between items-center mb-4">
+            <h2 class="font-bold flex items-center gap-2"><i class="fas fa-globe text-green-400"></i> 최근 생성 사이트</h2>
+            <a href="/admin-sites.html" class="text-xs text-blue-400 hover:underline">전체 보기 →</a>
+        </div>
+        <div id="recent-sites" class="space-y-2"></div>
+    </div>
+</main>
+
+<script src="/src/auth-frontend.js"></script>
+<script>
+    const HEADERS = { Authorization: `Bearer ${localStorage.getItem('admin_token')}` };
+
+    async function loadStats() {
+        try {
+            const res  = await fetch('/api/admin/stats', { headers: HEADERS });
+            const data = await res.json();
+            if (data.error) { alert('관리자 권한이 필요합니다.'); return; }
+            const s = data.stats;
+            document.getElementById('stat-users').textContent  = s.total_users.toLocaleString();
+            document.getElementById('stat-sites').textContent  = s.total_sites.toLocaleString();
+            document.getElementById('stat-active').textContent = s.active_sites.toLocaleString();
+
+            const planColors = { free: 'text-gray-400', starter: 'text-blue-400', pro: 'text-orange-400' };
+            document.getElementById('plan-dist').innerHTML = (s.plans || []).map(p => `
+                <div class="p-4 bg-white/5 rounded-xl text-center">
+                    <div class="text-xs text-gray-500 mb-1 capitalize">${p.plan}</div>
+                    <div class="text-2xl font-bold ${planColors[p.plan] || ''}">${p.cnt}</div>
+                </div>
+            `).join('') || '<p class="text-gray-500 text-sm col-span-3">데이터 없음</p>';
+        } catch(e) {
+            document.getElementById('stat-users').textContent = '오류';
         }
-    </script>
 
-    <!-- Sidebar -->
-    <aside class="w-72 border-r border-white/10 p-6 flex flex-col">
-        <div class="text-3xl font-black text-blue-500 mb-10">CP <span class="text-white">ADMIN</span></div>
-        <nav class="flex-1 space-y-2">
-            <a href="admin.html" class="block p-3 rounded-xl bg-white/10 font-bold"><i class="fas fa-chart-line mr-3"></i> 개요</a>
-            <a href="admin-users.html" class="block p-3 rounded-xl hover:bg-white/5 transition"><i class="fas fa-users mr-3"></i> 사용자 관리</a>
-            <a href="admin-sites.html" class="block p-3 rounded-xl hover:bg-white/5 transition"><i class="fas fa-globe mr-3"></i> 사이트 관리</a>
-            <a href="admin-php-versions.html" class="block p-3 rounded-xl hover:bg-white/5 transition"><i class="fas fa-code mr-3"></i> PHP 버전</a>
-            <a href="admin-traffic.html" class="block p-3 rounded-xl hover:bg-white/5 transition"><i class="fas fa-network-wired mr-3"></i> 트래픽 모니터링</a>
-            <a href="admin-notices.html" class="block p-3 rounded-xl hover:bg-white/5 transition"><i class="fas fa-bullhorn mr-3"></i> 공지 관리</a>
-            <a href="admin-settings.html" class="block p-3 rounded-xl hover:bg-white/5 transition"><i class="fas fa-cog mr-3"></i> 시스템 설정</a>
-        </nav>
-        <button onclick="logout()" class="mt-auto w-full bg-red-600 py-3 rounded-xl font-bold hover:bg-red-500 transition"><i class="fas fa-sign-out-alt mr-2"></i> 로그아웃</button>
-    </aside>
+        // 최근 사이트
+        try {
+            const res  = await fetch('/api/admin/sites?page=1', { headers: HEADERS });
+            const data = await res.json();
+            const sites = (data.sites || []).slice(0, 8);
+            const statusColor = { active:'text-green-400', provisioning:'text-yellow-400', suspended:'text-red-400', error:'text-red-500' };
+            document.getElementById('recent-sites').innerHTML = sites.length === 0
+                ? '<p class="text-gray-500 text-sm">사이트 없음</p>'
+                : sites.map(s => `
+                    <div class="flex items-center justify-between p-3 bg-white/5 rounded-xl text-sm">
+                        <div>
+                            <span class="font-bold">${escHtml(s.site_name)}</span>
+                            <span class="text-gray-500 ml-2 text-xs font-mono">${escHtml(s.primary_domain)}</span>
+                        </div>
+                        <div class="flex items-center gap-3">
+                            <span class="text-xs text-gray-500">${escHtml(s.owner_email || '')}</span>
+                            <span class="text-xs ${statusColor[s.status] || 'text-gray-400'}">${s.status}</span>
+                        </div>
+                    </div>`).join('');
+        } catch {}
 
-    <!-- Main Content -->
-    <main class="flex-1 p-10 overflow-y-auto">
-        <header class="flex justify-between items-center mb-10">
-            <h1 class="text-3xl font-bold">관리자 개요</h1>
-            <div class="text-sm text-gray-400">관리자님, 환영합니다!</div>
-        </header>
+        // 서버 IP
+        try {
+            const r = await fetch(`/api/domains?site_id=ping`, { headers: HEADERS });
+            const d = await r.json();
+            if (d.server_ip) document.getElementById('stat-ip').textContent = d.server_ip;
+        } catch {}
+    }
 
-        <section class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-10">
-            <div class="p-6 bg-[#111] rounded-2xl border border-white/5">
-                <div class="text-gray-500 text-xs uppercase mb-2">총 사용자</div>
-                <div class="text-4xl font-bold" id="total-users">0</div>
-            </div>
-            <div class="p-6 bg-[#111] rounded-2xl border border-white/5">
-                <div class="text-gray-500 text-xs uppercase mb-2">총 호스팅</div>
-                <div class="text-4xl font-bold" id="total-hostings">0</div>
-            </div>
-            <div class="p-6 bg-[#111] rounded-2xl border border-white/5">
-                <div class="text-gray-500 text-xs uppercase mb-2">월간 트래픽</div>
-                <div class="text-4xl font-bold" id="monthly-traffic">0 GB</div>
-            </div>
-        </section>
+    function escHtml(s) {
+        return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    }
 
-        <!-- 인프라 맵 (36+4 버킷) -->
-        <section class="p-8 bg-[#111] rounded-3xl border border-white/10 mb-10">
-            <div class="flex justify-between items-end mb-8">
-                <div>
-                    <h2 class="text-2xl font-bold text-white">클러스터 동기화 상태</h2>
-                    <p class="text-gray-500 text-sm">36 메인 버킷 + 4 백업 노드</p>
-                </div>
-            </div>
-            <div id="infra-map-container">
-                <!-- JS로 36개 메인 버킷과 4개 백업 버킷 시각화 -->
-            </div>
-        </section>
-
-        <!-- 최근 시스템 알림 -->
-        <section class="p-8 bg-[#111] rounded-3xl border border-white/10">
-            <h2 class="text-2xl font-bold mb-6">최근 시스템 알림</h2>
-            <div id="system-alerts" class="space-y-3">
-                <div class="text-gray-400">알림이 없습니다.</div>
-            </div>
-        </section>
-    </main>
-
-    <script src="/src/auth-frontend.js"></script> <!-- 로그아웃 함수 포함 -->
-    <script>
-        async function loadAdminOverview() {
-            // 실제 D1에서 관리자 통계 데이터 페치
-            // 예시: const res = await fetch('/api/admin/stats', { headers: { 'Authorization': `Bearer ${token}` } });
-            document.getElementById('total-users').innerText = '1,234';
-            document.getElementById('total-hostings').innerText = '567';
-            document.getElementById('monthly-traffic').innerText = '890 GB';
-
-            // 인프라 맵 렌더링 (더미 데이터)
-            const infraMapContainer = document.getElementById('infra-map-container');
-            infraMapContainer.innerHTML = `
-                <h3 class="text-xs font-bold text-gray-400 uppercase tracking-widest mb-4">메인 스토리지 샤드 (36)</h3>
-                <div class="grid grid-cols-12 gap-2 mb-8">
-                    ${Array.from({length: 36}).map((_, i) => `<div class="aspect-square bg-green-500/20 opacity-70 rounded-sm" title="Main Bucket ${i+1}"></div>`).join('')}
-                </div>
-                <h3 class="text-xs font-bold text-gray-400 uppercase tracking-widest mb-4">백업 노드 (4)</h3>
-                <div class="grid grid-cols-4 gap-4">
-                    ${Array.from({length: 4}).map((_, i) => `<div class="h-16 bg-blue-500/10 border border-blue-500/30 rounded-xl flex items-center justify-center"><span class="text-xs font-mono text-blue-500">BACKUP-${i+1}</span></div>`).join('')}
-                </div>
-            `;
-        }
-        loadAdminOverview();
-    </script>
+    loadStats();
+</script>
 </body>
 </html>

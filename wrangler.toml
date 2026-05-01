@@ -1,6 +1,7 @@
-# CloudPress v20.0 — wrangler.toml
+# CloudPress v21.0 — wrangler.toml
 # Originless Edge CMS (WordPress on Cloudflare Workers)
-# 스토리지: Supabase (Primary + Secondary) + D1 (플랫폼 DB) + KV (세션/캐시)
+# 스토리지: Supabase (자동 프로비저닝) + D1 (플랫폼 DB) + KV (세션/캐시)
+# 인프라: 사용자 CF Global API Key로 Worker/D1/KV 자동 생성
 
 name = "cloud-press"
 main = "src/index.js"
@@ -8,8 +9,6 @@ compatibility_date = "2025-04-01"
 compatibility_flags = ["nodejs_compat"]
 
 # ── 정적 파일 서빙 (HTML/CSS/JS → Workers Assets) ──────────────────────────────
-# signup.html, login.html 등이 Worker와 동일 오리진에서 서빙되어
-# fetch('/api/signup') 같은 상대경로가 Worker로 정상 도달함
 [assets]
 directory = "./"
 binding   = "ASSETS"
@@ -26,13 +25,6 @@ binding = "SESSIONS"
 id      = "19e5e273e99941fbb963300e56dbdf9e"
 
 # ── KV: 이중 캐시 (Edge + KV) ───────────────────────────────────────────────────
-# page:{prefix}:{path}      → HTML 캐시
-# site_domain:{hostname}    → 사이트 정보 캐시
-# opt:{prefix}:{key}        → WordPress 옵션 캐시
-# rl:{ip}:{window}          → Rate Limit 카운터
-# ddos_ban:{ip}             → DDoS 밴 목록
-# wp_session:{token}        → WordPress 로그인 세션
-# media:{path}              → 소형 미디어 D1 fallback
 [[kv_namespaces]]
 binding = "CACHE"
 id      = "9b8370d20a9646b9aa73f63c9200379f"
@@ -40,23 +32,47 @@ id      = "9b8370d20a9646b9aa73f63c9200379f"
 # ── KV: WP 설치 작업 큐 ──────────────────────────────────────────────────────────
 [[kv_namespaces]]
 binding = "INSTALL_QUEUE"
-id      = "INSTALL_QUEUE_KV_ID_여기에_입력"
+id      = "f6ae966a71914956864e6ed452ddd9e4"
 
 # ── 환경 변수 ────────────────────────────────────────────────────────────────────
-# 아래 secret들은 반드시 wrangler secret put 으로 주입하세요:
-#   wrangler secret put JWT_SECRET        ← 필수 (JWT 서명 키)
-#   wrangler secret put SERVER_IP           ← 필수 (서버 공인 IP, 도메인 A레코드 대상)
-#   wrangler secret put SUPABASE_URL        ← 스토리지용
-#   wrangler secret put SUPABASE_KEY        ← 스토리지용
-#   wrangler secret put SUPABASE_URL2       ← 보조 스토리지
-#   wrangler secret put SUPABASE_KEY2       ← 보조 스토리지
-#   wrangler secret put DEFAULT_DB_HOST     ← WordPress DB 호스트
+# 필수 secrets (wrangler secret put 으로 주입):
+#
+#   wrangler secret put JWT_SECRET
+#     ← JWT 서명 키 (필수)
+#
+#   wrangler secret put CF_ACCOUNT_ID
+#     ← 플랫폼 Cloudflare 계정 ID (사용자 계정 ID 조회 실패 시 폴백용)
+#
+# Supabase 기본 계정 (사이트 버킷 자동 생성용):
+#   wrangler secret put SUPABASE_URL
+#     ← 기본 Supabase 프로젝트 URL (https://xxxx.supabase.co)
+#   wrangler secret put SUPABASE_KEY
+#     ← 기본 Supabase service_role key
+#
+# Supabase 자동 프로젝트 생성 (선택 — 설정 시 Supabase 프로젝트도 자동 생성됨):
+#   wrangler secret put SUPABASE_MANAGEMENT_TOKEN
+#     ← Supabase Management API 토큰 (https://supabase.com/dashboard/account/tokens)
+#   wrangler secret put SUPABASE_ORG_ID
+#     ← Supabase 조직 ID
+#   wrangler secret put SUPABASE_DB_PASS
+#     ← 새 Supabase 프로젝트 DB 비밀번호 (기본값으로 사용)
+#   wrangler secret put SUPABASE_REGION
+#     ← Supabase 리전 (기본: ap-northeast-2)
+#
+# 추가 Supabase 계정 (분산 저장용):
+#   wrangler secret put SUPABASE_URL2
+#   wrangler secret put SUPABASE_KEY2
+#
+# 레거시 (서버 에이전트 방식 사용 시):
+#   wrangler secret put DEFAULT_DB_HOST   ← WordPress DB 호스트
+#   wrangler secret put SERVER_IP         ← 서버 공인 IP
 #   wrangler secret put PURGE_KEY
 #   wrangler secret put ENCRYPTION_KEY
+
 [vars]
-CF_ACCOUNT_ID  = ""
+CF_ACCOUNT_ID   = ""
 DEFAULT_DB_HOST = "127.0.0.1"
-# SERVER_IP — wrangler secret put SERVER_IP (실제 서버 공인 IP)
+SUPABASE_REGION = "ap-northeast-2"
 
 # ── CPU 한도 ─────────────────────────────────────────────────────────────────────
 [limits]

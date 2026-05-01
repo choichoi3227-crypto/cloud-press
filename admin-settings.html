@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>시스템 설정 — CloudPress Admin</title>
+    <link rel="stylesheet" href="/style.css">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+</head>
+<body class="bg-[#050505] text-white md:flex md:h-screen">
+<script>const token=localStorage.getItem('admin_token');if(!token)window.location.href='/login.html';</script>
+
+<header class="md:hidden sticky top-0 z-50 bg-[#050505]/95 backdrop-blur-lg border-b border-white/10">
+    <div class="flex justify-between items-center px-4 py-3">
+        <span class="text-xl font-black text-blue-500">CP <span class="text-white">ADMIN</span></span>
+        <button id="mobileMenuBtn" class="text-gray-400 hover:text-white p-2"><i class="fas fa-bars text-xl"></i></button>
+    </div>
+    <div id="mobileMenu" class="hidden border-t border-white/10 py-2 px-2 space-y-1">
+        <a href="/admin.html"          class="flex items-center gap-3 px-4 py-3 rounded-xl hover:bg-white/5 transition text-gray-400"><i class="fas fa-chart-line w-5"></i> 개요</a>
+        <a href="/admin-users.html"    class="flex items-center gap-3 px-4 py-3 rounded-xl hover:bg-white/5 transition text-gray-400"><i class="fas fa-users w-5"></i> 사용자 관리</a>
+        <a href="/admin-sites.html"    class="flex items-center gap-3 px-4 py-3 rounded-xl hover:bg-white/5 transition text-gray-400"><i class="fas fa-globe w-5"></i> 사이트 관리</a>
+        <a href="/admin-settings.html" class="flex items-center gap-3 px-4 py-3 rounded-xl bg-white/10 font-bold"><i class="fas fa-cog w-5"></i> 시스템 설정</a>
+        <div class="border-t border-white/10 mt-2 pt-2">
+            <button onclick="logout()" class="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-red-400 hover:bg-red-900/20 transition"><i class="fas fa-sign-out-alt w-5"></i> 로그아웃</button>
+        </div>
+    </div>
+</header>
+<script>document.getElementById('mobileMenuBtn').addEventListener('click',()=>document.getElementById('mobileMenu').classList.toggle('hidden'));</script>
+
+<aside class="w-64 border-r border-white/10 p-6 flex flex-col hidden md:flex flex-shrink-0">
+    <div class="text-2xl font-black text-blue-500 mb-10">CP <span class="text-white">ADMIN</span></div>
+    <nav class="flex-1 space-y-1">
+        <a href="/admin.html"          class="flex items-center gap-3 p-3 rounded-xl hover:bg-white/5 transition text-gray-400 text-sm"><i class="fas fa-chart-line w-5 text-center"></i> 개요</a>
+        <a href="/admin-users.html"    class="flex items-center gap-3 p-3 rounded-xl hover:bg-white/5 transition text-gray-400 text-sm"><i class="fas fa-users w-5 text-center"></i> 사용자 관리</a>
+        <a href="/admin-sites.html"    class="flex items-center gap-3 p-3 rounded-xl hover:bg-white/5 transition text-gray-400 text-sm"><i class="fas fa-globe w-5 text-center"></i> 사이트 관리</a>
+        <a href="/admin-settings.html" class="flex items-center gap-3 p-3 rounded-xl bg-white/10 font-bold text-sm"><i class="fas fa-cog w-5 text-center"></i> 시스템 설정</a>
+    </nav>
+    <button onclick="logout()" class="mt-auto w-full bg-red-600/20 border border-red-500/30 text-red-400 py-3 rounded-xl font-bold hover:bg-red-600/30 transition text-sm">
+        <i class="fas fa-sign-out-alt mr-2"></i> 로그아웃
+    </button>
+</aside>
+
+<main class="flex-1 w-full overflow-y-auto p-6 md:p-10 space-y-6">
+    <h1 class="text-2xl font-bold mb-6">시스템 설정</h1>
+
+    <!-- 서버 IP 설정 -->
+    <div class="p-6 bg-[#111] rounded-2xl border border-white/5 space-y-4">
+        <h2 class="font-bold flex items-center gap-2"><i class="fas fa-server text-blue-400"></i> 서버 IP 설정</h2>
+        <p class="text-sm text-gray-400">
+            호스팅 도메인의 A레코드가 가리킬 Cloudflare Anycast IP입니다.<br>
+            <code class="text-xs bg-white/10 px-2 py-1 rounded">wrangler secret put SERVER_IP</code> 명령으로 환경변수를 설정하세요.
+        </p>
+        <div class="p-4 bg-black/30 rounded-xl">
+            <p class="text-xs text-gray-500 mb-1">현재 설정된 서버 IP</p>
+            <p id="current-ip" class="font-mono text-white text-lg"><i class="fas fa-spinner fa-spin text-gray-600"></i></p>
+        </div>
+        <div class="text-xs text-gray-500 space-y-1">
+            <p><i class="fas fa-info-circle text-blue-400 mr-1"></i> Cloudflare Workers에서는 환경변수 <code>SERVER_IP</code>로 관리됩니다.</p>
+            <p><i class="fas fa-info-circle text-blue-400 mr-1"></i> 변경 후 Workers를 재배포해야 적용됩니다.</p>
+        </div>
+    </div>
+
+    <!-- Wrangler 환경변수 가이드 -->
+    <div class="p-6 bg-[#111] rounded-2xl border border-white/5 space-y-4">
+        <h2 class="font-bold flex items-center gap-2"><i class="fas fa-key text-yellow-400"></i> 필수 환경변수 (Wrangler Secrets)</h2>
+        <div class="space-y-2 text-sm">
+            <div class="flex flex-col md:flex-row md:items-center gap-2 p-3 bg-white/5 rounded-xl">
+                <code class="text-yellow-300 w-40 flex-shrink-0">JWT_SECRET</code>
+                <span class="text-gray-400">JWT 토큰 서명 비밀키 (필수)</span>
+                <span id="jwt-status" class="ml-auto text-xs text-gray-500">-</span>
+            </div>
+            <div class="flex flex-col md:flex-row md:items-center gap-2 p-3 bg-white/5 rounded-xl">
+                <code class="text-yellow-300 w-40 flex-shrink-0">SERVER_IP</code>
+                <span class="text-gray-400">서버 공개 IP (도메인 A레코드 대상)</span>
+                <span id="ip-status" class="ml-auto text-xs text-gray-500">-</span>
+            </div>
+            <div class="flex flex-col md:flex-row md:items-center gap-2 p-3 bg-white/5 rounded-xl">
+                <code class="text-yellow-300 w-40 flex-shrink-0">SUPABASE_URL</code>
+                <span class="text-gray-400">Supabase 프로젝트 URL (스토리지)</span>
+            </div>
+            <div class="flex flex-col md:flex-row md:items-center gap-2 p-3 bg-white/5 rounded-xl">
+                <code class="text-yellow-300 w-40 flex-shrink-0">SUPABASE_KEY</code>
+                <span class="text-gray-400">Supabase Service Role Key</span>
+            </div>
+            <div class="flex flex-col md:flex-row md:items-center gap-2 p-3 bg-white/5 rounded-xl">
+                <code class="text-yellow-300 w-40 flex-shrink-0">DEFAULT_DB_HOST</code>
+                <span class="text-gray-400">WordPress DB 호스트 (기본: 127.0.0.1)</span>
+            </div>
+        </div>
+        <div class="p-4 bg-black/30 rounded-xl font-mono text-xs text-green-400 space-y-1">
+            <p class="text-gray-500"># Wrangler CLI로 비밀 값 설정 예시</p>
+            <p>wrangler secret put JWT_SECRET</p>
+            <p>wrangler secret put SERVER_IP</p>
+            <p>wrangler secret put SUPABASE_URL</p>
+            <p>wrangler secret put SUPABASE_KEY</p>
+        </div>
+    </div>
+
+    <!-- DB 상태 -->
+    <div class="p-6 bg-[#111] rounded-2xl border border-white/5 space-y-4">
+        <h2 class="font-bold flex items-center gap-2"><i class="fas fa-database text-green-400"></i> D1 데이터베이스 상태</h2>
+        <div id="db-stats" class="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <div class="p-4 bg-white/5 rounded-xl text-center"><div class="text-xs text-gray-500 mb-1">사용자</div><div class="text-2xl font-bold" id="db-users">-</div></div>
+            <div class="p-4 bg-white/5 rounded-xl text-center"><div class="text-xs text-gray-500 mb-1">사이트</div><div class="text-2xl font-bold" id="db-sites">-</div></div>
+            <div class="p-4 bg-white/5 rounded-xl text-center"><div class="text-xs text-gray-500 mb-1">도메인</div><div class="text-2xl font-bold" id="db-domains">-</div></div>
+            <div class="p-4 bg-white/5 rounded-xl text-center"><div class="text-xs text-gray-500 mb-1">SSH 키</div><div class="text-2xl font-bold" id="db-ssh">-</div></div>
+        </div>
+    </div>
+</main>
+
+<script src="/src/auth-frontend.js"></script>
+<script>
+    const HEADERS = { Authorization: `Bearer ${localStorage.getItem('admin_token')}` };
+
+    async function loadSettings() {
+        // 서버 IP 조회 (domains API에서 반환)
+        try {
+            const res  = await fetch('/api/admin/stats', { headers: HEADERS });
+            const data = await res.json();
+            if (data.stats) {
+                document.getElementById('db-users').textContent = data.stats.total_users;
+                document.getElementById('db-sites').textContent = data.stats.total_sites;
+            }
+        } catch {}
+
+        // IP 확인
+        try {
+            const res = await fetch('/api/domains?site_id=test', { headers: HEADERS });
+            const data = await res.json();
+            const ip = data.server_ip || '환경변수 SERVER_IP 미설정';
+            document.getElementById('current-ip').textContent = ip;
+            document.getElementById('ip-status').textContent  = data.server_ip ? '✅ 설정됨' : '⚠️ 미설정';
+            document.getElementById('ip-status').className    = 'ml-auto text-xs ' + (data.server_ip ? 'text-green-400' : 'text-yellow-400');
+        } catch {}
+    }
+
+    loadSettings();
+</script>
+</body>
+</html>

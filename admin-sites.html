@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>사이트 관리 — CloudPress Admin</title>
+    <link rel="stylesheet" href="/style.css">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+</head>
+<body class="bg-[#050505] text-white md:flex md:h-screen">
+<script>const token=localStorage.getItem('admin_token');if(!token)window.location.href='/login.html';</script>
+
+<header class="md:hidden sticky top-0 z-50 bg-[#050505]/95 backdrop-blur-lg border-b border-white/10">
+    <div class="flex justify-between items-center px-4 py-3">
+        <span class="text-xl font-black text-blue-500">CP <span class="text-white">ADMIN</span></span>
+        <button id="mobileMenuBtn" class="text-gray-400 hover:text-white p-2"><i class="fas fa-bars text-xl"></i></button>
+    </div>
+    <div id="mobileMenu" class="hidden border-t border-white/10 py-2 px-2 space-y-1">
+        <a href="/admin.html"          class="flex items-center gap-3 px-4 py-3 rounded-xl hover:bg-white/5 transition text-gray-400"><i class="fas fa-chart-line w-5"></i> 개요</a>
+        <a href="/admin-users.html"    class="flex items-center gap-3 px-4 py-3 rounded-xl hover:bg-white/5 transition text-gray-400"><i class="fas fa-users w-5"></i> 사용자 관리</a>
+        <a href="/admin-sites.html"    class="flex items-center gap-3 px-4 py-3 rounded-xl bg-white/10 font-bold"><i class="fas fa-globe w-5"></i> 사이트 관리</a>
+        <a href="/admin-settings.html" class="flex items-center gap-3 px-4 py-3 rounded-xl hover:bg-white/5 transition text-gray-400"><i class="fas fa-cog w-5"></i> 시스템 설정</a>
+        <div class="border-t border-white/10 mt-2 pt-2">
+            <button onclick="logout()" class="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-red-400 hover:bg-red-900/20 transition"><i class="fas fa-sign-out-alt w-5"></i> 로그아웃</button>
+        </div>
+    </div>
+</header>
+<script>document.getElementById('mobileMenuBtn').addEventListener('click',()=>document.getElementById('mobileMenu').classList.toggle('hidden'));</script>
+
+<aside class="w-64 border-r border-white/10 p-6 flex flex-col hidden md:flex flex-shrink-0">
+    <div class="text-2xl font-black text-blue-500 mb-10">CP <span class="text-white">ADMIN</span></div>
+    <nav class="flex-1 space-y-1">
+        <a href="/admin.html"          class="flex items-center gap-3 p-3 rounded-xl hover:bg-white/5 transition text-gray-400 text-sm"><i class="fas fa-chart-line w-5 text-center"></i> 개요</a>
+        <a href="/admin-users.html"    class="flex items-center gap-3 p-3 rounded-xl hover:bg-white/5 transition text-gray-400 text-sm"><i class="fas fa-users w-5 text-center"></i> 사용자 관리</a>
+        <a href="/admin-sites.html"    class="flex items-center gap-3 p-3 rounded-xl bg-white/10 font-bold text-sm"><i class="fas fa-globe w-5 text-center"></i> 사이트 관리</a>
+        <a href="/admin-settings.html" class="flex items-center gap-3 p-3 rounded-xl hover:bg-white/5 transition text-gray-400 text-sm"><i class="fas fa-cog w-5 text-center"></i> 시스템 설정</a>
+    </nav>
+    <button onclick="logout()" class="mt-auto w-full bg-red-600/20 border border-red-500/30 text-red-400 py-3 rounded-xl font-bold hover:bg-red-600/30 transition text-sm">
+        <i class="fas fa-sign-out-alt mr-2"></i> 로그아웃
+    </button>
+</aside>
+
+<main class="flex-1 w-full overflow-y-auto p-6 md:p-10">
+    <div class="flex justify-between items-center mb-8">
+        <h1 class="text-2xl font-bold">사이트 관리</h1>
+        <button onclick="loadSites()" class="text-sm text-gray-400 hover:text-white"><i class="fas fa-sync-alt mr-1"></i> 새로고침</button>
+    </div>
+
+    <div class="bg-[#111] rounded-2xl border border-white/5 overflow-hidden">
+        <div class="overflow-x-auto">
+            <table class="w-full text-sm">
+                <thead>
+                    <tr class="border-b border-white/10 text-gray-500 text-xs uppercase">
+                        <th class="text-left p-4">사이트명</th>
+                        <th class="text-left p-4">도메인</th>
+                        <th class="text-left p-4">소유자</th>
+                        <th class="text-left p-4">PHP</th>
+                        <th class="text-left p-4">상태</th>
+                        <th class="text-left p-4">생성일</th>
+                        <th class="text-left p-4">작업</th>
+                    </tr>
+                </thead>
+                <tbody id="sites-tbody">
+                    <tr><td colspan="7" class="text-center p-8 text-gray-500"><i class="fas fa-spinner fa-spin mr-2"></i>로딩 중...</td></tr>
+                </tbody>
+            </table>
+        </div>
+        <div id="pagination" class="flex justify-center gap-2 p-4 border-t border-white/10"></div>
+    </div>
+</main>
+
+<!-- 상태 변경 모달 -->
+<div id="site-modal" class="fixed inset-0 bg-black/70 z-50 hidden flex items-center justify-center p-4">
+    <div class="bg-[#111] border border-white/10 rounded-2xl p-6 w-full max-w-sm space-y-4">
+        <h3 class="font-bold text-lg">사이트 상태 변경</h3>
+        <input type="hidden" id="modal-site-id">
+        <div>
+            <label class="text-xs text-gray-400 mb-1 block">상태</label>
+            <select id="modal-status" class="w-full p-3 bg-white/5 border border-white/10 rounded-xl outline-none text-sm">
+                <option value="provisioning">provisioning</option>
+                <option value="active">active</option>
+                <option value="suspended">suspended</option>
+                <option value="error">error</option>
+            </select>
+        </div>
+        <div class="flex gap-3">
+            <button onclick="saveSite()" class="flex-1 bg-blue-700 py-2 rounded-xl font-bold text-sm hover:bg-blue-600 transition">저장</button>
+            <button onclick="closeSiteModal()" class="flex-1 bg-white/10 py-2 rounded-xl font-bold text-sm hover:bg-white/20 transition">취소</button>
+        </div>
+    </div>
+</div>
+
+<script src="/src/auth-frontend.js"></script>
+<script>
+    const HEADERS = { Authorization: `Bearer ${localStorage.getItem('admin_token')}` };
+    let currentPage = 1;
+    function escHtml(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+
+    const statusColor = {active:'text-green-400',provisioning:'text-yellow-400',suspended:'text-orange-400',error:'text-red-400'};
+
+    async function loadSites(page=1) {
+        currentPage = page;
+        const tbody = document.getElementById('sites-tbody');
+        tbody.innerHTML = '<tr><td colspan="7" class="text-center p-8 text-gray-500"><i class="fas fa-spinner fa-spin mr-2"></i>로딩 중...</td></tr>';
+        try {
+            const res  = await fetch(`/api/admin/sites?page=${page}`, { headers: HEADERS });
+            const data = await res.json();
+            if (data.error) { tbody.innerHTML = `<tr><td colspan="7" class="text-center p-8 text-red-400">${escHtml(data.error)}</td></tr>`; return; }
+            const sites = data.sites || [];
+            if (!sites.length) { tbody.innerHTML = '<tr><td colspan="7" class="text-center p-8 text-gray-500">사이트 없음</td></tr>'; return; }
+            tbody.innerHTML = sites.map(s => `
+                <tr class="border-b border-white/5 hover:bg-white/3 transition">
+                    <td class="p-4 font-bold text-sm">${escHtml(s.site_name)}</td>
+                    <td class="p-4 font-mono text-xs text-blue-300">${escHtml(s.primary_domain)}</td>
+                    <td class="p-4 text-xs text-gray-400">${escHtml(s.owner_email||'')}</td>
+                    <td class="p-4 text-xs font-mono">${escHtml(s.php_version||'')}</td>
+                    <td class="p-4"><span class="text-xs ${statusColor[s.status]||'text-gray-400'}">${s.status}</span></td>
+                    <td class="p-4 text-xs text-gray-500">${new Date(s.created_at).toLocaleDateString('ko-KR')}</td>
+                    <td class="p-4 flex gap-2">
+                        <button onclick="openSiteModal('${escHtml(s.id)}','${escHtml(s.status)}')" class="text-xs border border-white/20 px-3 py-1 rounded-lg hover:bg-white/5 transition">상태</button>
+                        <button onclick="deleteSite('${escHtml(s.id)}','${escHtml(s.site_name)}')" class="text-xs border border-red-500/30 text-red-400 px-3 py-1 rounded-lg hover:bg-red-900/20 transition">삭제</button>
+                    </td>
+                </tr>`).join('');
+
+            const pages = Math.ceil((data.total||0)/(data.limit||50));
+            document.getElementById('pagination').innerHTML = pages > 1
+                ? Array.from({length:Math.min(pages,10)},(_,i)=>i+1).map(p=>
+                    `<button onclick="loadSites(${p})" class="px-3 py-1 rounded-lg text-sm ${p===currentPage?'bg-blue-700':'bg-white/5 hover:bg-white/10'} transition">${p}</button>`
+                  ).join('')
+                : '';
+        } catch(e) {
+            tbody.innerHTML = `<tr><td colspan="7" class="text-center p-8 text-red-400">오류: ${e.message}</td></tr>`;
+        }
+    }
+
+    function openSiteModal(id, status) {
+        document.getElementById('modal-site-id').value  = id;
+        document.getElementById('modal-status').value   = status;
+        document.getElementById('site-modal').classList.remove('hidden');
+    }
+    function closeSiteModal() { document.getElementById('site-modal').classList.add('hidden'); }
+
+    async function saveSite() {
+        const id     = document.getElementById('modal-site-id').value;
+        const status = document.getElementById('modal-status').value;
+        const res    = await fetch(`/api/admin/sites?id=${id}`, {
+            method: 'PUT', headers: { ...HEADERS, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ status }),
+        });
+        const data = await res.json();
+        alert(data.message || data.error);
+        closeSiteModal();
+        loadSites(currentPage);
+    }
+
+    async function deleteSite(id, name) {
+        if (!confirm(`'${name}' 사이트를 삭제하시겠습니까?`)) return;
+        const res  = await fetch(`/api/admin/sites?id=${id}`, { method: 'DELETE', headers: HEADERS });
+        const data = await res.json();
+        alert(data.message || data.error);
+        loadSites(currentPage);
+    }
+
+    loadSites();
+</script>
+</body>
+</html>

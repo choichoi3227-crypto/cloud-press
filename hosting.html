@@ -19,9 +19,52 @@
     <script>
         const token = localStorage.getItem('admin_token');
         if (!token) window.location.href = '/login.html';
-    
+    <!-- ── 모바일 헤더 (md 이상에서 숨김) ── -->
+    <header class="md:hidden sticky top-0 z-50 bg-[#050505]/95 backdrop-blur-lg border-b border-white/10">
+        <div class="flex justify-between items-center px-4 py-3">
+            <a href="/dashboard.html" class="text-xl font-black text-blue-500">CLOUD<span class="text-white">PRESS</span></a>
+            <button id="mobileMenuBtn" class="text-gray-400 hover:text-white p-2">
+                <i class="fas fa-bars text-xl"></i>
+            </button>
+        </div>
+        <!-- 드롭다운 메뉴 -->
+        <div id="mobileMenu" class="hidden border-t border-white/10 py-2 px-2 space-y-1">
+            <a href="/dashboard.html" class="flex items-center gap-3 px-4 py-3 rounded-xl hover:bg-white/5 transition text-gray-400"><i class="fas fa-tachometer-alt w-5 text-center"></i> 대시보드</a>
+            <a href="/hosting.html" class="flex items-center gap-3 px-4 py-3 rounded-xl hover:bg-white/5 transition font-bold text-white"><i class="fas fa-globe w-5 text-center"></i> 내 호스팅</a>
+            <a href="/traffic.html" class="flex items-center gap-3 px-4 py-3 rounded-xl hover:bg-white/5 transition text-gray-400"><i class="fas fa-chart-line w-5 text-center"></i> 트래픽</a>
+            <a href="/storage.html" class="flex items-center gap-3 px-4 py-3 rounded-xl hover:bg-white/5 transition text-gray-400"><i class="fas fa-hdd w-5 text-center"></i> 스토리지</a>
+            <a href="/account.html" class="flex items-center gap-3 px-4 py-3 rounded-xl hover:bg-white/5 transition text-gray-400"><i class="fas fa-user-circle w-5 text-center"></i> 내 계정</a>
+            <div class="border-t border-white/10 mt-2 pt-2">
+                <button onclick="logout()" class="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-red-400 hover:bg-red-900/20 transition">
+                    <i class="fas fa-sign-out-alt w-5 text-center"></i> 로그아웃
+                </button>
+            </div>
+        </div>
+    </header>
+    <script>
+        document.getElementById('mobileMenuBtn').addEventListener('click', () => {
+            document.getElementById('mobileMenu').classList.toggle('hidden');
+        });
+        // 메뉴 링크 클릭시 닫기
+        document.querySelectorAll('#mobileMenu a').forEach(a => {
+            a.addEventListener('click', () => document.getElementById('mobileMenu').classList.add('hidden'));
+        });
+    </script>
 
-    
+    <!-- Sidebar -->
+    <aside class="w-64 border-r border-white/10 p-6 flex flex-col flex-shrink-0 hidden md:flex">
+        <div class="text-2xl font-black text-blue-500 mb-10">CLOUD<span class="text-white">PRESS</span></div>
+        <nav class="flex-1 space-y-2">
+            <a href="/dashboard.html" class="block p-3 rounded-xl hover:bg-white/5 transition"><i class="fas fa-tachometer-alt mr-3"></i> 대시보드</a>
+            <a href="/hosting.html"   class="block p-3 rounded-xl bg-white/10 font-bold"><i class="fas fa-globe mr-3"></i> 내 호스팅</a>
+            <a href="/traffic.html"   class="block p-3 rounded-xl hover:bg-white/5 transition"><i class="fas fa-chart-line mr-3"></i> 트래픽</a>
+            <a href="/storage.html"   class="block p-3 rounded-xl hover:bg-white/5 transition"><i class="fas fa-hdd mr-3"></i> 스토리지</a>
+            <a href="/account.html"   class="block p-3 rounded-xl hover:bg-white/5 transition"><i class="fas fa-user-circle mr-3"></i> 내 계정</a>
+        </nav>
+        <button onclick="logout()" class="mt-auto w-full bg-red-600 py-3 rounded-xl font-bold hover:bg-red-500 transition">
+            <i class="fas fa-sign-out-alt mr-2"></i> 로그아웃
+        </button>
+    </aside>
 
     <!-- Main -->
     <main class="flex-1 w-full overflow-y-auto">
@@ -60,7 +103,6 @@
     </main>
 
     <script src="/src/auth-frontend.js"></script>
-    <script src="/src/sidebar.js"></script>
     <script>
         const TOKEN   = localStorage.getItem('admin_token');
         const HEADERS = { 'Authorization': `Bearer ${TOKEN}`, 'Content-Type': 'application/json' };

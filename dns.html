@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DNS 관리 | CloudPress</title>
+    <link rel="stylesheet" href="/style.css">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        .record-row:hover { background: rgba(255,255,255,0.03); }
+        code { font-family: 'Courier New', monospace; }
+        .type-badge { font-family: 'Courier New', monospace; font-size: 0.7rem; font-weight: 700; }
+    </style>
+</head>
+<body class="bg-[#050505] text-white md:flex md:h-screen">
+    <script>
+        const token = localStorage.getItem('admin_token');
+        if (!token) window.location.href = '/login.html';
+    </script>
+
+    <main class="flex-1 w-full overflow-y-auto">
+        <div class="p-8 max-w-5xl mx-auto">
+            <header class="mb-8">
+                <a href="/domains.html" class="text-gray-500 hover:text-white transition text-sm flex items-center gap-2 mb-4">
+                    <i class="fas fa-arrow-left"></i> 도메인 목록으로
+                </a>
+                <div class="flex items-center justify-between">
+                    <div>
+                        <h1 class="text-3xl font-bold" id="page-domain">DNS 관리</h1>
+                        <p class="text-gray-500 text-sm mt-1">Cloudflare DNS 레코드를 관리합니다</p>
+                    </div>
+                    <button onclick="openAddRecord()" class="bg-blue-600 px-5 py-2.5 rounded-xl text-white font-bold hover:bg-blue-500 transition flex items-center gap-2 text-sm">
+                        <i class="fas fa-plus"></i> 레코드 추가
+                    </button>
+                </div>
+            </header>
+
+            <div id="alertMsg" class="hidden mb-6 p-3 rounded-xl text-sm text-center"></div>
+
+            <!-- 레코드 타입 필터 -->
+            <div class="flex gap-2 mb-6 flex-wrap">
+                <button onclick="filterRecords('')" id="filter-all" class="filter-btn active px-4 py-2 rounded-xl text-sm font-bold bg-blue-600/20 border border-blue-500/40 text-blue-400">전체</button>
+                <button onclick="filterRecords('A')" class="filter-btn px-4 py-2 rounded-xl text-sm font-bold border border-white/10 text-gray-500 hover:bg-white/5 hover:text-white transition">A</button>
+                <button onclick="filterRecords('AAAA')" class="filter-btn px-4 py-2 rounded-xl text-sm font-bold border border-white/10 text-gray-500 hover:bg-white/5 hover:text-white transition">AAAA</button>
+                <button onclick="filterRecords('CNAME')" class="filter-btn px-4 py-2 rounded-xl text-sm font-bold border border-white/10 text-gray-500 hover:bg-white/5 hover:text-white transition">CNAME</button>
+                <button onclick="filterRecords('MX')" class="filter-btn px-4 py-2 rounded-xl text-sm font-bold border border-white/10 text-gray-500 hover:bg-white/5 hover:text-white transition">MX</button>
+                <button onclick="filterRecords('TXT')" class="filter-btn px-4 py-2 rounded-xl text-sm font-bold border border-white/10 text-gray-500 hover:bg-white/5 hover:text-white transition">TXT</button>
+            </div>
+
+            <!-- DNS 레코드 테이블 -->
+            <div class="bg-[#0f0f0f] border border-white/10 rounded-2xl overflow-hidden">
+                <div class="grid grid-cols-12 px-6 py-3 text-xs text-gray-600 uppercase tracking-wider border-b border-white/5">
+                    <div class="col-span-1">타입</div>
+                    <div class="col-span-3">이름</div>
+                    <div class="col-span-4">내용</div>
+                    <div class="col-span-1">TTL</div>
+                    <div class="col-span-1">프록시</div>
+                    <div class="col-span-2 text-right">작업</div>
+                </div>
+                <div id="dns-records">
+                    <div class="text-center py-12 text-gray-600">
+                        <i class="fas fa-spinner fa-spin text-2xl mb-3"></i>
+                        <p class="text-sm">DNS 레코드 로딩 중...</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <!-- 레코드 추가/편집 모달 -->
+    <div id="recordModal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm">
+        <div class="bg-[#111] border border-white/10 rounded-2xl p-8 w-full max-w-lg mx-4 shadow-2xl">
+            <div class="flex items-center justify-between mb-6">
+                <h2 id="modal-title" class="text-xl font-bold">DNS 레코드 추가</h2>
+                <button onclick="closeModal()" class="text-gray-500 hover:text-white transition text-xl">&times;</button>
+            </div>
+
+            <div class="space-y-4">
+                <div>
+                    <label class="text-sm text-gray-400 mb-1.5 block">레코드 타입</label>
+                    <select id="rec-type" onchange="updateTypeHelp()" class="w-full p-3 bg-white/5 border border-white/10 rounded-xl outline-none focus:border-blue-500 text-sm">
+                        <option value="A">A - IPv4 주소</option>
+                        <option value="AAAA">AAAA - IPv6 주소</option>
+                        <option value="CNAME">CNAME - 별칭</option>
+                        <option value="MX">MX - 메일 서버</option>
+                        <option value="TXT">TXT - 텍스트</option>
+                        <option value="NS">NS - 네임서버</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="text-sm text-gray-400 mb-1.5 block">이름 (Name)</label>
+                    <input id="rec-name" type="text" placeholder="@ 또는 subdomain"
+                        class="w-full p-3 bg-white/5 border border-white/10 rounded-xl outline-none focus:border-blue-500 text-sm">
+                    <p class="text-xs text-gray-600 mt-1">@ = 루트 도메인</p>
+                </div>
+                <div id="mx-priority-wrapper" class="hidden">
+                    <label class="text-sm text-gray-400 mb-1.5 block">우선순위 (Priority)</label>
+                    <input id="rec-priority" type="number" value="10" min="0" max="65535"
+                        class="w-full p-3 bg-white/5 border border-white/10 rounded-xl outline-none focus:border-blue-500 text-sm">
+                </div>
+                <div>
+                    <label class="text-sm text-gray-400 mb-1.5 block" id="content-label">내용 (Content)</label>
+                    <input id="rec-content" type="text" placeholder="IP 주소 또는 도메인"
+                        class="w-full p-3 bg-white/5 border border-white/10 rounded-xl outline-none focus:border-blue-500 text-sm">
+                </div>
+                <div>
+                    <label class="text-sm text-gray-400 mb-1.5 block">TTL</label>
+                    <select id="rec-ttl" class="w-full p-3 bg-white/5 border border-white/10 rounded-xl outline-none focus:border-blue-500 text-sm">
+                        <option value="1">자동</option>
+                        <option value="300">5분</option>
+                        <option value="3600">1시간</option>
+                        <option value="86400">1일</option>
+                    </select>
+                </div>
+                <div id="proxy-wrapper" class="flex items-center gap-3">
+                    <input id="rec-proxied" type="checkbox" checked class="w-4 h-4 rounded">
+                    <label class="text-sm text-gray-300">Cloudflare 프록시 사용 (권장)</label>
+                </div>
+            </div>
+
+            <div id="rec-error" class="hidden mt-4 p-3 rounded-xl text-sm bg-red-900/20 border border-red-500/30 text-red-400"></div>
+
+            <div class="flex gap-3 mt-6">
+                <button onclick="closeModal()" class="flex-1 border border-white/20 py-3 rounded-xl font-bold hover:bg-white/5 transition text-sm">취소</button>
+                <button onclick="saveRecord()" id="saveBtn" class="flex-1 bg-blue-600 py-3 rounded-xl font-bold hover:bg-blue-500 transition text-sm">저장</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="/src/auth-frontend.js"></script>
+    <script src="/src/sidebar.js"></script>
+    <script>
+        const TOKEN = localStorage.getItem('admin_token');
+        const H = { 'Authorization': `Bearer ${TOKEN}`, 'Content-Type': 'application/json' };
+        const params = new URLSearchParams(location.search);
+        const DOMAIN = params.get('domain') || '';
+        const SITE_ID = params.get('site_id') || '';
+        let records = [];
+        let currentFilter = '';
+        let editingId = null;
+
+        document.getElementById('page-domain').textContent = DOMAIN || 'DNS 관리';
+        document.title = `${DOMAIN} DNS | CloudPress`;
+
+        function showAlert(msg, type = 'error') {
+            const el = document.getElementById('alertMsg');
+            el.className = `mb-6 p-3 rounded-xl text-sm text-center ${type === 'error' ? 'bg-red-900/30 text-red-400 border border-red-500/30' : 'bg-green-900/30 text-green-400 border border-green-500/30'}`;
+            el.textContent = msg;
+            el.classList.remove('hidden');
+            setTimeout(() => el.classList.add('hidden'), 5000);
+        }
+
+        function typeColor(type) {
+            const colors = { A:'blue', AAAA:'indigo', CNAME:'green', MX:'yellow', TXT:'purple', NS:'gray', SRV:'orange' };
+            const c = colors[type] || 'gray';
+            return `bg-${c}-900/40 border-${c}-500/30 text-${c}-300`;
+        }
+
+        function renderRecords(recs) {
+            const el = document.getElementById('dns-records');
+            if (!recs.length) {
+                el.innerHTML = `<div class="text-center py-12 text-gray-600">
+                    <i class="fas fa-list text-2xl mb-3 opacity-50"></i>
+                    <p class="text-sm">레코드가 없습니다</p>
+                </div>`;
+                return;
+            }
+            el.innerHTML = recs.map(r => `
+            <div class="record-row grid grid-cols-12 px-6 py-4 border-b border-white/5 items-center transition-colors">
+                <div class="col-span-1">
+                    <span class="type-badge px-2 py-1 rounded-md border ${typeColor(r.type)}">${r.type}</span>
+                </div>
+                <div class="col-span-3 text-sm font-mono text-gray-300 truncate">${escHtml(r.name)}</div>
+                <div class="col-span-4 text-sm text-gray-400 font-mono truncate" title="${escHtml(r.content)}">${escHtml(r.content)}</div>
+                <div class="col-span-1 text-xs text-gray-600">${r.ttl === 1 ? 'Auto' : r.ttl + 's'}</div>
+                <div class="col-span-1">
+                    ${r.proxied
+                        ? '<span class="text-xs text-orange-400"><i class="fas fa-cloud"></i></span>'
+                        : '<span class="text-xs text-gray-600"><i class="fas fa-cloud opacity-30"></i></span>'}
+                </div>
+                <div class="col-span-2 flex justify-end gap-2">
+                    <button onclick="editRecord('${r.id}')" class="text-xs border border-white/10 px-3 py-1.5 rounded-lg hover:bg-white/5 transition text-gray-500 hover:text-white">
+                        <i class="fas fa-edit"></i>
+                    </button>
+                    <button onclick="deleteRecord('${r.id}')" class="text-xs text-gray-600 hover:text-red-400 transition px-2">
+                        <i class="fas fa-trash"></i>
+                    </button>
+                </div>
+            </div>`).join('');
+        }
+
+        function filterRecords(type) {
+            currentFilter = type;
+            document.querySelectorAll('.filter-btn').forEach(b => {
+                b.className = 'filter-btn px-4 py-2 rounded-xl text-sm font-bold border border-white/10 text-gray-500 hover:bg-white/5 hover:text-white transition';
+            });
+            const activeId = type ? `filter-${type.toLowerCase()}` : 'filter-all';
+            const activeBtn = document.querySelector(`[onclick="filterRecords('${type}')"]`) || document.getElementById('filter-all');
+            if (activeBtn) activeBtn.className = 'filter-btn active px-4 py-2 rounded-xl text-sm font-bold bg-blue-600/20 border border-blue-500/40 text-blue-400';
+            const filtered = type ? records.filter(r => r.type === type) : records;
+            renderRecords(filtered);
+        }
+
+        async function loadRecords() {
+            try {
+                const res = await fetch(`/api/dns?domain=${encodeURIComponent(DOMAIN)}&site_id=${SITE_ID}`, { headers: H });
+                const data = await res.json();
+                if (data.success) {
+                    records = data.records || [];
+                    filterRecords(currentFilter);
+                } else {
+                    showAlert(data.error || 'DNS 레코드를 불러오지 못했습니다.');
+                }
+            } catch {
+                showAlert('DNS 레코드 로드 실패. API 키를 확인해주세요.');
+                document.getElementById('dns-records').innerHTML = `<div class="text-center py-12 text-gray-600 text-sm"><i class="fas fa-exclamation-circle text-2xl mb-3 text-red-500/50 block"></i>Cloudflare API 키가 설정되어 있지 않거나 권한이 없습니다.<br><a href="/account.html" class="text-blue-400 hover:underline mt-2 inline-block">계정 설정에서 API 키를 등록하세요 →</a></div>`;
+            }
+        }
+
+        function openAddRecord() {
+            editingId = null;
+            document.getElementById('modal-title').textContent = 'DNS 레코드 추가';
+            document.getElementById('rec-type').value = 'A';
+            document.getElementById('rec-name').value = '';
+            document.getElementById('rec-content').value = '';
+            document.getElementById('rec-ttl').value = '1';
+            document.getElementById('rec-proxied').checked = true;
+            document.getElementById('rec-error').classList.add('hidden');
+            updateTypeHelp();
+            document.getElementById('recordModal').classList.remove('hidden');
+        }
+
+        function editRecord(id) {
+            const r = records.find(rec => rec.id === id);
+            if (!r) return;
+            editingId = id;
+            document.getElementById('modal-title').textContent = 'DNS 레코드 수정';
+            document.getElementById('rec-type').value = r.type;
+            document.getElementById('rec-name').value = r.name;
+            document.getElementById('rec-content').value = r.content;
+            document.getElementById('rec-ttl').value = r.ttl;
+            document.getElementById('rec-proxied').checked = r.proxied;
+            if (r.priority) document.getElementById('rec-priority').value = r.priority;
+            document.getElementById('rec-error').classList.add('hidden');
+            updateTypeHelp();
+            document.getElementById('recordModal').classList.remove('hidden');
+        }
+
+        function closeModal() { document.getElementById('recordModal').classList.add('hidden'); }
+
+        function updateTypeHelp() {
+            const type = document.getElementById('rec-type').value;
+            const contentLabel = document.getElementById('content-label');
+            const proxyWrapper = document.getElementById('proxy-wrapper');
+            const mxWrapper = document.getElementById('mx-priority-wrapper');
+
+            const labels = { A:'IP 주소 (예: 192.0.2.1)', AAAA:'IPv6 주소', CNAME:'대상 도메인 (예: example.com)', MX:'메일 서버 (예: mail.example.com)', TXT:'텍스트 내용', NS:'네임서버 주소' };
+            contentLabel.textContent = labels[type] || '내용 (Content)';
+
+            const noProxy = ['MX','TXT','NS','AAAA'];
+            if (noProxy.includes(type)) {
+                document.getElementById('rec-proxied').checked = false;
+                proxyWrapper.style.opacity = '0.4';
+            } else {
+                proxyWrapper.style.opacity = '1';
+            }
+            mxWrapper.classList.toggle('hidden', type !== 'MX');
+        }
+
+        async function saveRecord() {
+            const type = document.getElementById('rec-type').value;
+            const name = document.getElementById('rec-name').value.trim();
+            const content = document.getElementById('rec-content').value.trim();
+            const ttl = parseInt(document.getElementById('rec-ttl').value);
+            const proxied = document.getElementById('rec-proxied').checked;
+            const priority = type === 'MX' ? parseInt(document.getElementById('rec-priority').value) : undefined;
+
+            if (!name) return showError('이름을 입력해주세요.');
+            if (!content) return showError('내용을 입력해주세요.');
+
+            const btn = document.getElementById('saveBtn');
+            btn.disabled = true; btn.textContent = '저장 중...';
+
+            try {
+                const body = { domain: DOMAIN, site_id: SITE_ID, type, name, content, ttl, proxied };
+                if (priority !== undefined) body.priority = priority;
+                if (editingId) body.record_id = editingId;
+
+                const res = await fetch('/api/dns', {
+                    method: editingId ? 'PUT' : 'POST', headers: H,
+                    body: JSON.stringify(body)
+                });
+                const data = await res.json();
+                if (data.success) {
+                    closeModal();
+                    showAlert('레코드가 저장되었습니다.', 'success');
+                    await loadRecords();
+                } else {
+                    showError(data.error || '저장에 실패했습니다.');
+                }
+            } catch { showError('오류가 발생했습니다.'); }
+            finally { btn.disabled = false; btn.textContent = '저장'; }
+        }
+
+        async function deleteRecord(id) {
+            if (!confirm('이 DNS 레코드를 삭제하시겠습니까?')) return;
+            try {
+                const res = await fetch(`/api/dns?record_id=${id}&domain=${encodeURIComponent(DOMAIN)}&site_id=${SITE_ID}`, { method: 'DELETE', headers: H });
+                const data = await res.json();
+                if (data.success) { showAlert('삭제되었습니다.', 'success'); await loadRecords(); }
+                else showAlert(data.error || '삭제 실패');
+            } catch { showAlert('오류가 발생했습니다.'); }
+        }
+
+        function showError(msg) {
+            const el = document.getElementById('rec-error');
+            el.textContent = msg;
+            el.classList.remove('hidden');
+        }
+
+        function escHtml(str) {
+            return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+        }
+
+        if (DOMAIN) loadRecords();
+        else showAlert('도메인 파라미터가 없습니다.');
+    </script>
+</body>
+</html>

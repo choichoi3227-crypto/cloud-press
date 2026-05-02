@@ -151,23 +151,30 @@ async function createCfKV(cf, accountId, kvName) {
 
 // ── Supabase 프로젝트 + 버킷 자동 생성 ───────────────────────────────────────
 async function provisionSupabase(env, siteId, shortId) {
-  // 1) DB에서 여유 있는 기존 Supabase 계정 찾기
-  const slot = await env.DB.prepare(
-    "SELECT * FROM supabase_accounts WHERE used_gb < max_gb ORDER BY used_gb ASC LIMIT 1"
-  ).first().catch(() => null);
+  // 1) 환경변수 우선 체크 (가장 신뢰할 수 있는 소스)
+  let sUrl = env.SUPABASE_URL || env.SUPABASE_URL2 || null;
+  let sKey = env.SUPABASE_SERVICE_KEY || env.SUPABASE_KEY || env.SUPABASE_KEY2 || null;
+  let accountNo = "1";
 
-  let sUrl, sKey, accountNo;
+  // 2) DB에서 여유 있는 기존 Supabase 계정 찾기 (환경변수 없을 때만)
+  if (!sUrl || !sKey) {
+    const slot = await env.DB.prepare(
+      "SELECT * FROM supabase_accounts WHERE used_gb < max_gb ORDER BY used_gb ASC LIMIT 1"
+    ).first().catch(() => null);
 
-  if (slot) {
-    // 기존 환경변수 기반 계정 사용
-    sUrl      = env[slot.supabase_url] || slot.supabase_url;
-    sKey      = env[slot.supabase_key] || slot.supabase_key;
-    accountNo = slot.account_no;
-  } else {
-    // 환경변수에서 직접
-    sUrl      = env.SUPABASE_URL;
-    sKey      = env.SUPABASE_KEY;
-    accountNo = 1;
+    if (slot) {
+      sUrl      = env[slot.supabase_url] || slot.supabase_url;
+      sKey      = env[slot.supabase_key] || slot.supabase_key;
+      accountNo = slot.account_no;
+    }
+  }
+
+  // 3) DB에 기본 계정 등록 (없는 경우, 환경변수가 있다면)
+  if (sUrl && sKey) {
+    await env.DB.prepare(
+      `INSERT OR IGNORE INTO supabase_accounts (account_no, supabase_url, supabase_key, max_gb)
+       VALUES (?, ?, ?, 450)`
+    ).bind("1", "SUPABASE_URL", "SUPABASE_SERVICE_KEY", 450).run().catch(() => {});
   }
 
   // Supabase Management API 토큰이 있으면 새 프로젝트 자동 생성 시도
@@ -227,7 +234,10 @@ async function provisionSupabase(env, siteId, shortId) {
     }
   }
 
-  if (!sUrl || !sKey) return null;
+  if (!sUrl || !sKey) {
+    console.warn("[supabase] URL/KEY 미설정 - wrangler secret put SUPABASE_URL 및 SUPABASE_SERVICE_KEY 필요");
+    return null;
+  }
 
   // 버킷 생성
   const bucketName = `site-${shortId}`;

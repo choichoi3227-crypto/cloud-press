@@ -11,82 +11,56 @@
 </head>
 <body class="bg-[#050505] text-white md:flex md:h-screen">
     <script>
-        // 클라이언트 측 인증 체크
-        const token = localStorage.getItem('admin_token'); // 사용자 토큰도 'admin_token'으로 통일
-        if (!token) {
-            window.location.href = '/login.html';
-        }
+        const token = localStorage.getItem('admin_token');
+        if (!token) window.location.href = '/login.html';
     </script>
-
-    <!-- ── 모바일 헤더 (md 이상에서 숨김) ── -->
-    <header class="md:hidden sticky top-0 z-50 bg-[#050505]/95 backdrop-blur-lg border-b border-white/10">
-        <div class="flex justify-between items-center px-4 py-3">
-            <a href="/dashboard.html" class="text-xl font-black text-blue-500">CLOUD<span class="text-white">PRESS</span></a>
-            <button id="mobileMenuBtn" class="text-gray-400 hover:text-white p-2">
-                <i class="fas fa-bars text-xl"></i>
-            </button>
-        </div>
-        <!-- 드롭다운 메뉴 -->
-        <div id="mobileMenu" class="hidden border-t border-white/10 py-2 px-2 space-y-1">
-            <a href="/dashboard.html" class="flex items-center gap-3 px-4 py-3 rounded-xl hover:bg-white/5 transition font-bold text-white"><i class="fas fa-tachometer-alt w-5 text-center"></i> 대시보드</a>
-            <a href="/hosting.html" class="flex items-center gap-3 px-4 py-3 rounded-xl hover:bg-white/5 transition text-gray-400"><i class="fas fa-globe w-5 text-center"></i> 내 호스팅</a>
-            <a href="/traffic.html" class="flex items-center gap-3 px-4 py-3 rounded-xl hover:bg-white/5 transition text-gray-400"><i class="fas fa-chart-line w-5 text-center"></i> 트래픽</a>
-            <a href="/storage.html" class="flex items-center gap-3 px-4 py-3 rounded-xl hover:bg-white/5 transition text-gray-400"><i class="fas fa-hdd w-5 text-center"></i> 스토리지</a>
-            <a href="/account.html" class="flex items-center gap-3 px-4 py-3 rounded-xl hover:bg-white/5 transition text-gray-400"><i class="fas fa-user-circle w-5 text-center"></i> 내 계정</a>
-            <div class="border-t border-white/10 mt-2 pt-2">
-                <button onclick="logout()" class="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-red-400 hover:bg-red-900/20 transition">
-                    <i class="fas fa-sign-out-alt w-5 text-center"></i> 로그아웃
-                </button>
-            </div>
-        </div>
-    </header>
-    <script>
-        document.getElementById('mobileMenuBtn').addEventListener('click', () => {
-            document.getElementById('mobileMenu').classList.toggle('hidden');
-        });
-        // 메뉴 링크 클릭시 닫기
-        document.querySelectorAll('#mobileMenu a').forEach(a => {
-            a.addEventListener('click', () => document.getElementById('mobileMenu').classList.add('hidden'));
-        });
-    </script>
-
-    <!-- Sidebar -->
-    <aside class="w-64 border-r border-white/10 p-6 flex flex-col hidden md:flex">
-        <div class="text-2xl font-black text-blue-500 mb-10">CLOUD<span class="text-white">PRESS</span></div>
-        <nav class="flex-1 space-y-2">
-            <a href="/dashboard.html" class="block p-3 rounded-xl bg-white/10 font-bold"><i class="fas fa-tachometer-alt mr-3"></i> 대시보드</a>
-            <a href="/hosting.html" class="block p-3 rounded-xl hover:bg-white/5 transition"><i class="fas fa-globe mr-3"></i> 내 호스팅</a>
-            <a href="/traffic.html" class="block p-3 rounded-xl hover:bg-white/5 transition"><i class="fas fa-chart-line mr-3"></i> 트래픽</a>
-            <a href="/storage.html" class="block p-3 rounded-xl hover:bg-white/5 transition"><i class="fas fa-hdd mr-3"></i> 스토리지</a>
-            <a href="/account.html" class="block p-3 rounded-xl hover:bg-white/5 transition"><i class="fas fa-user-circle mr-3"></i> 내 계정</a>
-        </nav>
-        <button onclick="logout()" class="mt-auto w-full bg-red-600 py-3 rounded-xl font-bold hover:bg-red-500 transition"><i class="fas fa-sign-out-alt mr-2"></i> 로그아웃</button>
-    </aside>
 
     <!-- Main Content -->
-    <main class="flex-1 w-full p-10 overflow-y-auto">
+    <main class="flex-1 w-full p-8 overflow-y-auto">
         <header class="flex justify-between items-center mb-10">
-            <h1 class="text-3xl font-bold">대시보드 개요</h1>
-            <div id="user-display" class="text-sm text-gray-400">환영합니다, <span id="user-email">사용자님</span>!</div>
+            <div>
+                <h1 class="text-3xl font-bold">대시보드 개요</h1>
+                <p class="text-gray-500 text-sm mt-1">환영합니다, <span id="user-email">사용자님</span></p>
+            </div>
+            <a href="/hosting-create.html" class="bg-blue-600 hover:bg-blue-500 transition px-5 py-2.5 rounded-xl text-sm font-bold flex items-center gap-2">
+                <i class="fas fa-plus"></i> 새 호스팅 생성
+            </a>
         </header>
 
         <section class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-10">
-            <div class="p-6 bg-[#111] rounded-2xl border border-white/5">
-                <div class="text-gray-500 text-xs uppercase mb-2">활성 호스팅</div>
+            <div class="p-6 bg-[#111] rounded-2xl border border-white/5 hover:border-white/10 transition-all">
+                <div class="flex items-center justify-between mb-4">
+                    <div class="text-gray-500 text-xs uppercase tracking-wider">활성 호스팅</div>
+                    <div class="w-10 h-10 bg-blue-600/20 rounded-xl flex items-center justify-center">
+                        <i class="fas fa-server text-blue-400 text-sm"></i>
+                    </div>
+                </div>
                 <div class="text-4xl font-bold" id="active-hostings">0</div>
+                <div class="text-xs text-gray-600 mt-2">운영 중인 사이트</div>
             </div>
-            <div class="p-6 bg-[#111] rounded-2xl border border-white/5">
-                <div class="text-gray-500 text-xs uppercase mb-2">월간 트래픽</div>
+            <div class="p-6 bg-[#111] rounded-2xl border border-white/5 hover:border-white/10 transition-all">
+                <div class="flex items-center justify-between mb-4">
+                    <div class="text-gray-500 text-xs uppercase tracking-wider">월간 트래픽</div>
+                    <div class="w-10 h-10 bg-green-600/20 rounded-xl flex items-center justify-center">
+                        <i class="fas fa-chart-line text-green-400 text-sm"></i>
+                    </div>
+                </div>
                 <div class="text-4xl font-bold" id="monthly-traffic">0 GB</div>
+                <div class="text-xs text-gray-600 mt-2">이번 달 사용량</div>
             </div>
-            <div class="p-6 bg-[#111] rounded-2xl border border-white/5">
-                <div class="text-gray-500 text-xs uppercase mb-2">잔여 스토리지</div>
+            <div class="p-6 bg-[#111] rounded-2xl border border-white/5 hover:border-white/10 transition-all">
+                <div class="flex items-center justify-between mb-4">
+                    <div class="text-gray-500 text-xs uppercase tracking-wider">잔여 스토리지</div>
+                    <div class="w-10 h-10 bg-purple-600/20 rounded-xl flex items-center justify-center">
+                        <i class="fas fa-hdd text-purple-400 text-sm"></i>
+                    </div>
+                </div>
                 <div class="text-4xl font-bold" id="remaining-storage">0 GB</div>
+                <div class="text-xs text-gray-600 mt-2">총 18GB 기준</div>
             </div>
         </section>
 
-        <!-- 긴급 알림 바 -->
-        <div id="emergency-alert" class="hidden bg-red-600 text-white px-6 py-3 flex justify-between items-center shadow-2xl rounded-xl mb-10">
+        <div id="emergency-alert" class="hidden bg-red-600/90 text-white px-6 py-3 flex justify-between items-center shadow-2xl rounded-xl mb-10 border border-red-500/50">
             <div class="flex items-center gap-3">
                 <span class="animate-ping inline-flex h-3 w-3 rounded-full bg-white opacity-75"></span>
                 <span class="font-bold text-sm">긴급: 잔여 스토리지가 1GB 미만입니다. 비상 백업 스토리지를 가동하며 자동 최적화를 시작합니다.</span>
@@ -94,16 +68,38 @@
             <div class="text-xs opacity-80 font-mono" id="optimization-status">최적화 대기 중...</div>
         </div>
 
-        <!-- 트래픽 그래프 (예시) -->
+        <section class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-10">
+            <a href="/hosting.html" class="p-4 bg-[#111] rounded-2xl border border-white/5 hover:border-blue-500/30 hover:bg-blue-900/10 transition-all group text-center">
+                <i class="fas fa-server text-2xl text-gray-600 group-hover:text-blue-400 transition-colors mb-2 block"></i>
+                <div class="text-sm font-medium text-gray-400 group-hover:text-white transition-colors">호스팅 관리</div>
+            </a>
+            <a href="/domains.html" class="p-4 bg-[#111] rounded-2xl border border-white/5 hover:border-green-500/30 hover:bg-green-900/10 transition-all group text-center">
+                <i class="fas fa-globe text-2xl text-gray-600 group-hover:text-green-400 transition-colors mb-2 block"></i>
+                <div class="text-sm font-medium text-gray-400 group-hover:text-white transition-colors">도메인 관리</div>
+            </a>
+            <a href="/payment.html" class="p-4 bg-[#111] rounded-2xl border border-white/5 hover:border-yellow-500/30 hover:bg-yellow-900/10 transition-all group text-center">
+                <i class="fas fa-credit-card text-2xl text-gray-600 group-hover:text-yellow-400 transition-colors mb-2 block"></i>
+                <div class="text-sm font-medium text-gray-400 group-hover:text-white transition-colors">결제 수단</div>
+            </a>
+            <a href="/account.html" class="p-4 bg-[#111] rounded-2xl border border-white/5 hover:border-purple-500/30 hover:bg-purple-900/10 transition-all group text-center">
+                <i class="fas fa-user-circle text-2xl text-gray-600 group-hover:text-purple-400 transition-colors mb-2 block"></i>
+                <div class="text-sm font-medium text-gray-400 group-hover:text-white transition-colors">내 정보 관리</div>
+            </a>
+        </section>
+
         <section class="p-8 bg-[#111] rounded-3xl border border-white/10 mb-10">
-            <h2 class="text-2xl font-bold mb-6">최근 24시간 트래픽</h2>
+            <div class="flex items-center justify-between mb-6">
+                <h2 class="text-xl font-bold">최근 24시간 트래픽</h2>
+                <a href="/traffic.html" class="text-sm text-blue-400 hover:text-blue-300 transition">전체 보기 →</a>
+            </div>
             <div class="h-64">
                 <canvas id="trafficChart"></canvas>
             </div>
         </section>
     </main>
 
-    <script src="/src/auth-frontend.js"></script> <!-- 로그아웃 함수 포함 -->
-    <script src="/src/dashboard-logic.js"></script> <!-- 대시보드 데이터 로드 및 차트 -->
+    <script src="/src/auth-frontend.js"></script>
+    <script src="/src/sidebar.js"></script>
+    <script src="/src/dashboard-logic.js"></script>
 </body>
 </html>

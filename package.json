@@ -1,0 +1,28 @@
+{
+  "name": "cloud-press",
+  "version": "3.0.0",
+  "description": "완전한 서버리스 WordPress 호스팅 — Cloudflare Workers + Supabase",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev":           "wrangler dev",
+    "dev:php":       "wrangler dev --config wrangler-php.toml --port 8789",
+    "deploy":        "npm run deploy:php && npm run deploy:main",
+    "deploy:main":   "wrangler deploy",
+    "deploy:php":    "wrangler deploy --config wrangler-php.toml",
+    "db:init":       "wrangler d1 execute cloudpress-db --file=schema.sql",
+    "db:migrate":    "wrangler d1 execute cloudpress-db --file=schema-migrate.sql",
+    "db:remote":     "wrangler d1 execute cloudpress-db --remote --file=schema.sql",
+    "logs":          "wrangler tail",
+    "setup":         "node scripts/setup.mjs"
+  },
+  "devDependencies": {
+    "wrangler": "^3.98.0"
+  },
+  "dependencies": {
+    "@php-wasm/web": "^0.9.17"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

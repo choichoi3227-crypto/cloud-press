@@ -177,7 +177,7 @@
                             <div id="info-sftp" class="font-mono text-xs">-</div>
                         </div>
                         <div class="bg-white/5 rounded-xl p-3">
-                            <div class="text-gray-500 text-xs mb-1">스토리지 버킷</div>
+                            <div class="text-gray-500 text-xs mb-1">GitHub 저장소</div>
                             <div id="info-bucket" class="font-mono text-xs">-</div>
                         </div>
                         <div class="bg-white/5 rounded-xl p-3">
@@ -278,7 +278,7 @@
 
                     <div class="mb-4 p-3 bg-blue-900/20 border border-blue-500/20 rounded-xl text-sm text-blue-300">
                         <i class="fas fa-info-circle mr-2"></i>
-                        백업 파일은 Supabase Storage에 안전하게 저장됩니다. 다운로드 링크는 1시간 후 만료됩니다.
+                        백업 파일은 GitHub Repository에 안전하게 저장됩니다.
                     </div>
 
                     <div id="backup-list">
@@ -555,7 +555,7 @@
                 document.getElementById('info-domain').textContent  = site.primary_domain;
                 document.getElementById('info-ssh').textContent     = site.ssh_port || '-';
                 document.getElementById('info-sftp').textContent    = site.sftp_port || '-';
-                document.getElementById('info-bucket').textContent  = site.supabase_bucket || (site.status === 'provisioning' ? '⏳ 자동 생성 중...' : '미연결 (Supabase 설정 필요)');
+                document.getElementById('info-bucket').textContent  = site.github_repo_name ? (site.github_repo_owner + '/' + site.github_repo_name) : (site.status === 'provisioning' ? '⏳ GitHub 저장소 생성 중...' : '미연결 (관리자 설정에서 GitHub 토큰 추가 필요)');
                 document.getElementById('info-wpadmin').textContent = site.wp_admin_user || '-';
 
                 // PHP 현재 버전 배지

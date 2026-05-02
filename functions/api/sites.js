@@ -1,10 +1,17 @@
 // functions/api/sites.js
-// POST   → 호스팅 생성 (서브도메인 생성 없음, CF API로 Worker/D1/KV 자동 생성, Supabase 버킷 자동 분산)
+// POST   → 호스팅 생성 (CF API로 Worker/D1/KV 자동 생성, GitHub repo 자동 생성)
 // GET    → 사이트 목록 / 상세
 // PUT    → 설정 변경
 // DELETE → 사이트 삭제
 
 import { jsonOk, jsonErr, requireAuth, PLAN_LIMITS } from "../_shared.js";
+import {
+  pickGithubToken,
+  createGithubRepo,
+  uploadFileToGithub,
+  getRepoName,
+  ghReq,
+} from "./github-storage.js";
 
 // ── Cloudflare API 헬퍼 ───────────────────────────────────────────────────────
 class CfApi {
@@ -26,31 +33,10 @@ class CfApi {
     });
     return res.json();
   }
-  get(path)         { return this.req("GET",    path); }
-  post(path, body)  { return this.req("POST",   path, body); }
-  put(path, body)   { return this.req("PUT",    path, body); }
-  del(path)         { return this.req("DELETE", path); }
-}
-
-// ── Supabase 관리 API 헬퍼 ────────────────────────────────────────────────────
-class SupabaseAdmin {
-  constructor(accessToken) {
-    this.token = accessToken;
-    this.base  = "https://api.supabase.com/v1";
-  }
-  async req(method, path, body) {
-    const res = await fetch(`${this.base}${path}`, {
-      method,
-      headers: {
-        Authorization:  `Bearer ${this.token}`,
-        "Content-Type": "application/json",
-      },
-      body: body ? JSON.stringify(body) : undefined,
-    });
-    return { status: res.status, data: await res.json().catch(() => ({})) };
-  }
   get(path)        { return this.req("GET",    path); }
   post(path, body) { return this.req("POST",   path, body); }
+  put(path, body)  { return this.req("PUT",    path, body); }
+  del(path)        { return this.req("DELETE", path); }
 }
 
 // ── CF 계정 ID 조회 ───────────────────────────────────────────────────────────
@@ -59,42 +45,66 @@ async function getCfAccountId(cf) {
   return r.result?.[0]?.id || null;
 }
 
-// ── CF Worker 생성 ────────────────────────────────────────────────────────────
-async function createCfWorker(cf, accountId, workerName, siteId) {
+// ── CF Worker 생성 (GitHub 스토리지 연동) ─────────────────────────────────────
+async function createCfWorker(cf, accountId, workerName, siteId, githubOwner, githubRepo) {
   const script = `
 // CloudPress WordPress Worker — site: ${siteId}
+// Storage: GitHub (${githubOwner}/${githubRepo})
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
-    // 정적 파일은 Supabase에서 서빙
-    const supabaseUrl = env.SUPABASE_URL;
-    const supabaseKey = env.SUPABASE_KEY;
-    const bucketName  = env.BUCKET_NAME;
+
+    // CORS preflight
+    if (request.method === "OPTIONS") {
+      return new Response(null, {
+        headers: {
+          "Access-Control-Allow-Origin": "*",
+          "Access-Control-Allow-Methods": "GET,POST,PUT,DELETE,OPTIONS",
+          "Access-Control-Allow-Headers": "Content-Type,Authorization",
+        }
+      });
+    }
 
     // wp-admin, wp-login.php → WordPress 관리 처리
     if (url.pathname.startsWith('/wp-admin') || url.pathname === '/wp-login.php') {
-      return new Response(JSON.stringify({ site: '${siteId}', status: 'active' }), {
+      return new Response(JSON.stringify({ site: '${siteId}', status: 'active', storage: 'github' }), {
         headers: { 'Content-Type': 'application/json' }
       });
     }
 
-    // 미디어 파일 → Supabase Storage에서 서빙
+    // 미디어 파일 → GitHub Raw로 서빙
     if (url.pathname.startsWith('/wp-content/uploads/')) {
       const filePath = url.pathname.replace('/wp-content/uploads/', '');
-      const storageRes = await fetch(
-        \`\${supabaseUrl}/storage/v1/object/public/\${bucketName}/uploads/\${filePath}\`,
-        { headers: { apikey: supabaseKey } }
-      );
-      if (storageRes.ok) return storageRes;
+      const githubRaw = \`https://raw.githubusercontent.com/${githubOwner}/${githubRepo}/main/uploads/\${filePath}\`;
+      const ghToken = env.GITHUB_TOKEN;
+      const fetchOpts = ghToken
+        ? { headers: { Authorization: \`Bearer \${ghToken}\` } }
+        : {};
+      const ghRes = await fetch(githubRaw, fetchOpts).catch(() => null);
+      if (ghRes?.ok) return ghRes;
+    }
+
+    // 정적 파일 (테마, 플러그인) → GitHub Raw
+    if (url.pathname.startsWith('/wp-content/')) {
+      const filePath = url.pathname.slice('/wp-content/'.length);
+      const githubRaw = \`https://raw.githubusercontent.com/${githubOwner}/${githubRepo}/main/wp-content/\${filePath}\`;
+      const ghToken = env.GITHUB_TOKEN;
+      const fetchOpts = ghToken
+        ? { headers: { Authorization: \`Bearer \${ghToken}\` } }
+        : {};
+      const ghRes = await fetch(githubRaw, fetchOpts).catch(() => null);
+      if (ghRes?.ok) return ghRes;
     }
 
     // KV 캐시 확인
-    const cacheKey = \`page:\${url.pathname}\`;
-    const cached = await env.CACHE.get(cacheKey);
-    if (cached) {
-      return new Response(cached, {
-        headers: { 'Content-Type': 'text/html; charset=utf-8', 'X-Cache': 'HIT' }
-      });
+    if (env.CACHE) {
+      const cacheKey = \`page:\${url.pathname}\`;
+      const cached = await env.CACHE.get(cacheKey);
+      if (cached) {
+        return new Response(cached, {
+          headers: { 'Content-Type': 'text/html; charset=utf-8', 'X-Cache': 'HIT' }
+        });
+      }
     }
 
     return new Response('CloudPress WordPress Site — ' + url.pathname, {
@@ -132,7 +142,6 @@ export default {
 async function createCfD1(cf, accountId, dbName) {
   const r = await cf.post(`/accounts/${accountId}/d1/database`, { name: dbName });
   if (r.success) return { id: r.result.uuid, name: r.result.name };
-  // 이미 존재하면 조회
   const list = await cf.get(`/accounts/${accountId}/d1/database?name=${encodeURIComponent(dbName)}`);
   const existing = list.result?.find(d => d.name === dbName);
   if (existing) return { id: existing.uuid, name: existing.name };
@@ -149,144 +158,64 @@ async function createCfKV(cf, accountId, kvName) {
   return null;
 }
 
-// ── Supabase 프로젝트 + 버킷 자동 생성 ───────────────────────────────────────
-async function provisionSupabase(env, siteId, shortId) {
-  // 1) 환경변수 우선 체크 (가장 신뢰할 수 있는 소스)
-  let sUrl = env.SUPABASE_URL || env.SUPABASE_URL2 || null;
-  let sKey = env.SUPABASE_SERVICE_KEY || env.SUPABASE_KEY || env.SUPABASE_KEY2 || null;
-  let accountNo = "1";
-
-  // 2) DB에서 여유 있는 기존 Supabase 계정 찾기 (환경변수 없을 때만)
-  if (!sUrl || !sKey) {
-    const slot = await env.DB.prepare(
-      "SELECT * FROM supabase_accounts WHERE used_gb < max_gb ORDER BY used_gb ASC LIMIT 1"
-    ).first().catch(() => null);
-
-    if (slot) {
-      sUrl      = env[slot.supabase_url] || slot.supabase_url;
-      sKey      = env[slot.supabase_key] || slot.supabase_key;
-      accountNo = slot.account_no;
-    }
-  }
-
-  // 3) DB에 기본 계정 등록 (없는 경우, 환경변수가 있다면)
-  if (sUrl && sKey) {
-    await env.DB.prepare(
-      `INSERT OR IGNORE INTO supabase_accounts (account_no, supabase_url, supabase_key, max_gb)
-       VALUES (?, ?, ?, 450)`
-    ).bind("1", "SUPABASE_URL", "SUPABASE_SERVICE_KEY", 450).run().catch(() => {});
-  }
-
-  // Supabase Management API 토큰이 있으면 새 프로젝트 자동 생성 시도
-  if (env.SUPABASE_MANAGEMENT_TOKEN && env.SUPABASE_ORG_ID) {
-    try {
-      const mgmt = new SupabaseAdmin(env.SUPABASE_MANAGEMENT_TOKEN);
-
-      // 기존 프로젝트 목록에서 여유 찾기
-      const { data: projects } = await mgmt.get("/projects");
-      const usable = Array.isArray(projects)
-        ? projects.find(p => p.status === "ACTIVE_HEALTHY")
-        : null;
-
-      if (usable) {
-        // 기존 프로젝트의 API 키 가져오기
-        const { data: keys } = await mgmt.get(`/projects/${usable.id}/api-keys`);
-        const serviceKey = keys?.find(k => k.name === "service_role")?.api_key;
-        if (serviceKey && usable.endpoint) {
-          sUrl      = usable.endpoint;
-          sKey      = serviceKey;
-          accountNo = usable.id;
-        }
-      } else if (env.SUPABASE_DB_PASS) {
-        // 새 Supabase 프로젝트 생성
-        const projName = `cloudpress-${shortId}`;
-        const { data: newProj, status } = await mgmt.post("/projects", {
-          name:           projName,
-          organization_id: env.SUPABASE_ORG_ID,
-          db_pass:        env.SUPABASE_DB_PASS,
-          region:         env.SUPABASE_REGION || "ap-northeast-2",
-          plan:           "free",
-        });
-        if (status === 201 && newProj?.id) {
-          // 프로젝트 준비 대기 (최대 30초)
-          for (let i = 0; i < 10; i++) {
-            await new Promise(r => setTimeout(r, 3000));
-            const { data: status } = await mgmt.get(`/projects/${newProj.id}`);
-            if (status?.status === "ACTIVE_HEALTHY") break;
-          }
-          const { data: keys } = await mgmt.get(`/projects/${newProj.id}/api-keys`);
-          const serviceKey = keys?.find(k => k.name === "service_role")?.api_key;
-          if (serviceKey) {
-            sUrl      = `https://${newProj.id}.supabase.co`;
-            sKey      = serviceKey;
-            accountNo = newProj.id;
-
-            // DB에 새 계정 등록
-            await env.DB.prepare(
-              `INSERT OR IGNORE INTO supabase_accounts (account_no, supabase_url, supabase_key, max_gb)
-               VALUES (?, ?, ?, 450)`
-            ).bind(accountNo, sUrl, sKey, 450).run().catch(() => {});
-          }
-        }
-      }
-    } catch (e) {
-      console.warn("[supabase] management API error:", e.message);
-    }
-  }
-
-  if (!sUrl || !sKey) {
-    console.warn("[supabase] URL/KEY 미설정 - wrangler secret put SUPABASE_URL 및 SUPABASE_SERVICE_KEY 필요");
+// ── GitHub repo 프로비저닝 ────────────────────────────────────────────────────
+async function provisionGithubRepo(env, siteId, shortId, siteName) {
+  const token = await pickGithubToken(env);
+  if (!token) {
+    console.warn("[github] 사용 가능한 GitHub 토큰 없음");
     return null;
   }
 
-  // 버킷 생성
-  const bucketName = `site-${shortId}`;
-  try {
-    const res = await fetch(`${sUrl}/storage/v1/bucket`, {
-      method: "POST",
-      headers: {
-        apikey:         sKey,
-        Authorization:  `Bearer ${sKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        id:               bucketName,
-        name:             bucketName,
-        public:           false,
-        file_size_limit:  524288000, // 500MB
-        allowed_mime_types: null,
-      }),
-    });
-    const txt = await res.text();
-    const ok  = res.ok || txt.includes("already exists") || txt.includes("Duplicate");
+  const repoName = getRepoName(siteId);
+  const result   = await createGithubRepo(token, repoName, `CloudPress: ${siteName}`);
 
-    if (ok) {
-      // used_gb 업데이트
-      if (slot) {
-        await env.DB.prepare(
-          "UPDATE supabase_accounts SET used_gb = used_gb + 0.01 WHERE account_no = ?"
-        ).bind(slot.account_no).run().catch(() => {});
-      }
-
-      // 사이트 루트 디렉터리 구조 초기화 (uploads/, themes/, plugins/)
-      for (const folder of ["uploads/.keep", "themes/.keep", "plugins/.keep", "core/.keep"]) {
-        await fetch(`${sUrl}/storage/v1/object/${bucketName}/${folder}`, {
-          method: "POST",
-          headers: {
-            apikey:         sKey,
-            Authorization:  `Bearer ${sKey}`,
-            "Content-Type": "text/plain",
-          },
-          body: "",
-        }).catch(() => {});
-      }
-
-      return { bucketName, accountNo, supabaseUrl: sUrl, supabaseKey: sKey };
-    }
-  } catch (e) {
-    console.warn("[supabase] bucket creation error:", e.message);
+  if (result.error) {
+    console.warn("[github] repo 생성 실패:", result.error);
+    return null;
   }
-  return null;
+
+  const owner = result.owner;
+
+  // 기본 디렉터리 구조 초기화 (타임아웃 방지 위해 순차적으로)
+  const initFiles = [
+    { path: "uploads/.gitkeep",          content: "" },
+    { path: "wp-content/themes/.gitkeep", content: "" },
+    { path: "wp-content/plugins/.gitkeep", content: "" },
+    { path: "wp-core/.gitkeep",           content: "" },
+    { path: "README.md",                  content: `# CloudPress Site: ${siteName}\n\nSite ID: ${siteId}\nCreated: ${new Date().toISOString()}\n\n## Directory Structure\n- \`uploads/\` - WordPress media uploads\n- \`wp-content/themes/\` - WordPress themes\n- \`wp-content/plugins/\` - WordPress plugins\n- \`wp-core/\` - WordPress core files (chunked)\n` },
+  ];
+
+  // 순차 업로드 (타임아웃 방지)
+  for (const file of initFiles) {
+    await uploadFileToGithub(token, owner, repoName, file.path, file.content, `init: ${file.path}`)
+      .catch(e => console.warn(`[github] init file failed: ${file.path}`, e.message));
+    // 작은 딜레이 (API rate limit 방지)
+    await new Promise(r => setTimeout(r, 200));
+  }
+
+  return { owner, repoName, token };
+}
+
+// ── GitHub에 WordPress 코어 분할 업로드 ──────────────────────────────────────
+// 실제 WP 코어는 매우 크므로 백그라운드에서 청크 단위로 업로드
+async function uploadWordPressCore(token, owner, repoName, log) {
+  // WP 코어 메타정보만 먼저 기록 (실제 파일은 별도 배포 스크립트로)
+  const meta = {
+    version:     "6.5.5",
+    source:      "https://wordpress.org/wordpress-6.5.5.zip",
+    uploaded_at: new Date().toISOString(),
+    status:      "pending",
+    note:        "WordPress core files are managed separately. Use the setup script to upload.",
+  };
+
+  await uploadFileToGithub(
+    token, owner, repoName,
+    "wp-core/meta.json",
+    JSON.stringify(meta, null, 2),
+    "add WordPress core meta"
+  ).catch(() => {});
+
+  await log("GitHub repo 초기화 완료. WordPress 코어는 setup 스크립트로 업로드됩니다.");
 }
 
 // ── WordPress 초기 설정 SQL (D1에 직접 적용) ─────────────────────────────────
@@ -367,8 +296,8 @@ export async function onRequestGet(context) {
     }
 
     const query = payload.role === "admin"
-      ? "SELECT id, site_name, primary_domain, php_version, status, is_throttled, cache_enabled, created_at FROM sites ORDER BY rowid DESC"
-      : "SELECT id, site_name, primary_domain, php_version, status, is_throttled, cache_enabled, created_at FROM sites WHERE user_id = ? ORDER BY rowid DESC";
+      ? "SELECT id, site_name, primary_domain, php_version, status, is_throttled, cache_enabled, github_repo_owner, github_repo_name, created_at FROM sites ORDER BY rowid DESC"
+      : "SELECT id, site_name, primary_domain, php_version, status, is_throttled, cache_enabled, github_repo_owner, github_repo_name, created_at FROM sites WHERE user_id = ? ORDER BY rowid DESC";
     const stmt = payload.role === "admin"
       ? env.DB.prepare(query)
       : env.DB.prepare(query).bind(payload.id);
@@ -423,13 +352,13 @@ export async function onRequestPost(context) {
   if (!user?.cf_global_api_key || !user?.cf_email)
     return jsonErr("Cloudflare Global API 키가 설정되어 있지 않습니다. 계정 설정에서 먼저 등록해주세요.", 400);
 
-  // ── ID 생성 (서브도메인 없음 — primary_domain은 추후 사용자가 직접 연결) ───
+  // GitHub 토큰 존재 확인 (경고만, 차단 안 함)
+  const ghToken = await pickGithubToken(env);
+  const hasGithub = !!ghToken;
+
+  // ── ID 생성 ─────────────────────────────────────────────────────────────────
   const id      = crypto.randomUUID();
   const shortId = id.replace(/-/g, "").slice(0, 8);
-
-  // primary_domain: 서브도메인 대신 나중에 추가할 커스텀 도메인 placeholder
-  // 사용자가 도메인을 추가할 때까지 null로 둠
-  const primaryDomain = null;
 
   // ── CF API 인스턴스 ─────────────────────────────────────────────────────────
   const cf = new CfApi(user.cf_global_api_key, user.cf_email, null);
@@ -445,24 +374,24 @@ export async function onRequestPost(context) {
   cf.accountId = cfAccountId;
 
   // ── 사이트 레코드 먼저 DB에 저장 (provisioning 상태) ───────────────────────
-  const dbName = `wp_${id.replace(/-/g,"").slice(0,16)}`;
-  const dbUser = `u_${id.replace(/-/g,"").slice(0,12)}`;
-  const dbPass = crypto.randomUUID().replace(/-/g,"");
+  const dbName = `wp_${id.replace(/-/g, "").slice(0, 16)}`;
+  const dbUser = `u_${id.replace(/-/g, "").slice(0, 12)}`;
+  const dbPass = crypto.randomUUID().replace(/-/g, "");
   const dbHost = env.DEFAULT_DB_HOST || "127.0.0.1";
 
   try {
     await env.DB.prepare(
       `INSERT INTO sites
         (id, user_id, site_name, primary_domain, php_version, status,
-         supabase_bucket, supabase_account,
+         github_repo_owner, github_repo_name,
          wp_admin_user, wp_admin_pass, wp_admin_email,
          db_name, db_user, db_pass, db_host,
          cf_worker_name, cf_d1_id, cf_kv_id,
          wp_install_script, cache_enabled, created_at)
        VALUES (?, ?, ?, ?, ?, 'provisioning', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', 1, ?)`
     ).bind(
-      id, payload.id, site_name.trim(), primaryDomain, php_version,
-      null, null,
+      id, payload.id, site_name.trim(), null, php_version,
+      null, null, // github_repo_owner, github_repo_name (후에 업데이트)
       wp_admin_user, wp_admin_pass, wp_admin_email,
       dbName, dbUser, dbPass, dbHost,
       null, null, null,
@@ -479,19 +408,43 @@ export async function onRequestPost(context) {
     ).bind(id, msg, level).run().catch(() => {});
   };
 
-  // ── 백그라운드 프로비저닝 (비동기) ──────────────────────────────────────────
+  // ── 백그라운드 프로비저닝 ──────────────────────────────────────────────────
   const provision = async () => {
     try {
       await log("호스팅 프로비저닝 시작");
 
-      // 1) CF Worker 생성
+      // 1) GitHub repo 생성
+      let githubOwner = null;
+      let githubRepoName = null;
+      if (hasGithub) {
+        await log("GitHub 저장소 생성 중...");
+        const ghResult = await provisionGithubRepo(env, id, shortId, site_name.trim());
+        if (ghResult) {
+          githubOwner    = ghResult.owner;
+          githubRepoName = ghResult.repoName;
+          await log(`GitHub 저장소 생성 완료: ${githubOwner}/${githubRepoName}`);
+
+          // WordPress 코어 메타 업로드 (타임아웃 방지 - 메타만)
+          await uploadWordPressCore(ghResult.token, githubOwner, githubRepoName, log);
+        } else {
+          await log("GitHub 저장소 생성 실패 (계속 진행)", "warning");
+        }
+      } else {
+        await log("GitHub 토큰 미설정 - 스토리지 없이 진행 (관리자 설정에서 토큰 추가 필요)", "warning");
+      }
+
+      // 2) CF Worker 생성
       const workerName = `cp-site-${shortId}`;
       await log(`Cloudflare Worker 생성 중: ${workerName}`);
-      const workerOk = await createCfWorker(cf, cfAccountId, workerName, id);
+      const workerOk = await createCfWorker(
+        cf, cfAccountId, workerName, id,
+        githubOwner || "placeholder",
+        githubRepoName || `cloudpress-site-${shortId}`
+      );
       if (!workerOk) await log("Worker 생성 실패 (계속 진행)", "warning");
       else await log(`Worker 생성 완료: ${workerName}`);
 
-      // 2) CF D1 DB 생성
+      // 3) CF D1 DB 생성
       const d1Name = `cp-db-${shortId}`;
       await log(`D1 데이터베이스 생성 중: ${d1Name}`);
       const d1 = await createCfD1(cf, cfAccountId, d1Name);
@@ -499,7 +452,7 @@ export async function onRequestPost(context) {
       if (d1Id) await log(`D1 생성 완료: ${d1Name} (${d1Id})`);
       else      await log("D1 생성 실패 (계속 진행)", "warning");
 
-      // 3) CF KV 생성
+      // 4) CF KV 생성
       const kvName = `cp-kv-${shortId}`;
       await log(`KV 네임스페이스 생성 중: ${kvName}`);
       const kv = await createCfKV(cf, cfAccountId, kvName);
@@ -507,52 +460,33 @@ export async function onRequestPost(context) {
       if (kvId) await log(`KV 생성 완료: ${kvName} (${kvId})`);
       else      await log("KV 생성 실패 (계속 진행)", "warning");
 
-      // 4) Supabase 버킷 프로비저닝
-      await log("Supabase 스토리지 버킷 프로비저닝 중...");
-      const sb = await provisionSupabase(env, id, shortId);
-      let bucketName = null, supabaseAccountNo = null;
-      if (sb) {
-        bucketName        = sb.bucketName;
-        supabaseAccountNo = sb.accountNo;
-        await log(`Supabase 버킷 생성 완료: ${sb.bucketName}`);
-      } else {
-        await log("Supabase 버킷 생성 실패 (나중에 수동 연결 가능)", "warning");
-      }
-
       // 5) WordPress D1 초기화 SQL 실행
+      const tempDomain = `${workerName}.workers.dev`;
       if (d1Id) {
-        const domain = `site-${shortId}.workers.dev`; // 임시 Workers.dev 도메인
         await log("WordPress 데이터베이스 초기화 중...");
-        const initSql = buildWpInitSql(id, domain, wp_admin_user, wp_admin_pass, wp_admin_email);
-
-        // D1에 SQL 실행
+        const initSql = buildWpInitSql(id, tempDomain, wp_admin_user, wp_admin_pass, wp_admin_email);
         const sqlRes = await cf.post(
           `/accounts/${cfAccountId}/d1/database/${d1Id}/query`,
           { sql: initSql }
         );
         if (sqlRes.success) await log("WordPress DB 초기화 완료");
         else                await log("WordPress DB 초기화 실패: " + JSON.stringify(sqlRes.errors), "warning");
-
-        // Workers.dev 라우트 활성화 (임시 도메인)
-        await cf.post(`/accounts/${cfAccountId}/workers/scripts/${workerName}/subdomain`, {
-          enabled: false, // 서브도메인 비활성화 — 사용자가 직접 도메인 연결
-        }).catch(() => {});
-
-        // Workers.dev 비활성 → 도메인 추가 시 활성화
-        const tempDomain = `${workerName}.workers.dev`;
-        await env.DB.prepare(
-          "UPDATE sites SET primary_domain = ?, cf_worker_name = ?, cf_d1_id = ?, cf_kv_id = ?, supabase_bucket = ?, supabase_account = ?, status = 'active' WHERE id = ?"
-        ).bind(tempDomain, workerName, d1Id, kvId, bucketName, supabaseAccountNo, id).run();
-
-        await log(`WordPress 설치 완료 — 도메인 탭에서 커스텀 도메인을 연결하세요.`);
-      } else {
-        // D1 없이도 일단 active로
-        const tempDomain = `${workerName || `cp-site-${shortId}`}.workers.dev`;
-        await env.DB.prepare(
-          "UPDATE sites SET primary_domain = ?, cf_worker_name = ?, cf_kv_id = ?, supabase_bucket = ?, supabase_account = ?, status = 'active' WHERE id = ?"
-        ).bind(tempDomain, workerName, kvId, bucketName, supabaseAccountNo, id).run();
-        await log("호스팅 생성 완료 (D1 없이 진행)");
       }
+
+      // 6) DB 업데이트
+      await env.DB.prepare(
+        `UPDATE sites SET
+          primary_domain    = ?,
+          cf_worker_name    = ?,
+          cf_d1_id          = ?,
+          cf_kv_id          = ?,
+          github_repo_owner = ?,
+          github_repo_name  = ?,
+          status = 'active'
+         WHERE id = ?`
+      ).bind(tempDomain, workerName, d1Id, kvId, githubOwner, githubRepoName, id).run();
+
+      await log(`호스팅 생성 완료! GitHub: ${githubOwner}/${githubRepoName} — 도메인 탭에서 커스텀 도메인을 연결하세요.`);
 
     } catch (e) {
       await log("프로비저닝 오류: " + e.message, "error");
@@ -560,7 +494,6 @@ export async function onRequestPost(context) {
     }
   };
 
-  // Cloudflare Workers: context.waitUntil로 백그라운드 실행
   if (context.waitUntil) {
     context.waitUntil(provision());
   } else {
@@ -570,10 +503,11 @@ export async function onRequestPost(context) {
   return jsonOk({
     success:       true,
     id,
-    message:       "호스팅 생성이 시작되었습니다. Cloudflare 리소스(Worker/D1/KV)와 Supabase 버킷을 자동으로 생성 중입니다.",
+    message:       `호스팅 생성이 시작되었습니다. Cloudflare 리소스(Worker/D1/KV)${hasGithub ? "와 GitHub 저장소" : ""}를 자동으로 생성 중입니다.`,
     status:        "provisioning",
     wp_admin_user,
-    note:          "도메인 탭에서 커스텀 도메인을 연결해주세요. (서브도메인은 자동 생성되지 않습니다)",
+    github_enabled: hasGithub,
+    note:          "도메인 탭에서 커스텀 도메인을 연결해주세요.",
   });
 }
 
@@ -623,32 +557,29 @@ export async function onRequestDelete(context) {
   if (!id) return jsonErr("사이트 ID가 필요합니다.", 400);
 
   const site = await env.DB.prepare(
-    "SELECT id, user_id, cf_worker_name, cf_d1_id, cf_kv_id FROM sites WHERE id = ?"
+    "SELECT id, user_id, cf_worker_name, cf_d1_id, cf_kv_id, github_repo_owner, github_repo_name FROM sites WHERE id = ?"
   ).bind(id).first();
   if (!site) return jsonErr("사이트를 찾을 수 없습니다.", 404);
   if (site.user_id !== payload.id && payload.role !== "admin")
     return jsonErr("권한이 없습니다.", 403);
 
-  // CF 리소스 정리 (사용자 CF 키로)
+  // CF 리소스 정리
   try {
     const user = await env.DB.prepare(
       "SELECT cf_global_api_key, cf_email FROM users WHERE id = ?"
-    ).bind(payload.id).first();
+    ).bind(site.user_id).first();
 
     if (user?.cf_global_api_key && user?.cf_email) {
       const cf = new CfApi(user.cf_global_api_key, user.cf_email, null);
       const accountId = env.CF_ACCOUNT_ID || await getCfAccountId(cf).catch(() => null);
       if (accountId) {
         cf.accountId = accountId;
-        // Worker 삭제
         if (site.cf_worker_name) {
           await cf.del(`/accounts/${accountId}/workers/scripts/${site.cf_worker_name}`).catch(() => {});
         }
-        // D1 삭제
         if (site.cf_d1_id) {
           await cf.del(`/accounts/${accountId}/d1/database/${site.cf_d1_id}`).catch(() => {});
         }
-        // KV 삭제
         if (site.cf_kv_id) {
           await cf.del(`/accounts/${accountId}/storage/kv/namespaces/${site.cf_kv_id}`).catch(() => {});
         }
@@ -658,12 +589,17 @@ export async function onRequestDelete(context) {
     console.warn("[sites/delete] CF cleanup:", e.message);
   }
 
+  // GitHub repo는 삭제하지 않음 (데이터 보호) — 사용자가 직접 삭제
+
   try {
     await env.DB.prepare("DELETE FROM domain_aliases WHERE site_id = ?").bind(id).run();
     await env.DB.prepare("DELETE FROM site_ssh_keys WHERE site_id = ?").bind(id).run();
     await env.DB.prepare("DELETE FROM php_logs WHERE site_id = ?").bind(id).run();
     await env.DB.prepare("DELETE FROM sites WHERE id = ?").bind(id).run();
-    return jsonOk({ success: true, message: "호스팅이 삭제되었습니다." });
+    return jsonOk({
+      success: true,
+      message: "호스팅이 삭제되었습니다." + (site.github_repo_name ? ` (GitHub 저장소 ${site.github_repo_owner}/${site.github_repo_name}는 보존되었습니다. 필요시 직접 삭제하세요.)` : ""),
+    });
   } catch (e) {
     return jsonErr("삭제 오류: " + e.message, 500);
   }

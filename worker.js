@@ -1,31 +1,93 @@
 /**
- * CloudPress WordPress Worker v3.0
+ * CloudPress WordPress Worker v3.1
  * ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
- * 진짜 WordPress를 Cloudflare Workers에서 서버리스로 실행
+ * GitHub 스토리지 기반 WordPress 서버리스 실행
  *
  * 아키텍처:
- *   - PHP 실행: php-wasm (WebAssembly PHP 8.2) via @php-wasm/node CDN
- *   - DB: Cloudflare D1 (SQLite) ← WordPress MySQL → SQLite 브릿지
- *   - 파일시스템: Supabase Storage (WordPress 코어/테마/플러그인/미디어)
+ *   - 파일시스템: GitHub (WordPress 코어/테마/플러그인/미디어)
+ *   - DB: Cloudflare D1 (SQLite) — WordPress MySQL → SQLite 브릿지
  *   - 세션/캐시: Cloudflare KV
- *   - WordPress 코어: Supabase Storage에 자동 업로드 후 php-wasm에 마운트
+ *   - PHP 실행: php-wasm (WebAssembly PHP 8.2) via PHP_RUNNER binding
  *
  * 환경변수 (wrangler secret put):
- *   SUPABASE_URL          - Supabase 프로젝트 URL
- *   SUPABASE_SERVICE_KEY  - service_role key
+ *   GITHUB_TOKEN          - GitHub Personal Access Token (repo 접근)
+ *   GITHUB_OWNER          - GitHub 유저명/org
+ *   GITHUB_REPO           - 이 사이트의 GitHub repo 이름
  *   JWT_SECRET            - 플랫폼 JWT 서명키
+ *
+ * 바인딩 (wrangler.toml):
+ *   DB                    - Cloudflare D1 (이 사이트 전용 WordPress DB)
+ *   CACHE                 - Cloudflare KV (페이지 캐시)
+ *   KV                    - Cloudflare KV (설치 상태 등)
+ *   ASSETS                - 정적 파일 (선택)
+ *   PHP_RUNNER            - PHP Worker 서비스 바인딩 (선택)
  */
 
-// ─── PHP-WASM 로드 (Cloudflare Workers CDN) ────────────────────────────────
-// Workers는 npm 패키지를 직접 import 불가 → ESM CDN 활용
-const PHP_WASM_CDN = "https://cdn.jsdelivr.net/npm/@php-wasm/web@0.9.17/build/php_8_2.js";
+// ─── GitHub Storage 헬퍼 ──────────────────────────────────────────────────
+
+class GitHubStorage {
+  constructor(token, owner, repo) {
+    this.token = token;
+    this.owner = owner;
+    this.repo  = repo;
+    this.base  = "https://api.github.com";
+  }
+
+  _headers() {
+    return {
+      Authorization:         `Bearer ${this.token}`,
+      Accept:                "application/vnd.github+json",
+      "X-GitHub-Api-Version": "2022-11-28",
+      "Content-Type":        "application/json",
+      "User-Agent":          "CloudPress-Worker/3.1",
+    };
+  }
+
+  /** 파일 raw URL로 직접 가져오기 (빠름) */
+  rawUrl(path) {
+    return `https://raw.githubusercontent.com/${this.owner}/${this.repo}/main/${path}`;
+  }
+
+  async fetchRaw(path) {
+    const res = await fetch(this.rawUrl(path), {
+      headers: this.token
+        ? { Authorization: `Bearer ${this.token}` }
+        : {},
+    });
+    if (!res.ok) return null;
+    return res;
+  }
+
+  async getFile(path) {
+    const res = await fetch(
+      `${this.base}/repos/${this.owner}/${this.repo}/contents/${path}`,
+      { headers: this._headers() }
+    );
+    if (!res.ok) return null;
+    const data = await res.json();
+    if (data?.content) {
+      const decoded = atob(data.content.replace(/\n/g, ""));
+      return { text: decoded, sha: data.sha };
+    }
+    return null;
+  }
+
+  async exists(path) {
+    const res = await fetch(
+      `${this.base}/repos/${this.owner}/${this.repo}/contents/${path}`,
+      { method: "HEAD", headers: this._headers() }
+    );
+    return res.ok;
+  }
+}
 
 // ─── 유틸리티 ──────────────────────────────────────────────────────────────
+
 function jsonOk(data, status = 200) {
   return new Response(JSON.stringify(data), {
     status,
     headers: {
-      "Content-Type": "application/json",
+      "Content-Type":                "application/json",
       "Access-Control-Allow-Origin": "*",
       "Access-Control-Allow-Methods": "GET,POST,PUT,DELETE,OPTIONS",
       "Access-Control-Allow-Headers": "Content-Type,Authorization",
@@ -37,187 +99,220 @@ function jsonErr(msg, status = 400) {
   return jsonOk({ error: msg }, status);
 }
 
-// ─── Supabase Storage 헬퍼 ─────────────────────────────────────────────────
-class SupabaseStorage {
-  constructor(url, key) {
-    this.url = url;
-    this.key = key;
-  }
+// ─── D1 쿼리 헬퍼 ─────────────────────────────────────────────────────────
 
-  async upload(bucket, path, body, contentType = "application/octet-stream") {
-    const res = await fetch(
-      `${this.url}/storage/v1/object/${bucket}/${path}`,
-      {
-        method: "POST",
-        headers: {
-          apikey: this.key,
-          Authorization: `Bearer ${this.key}`,
-          "Content-Type": contentType,
-          "x-upsert": "true",
-        },
-        body,
-      }
-    );
-    return res.ok;
-  }
-
-  async download(bucket, path) {
-    const res = await fetch(
-      `${this.url}/storage/v1/object/${bucket}/${path}`,
-      {
-        headers: {
-          apikey: this.key,
-          Authorization: `Bearer ${this.key}`,
-        },
-      }
-    );
-    if (!res.ok) return null;
-    return res;
-  }
-
-  async exists(bucket, path) {
-    const res = await fetch(
-      `${this.url}/storage/v1/object/info/${bucket}/${path}`,
-      {
-        headers: {
-          apikey: this.key,
-          Authorization: `Bearer ${this.key}`,
-        },
-      }
-    );
-    return res.ok;
-  }
-
-  async createBucket(name) {
-    const res = await fetch(`${this.url}/storage/v1/bucket`, {
-      method: "POST",
-      headers: {
-        apikey: this.key,
-        Authorization: `Bearer ${this.key}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        id: name,
-        name,
-        public: false,
-        file_size_limit: 524288000,
-      }),
-    });
-    const text = await res.text();
-    return res.ok || text.includes("already exists") || text.includes("Duplicate");
-  }
-
-  async list(bucket, prefix = "") {
-    const res = await fetch(`${this.url}/storage/v1/object/list/${bucket}`, {
-      method: "POST",
-      headers: {
-        apikey: this.key,
-        Authorization: `Bearer ${this.key}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ prefix, limit: 1000 }),
-    });
-    if (!res.ok) return [];
-    const data = await res.json();
-    return Array.isArray(data) ? data : [];
-  }
-
-  publicUrl(bucket, path) {
-    return `${this.url}/storage/v1/object/public/${bucket}/${path}`;
-  }
-}
-
-// ─── WordPress 설치 감지 & 초기화 ─────────────────────────────────────────
-async function ensureWordPressInstalled(env, siteId, storage) {
-  const bucket = `site-${siteId.replace(/-/g, "").slice(0, 8)}`;
-
-  // 이미 설치됐는지 확인
-  const installed = await env.KV?.get(`wp_installed:${siteId}`);
-  if (installed) return { bucket, installed: true };
-
-  // 버킷 생성
-  await storage.createBucket(bucket);
-
-  // wp-config.php 생성 (D1 SQLite 드라이버 포함)
-  const wpConfig = buildWpConfig(siteId, env);
-  await storage.upload(bucket, "wordpress/wp-config.php", wpConfig, "text/plain");
-
-  // db.php SQLite 드라이버 업로드
-  const dbPhp = buildDbPhp();
-  await storage.upload(bucket, "wordpress/wp-content/db.php", dbPhp, "text/plain");
-
-  // .keep 파일로 폴더 구조 생성
-  for (const dir of ["uploads", "themes", "plugins"]) {
-    await storage.upload(bucket, `wordpress/wp-content/${dir}/.keep`, "", "text/plain");
-  }
-
-  // WordPress 코어 파일이 없으면 자동 다운로드 (최초 설치)
-  const coreExists = await storage.exists(bucket, "wordpress/wp-load.php");
-  if (!coreExists) {
-    // 백그라운드에서 WordPress 코어 다운로드 & 업로드
-    // (첫 요청 시 큐에 등록 → Install 큐 Worker가 처리)
-    await env.INSTALL_QUEUE?.put(
-      `install:${siteId}`,
-      JSON.stringify({
-        bucket,
-        siteId,
-        timestamp: Date.now(),
-      }),
-      { expirationTtl: 3600 }
-    );
-    return { bucket, installed: false, installing: true };
-  }
-
-  await env.KV?.put(`wp_installed:${siteId}`, "1");
-  return { bucket, installed: true };
-}
-
-// ─── WordPress 코어 파일 Supabase에 업로드 (Install Worker) ───────────────
-async function installWordPressCore(env, siteId, bucket, storage) {
-  // WordPress 최신 버전 다운로드 (공식 다운로드 서버)
-  const wpDownloadUrl = "https://ko.wordpress.org/latest-ko_KR.zip";
-
+async function d1Query(db, sql, params = []) {
   try {
-    const res = await fetch(wpDownloadUrl);
-    if (!res.ok) throw new Error("WordPress 다운로드 실패");
-
-    const zipBuffer = await res.arrayBuffer();
-
-    // Workers에서 ZIP 처리 (DecompressionStream 사용)
-    // Workers는 네이티브 ZIP 압축해제 미지원 → 파일 목록을 미리 알고 있으므로
-    // wp-content/db.php, wp-config.php만 커스텀하고 나머지는 Supabase에 저장
-    await storage.upload(bucket, "wordpress/wordpress.zip", zipBuffer, "application/zip");
-
-    // 설치 완료 마킹
-    await env.KV?.put(`wp_installed:${siteId}`, "1");
-    await env.INSTALL_QUEUE?.delete(`install:${siteId}`);
-
-    return true;
+    const stmt = params.length
+      ? db.prepare(sql).bind(...params)
+      : db.prepare(sql);
+    const result = await stmt.all();
+    return { ok: true, results: result.results || [] };
   } catch (e) {
-    console.error("[install] 오류:", e.message);
-    return false;
+    return { ok: false, error: e.message };
   }
 }
 
-// ─── wp-config.php 생성 (D1 + Supabase 설정) ─────────────────────────────
-function buildWpConfig(siteId, env) {
+async function d1Run(db, sql, params = []) {
+  try {
+    const stmt = params.length
+      ? db.prepare(sql).bind(...params)
+      : db.prepare(sql);
+    await stmt.run();
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+}
+
+// ─── KV 캐시 ───────────────────────────────────────────────────────────────
+
+async function getCached(kv, key) {
+  if (!kv) return null;
+  try { return await kv.get(key); } catch { return null; }
+}
+
+async function setCached(kv, key, value, ttl = 3600) {
+  if (!kv) return;
+  try { await kv.put(key, value, { expirationTtl: ttl }); } catch {}
+}
+
+// ─── WordPress 설치 상태 확인 ──────────────────────────────────────────────
+
+async function checkInstalled(db, kv) {
+  // KV에서 빠르게 확인
+  const kvFlag = await getCached(kv, "wp:installed");
+  if (kvFlag === "1") return true;
+
+  // D1에서 wp_options 테이블 존재 여부 확인
+  if (db) {
+    const r = await d1Query(
+      db,
+      "SELECT name FROM sqlite_master WHERE type='table' AND name='wp_options' LIMIT 1"
+    );
+    if (r.ok && r.results.length > 0) {
+      await setCached(kv, "wp:installed", "1", 86400);
+      return true;
+    }
+  }
+  return false;
+}
+
+// ─── WordPress 초기 테이블 생성 (D1) ──────────────────────────────────────
+
+async function initWordPressDB(db, siteUrl, adminUser, adminPass, adminEmail) {
+  if (!db) return false;
+
+  const now = new Date().toISOString().slice(0, 19).replace("T", " ");
+  const sqls = [
+    `CREATE TABLE IF NOT EXISTS wp_options (
+      option_id    INTEGER PRIMARY KEY AUTOINCREMENT,
+      option_name  TEXT UNIQUE NOT NULL,
+      option_value TEXT NOT NULL DEFAULT '',
+      autoload     TEXT NOT NULL DEFAULT 'yes'
+    )`,
+    `CREATE TABLE IF NOT EXISTS wp_users (
+      ID              INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_login      TEXT NOT NULL DEFAULT '',
+      user_pass       TEXT NOT NULL DEFAULT '',
+      user_nicename   TEXT NOT NULL DEFAULT '',
+      user_email      TEXT NOT NULL DEFAULT '',
+      user_url        TEXT NOT NULL DEFAULT '',
+      user_registered TEXT NOT NULL DEFAULT '',
+      user_status     INTEGER NOT NULL DEFAULT 0,
+      display_name    TEXT NOT NULL DEFAULT ''
+    )`,
+    `CREATE TABLE IF NOT EXISTS wp_usermeta (
+      umeta_id   INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id    INTEGER NOT NULL DEFAULT 0,
+      meta_key   TEXT,
+      meta_value TEXT
+    )`,
+    `CREATE TABLE IF NOT EXISTS wp_posts (
+      ID                    INTEGER PRIMARY KEY AUTOINCREMENT,
+      post_author           INTEGER NOT NULL DEFAULT 0,
+      post_date             TEXT NOT NULL DEFAULT '',
+      post_content          TEXT NOT NULL DEFAULT '',
+      post_title            TEXT NOT NULL DEFAULT '',
+      post_excerpt          TEXT NOT NULL DEFAULT '',
+      post_status           TEXT NOT NULL DEFAULT 'publish',
+      comment_status        TEXT NOT NULL DEFAULT 'open',
+      ping_status           TEXT NOT NULL DEFAULT 'open',
+      post_name             TEXT NOT NULL DEFAULT '',
+      post_type             TEXT NOT NULL DEFAULT 'post',
+      post_modified         TEXT NOT NULL DEFAULT '',
+      guid                  TEXT NOT NULL DEFAULT '',
+      menu_order            INTEGER NOT NULL DEFAULT 0,
+      comment_count         INTEGER NOT NULL DEFAULT 0
+    )`,
+    `CREATE TABLE IF NOT EXISTS wp_postmeta (
+      meta_id    INTEGER PRIMARY KEY AUTOINCREMENT,
+      post_id    INTEGER NOT NULL DEFAULT 0,
+      meta_key   TEXT,
+      meta_value TEXT
+    )`,
+    `CREATE TABLE IF NOT EXISTS wp_terms (
+      term_id    INTEGER PRIMARY KEY AUTOINCREMENT,
+      name       TEXT NOT NULL DEFAULT '',
+      slug       TEXT NOT NULL DEFAULT '',
+      term_group INTEGER NOT NULL DEFAULT 0
+    )`,
+    `CREATE TABLE IF NOT EXISTS wp_term_taxonomy (
+      term_taxonomy_id INTEGER PRIMARY KEY AUTOINCREMENT,
+      term_id          INTEGER NOT NULL DEFAULT 0,
+      taxonomy         TEXT NOT NULL DEFAULT '',
+      description      TEXT NOT NULL DEFAULT '',
+      parent           INTEGER NOT NULL DEFAULT 0,
+      count            INTEGER NOT NULL DEFAULT 0
+    )`,
+    `CREATE TABLE IF NOT EXISTS wp_term_relationships (
+      object_id        INTEGER NOT NULL DEFAULT 0,
+      term_taxonomy_id INTEGER NOT NULL DEFAULT 0,
+      term_order       INTEGER NOT NULL DEFAULT 0,
+      PRIMARY KEY (object_id, term_taxonomy_id)
+    )`,
+    `CREATE TABLE IF NOT EXISTS wp_comments (
+      comment_ID           INTEGER PRIMARY KEY AUTOINCREMENT,
+      comment_post_ID      INTEGER NOT NULL DEFAULT 0,
+      comment_author       TEXT NOT NULL DEFAULT '',
+      comment_author_email TEXT NOT NULL DEFAULT '',
+      comment_author_url   TEXT NOT NULL DEFAULT '',
+      comment_author_IP    TEXT NOT NULL DEFAULT '',
+      comment_date         TEXT NOT NULL DEFAULT '',
+      comment_content      TEXT NOT NULL DEFAULT '',
+      comment_approved     TEXT NOT NULL DEFAULT '1',
+      comment_type         TEXT NOT NULL DEFAULT 'comment',
+      comment_parent       INTEGER NOT NULL DEFAULT 0,
+      user_id              INTEGER NOT NULL DEFAULT 0
+    )`,
+    `CREATE TABLE IF NOT EXISTS wp_commentmeta (
+      meta_id    INTEGER PRIMARY KEY AUTOINCREMENT,
+      comment_id INTEGER NOT NULL DEFAULT 0,
+      meta_key   TEXT,
+      meta_value TEXT
+    )`,
+    // 기본 옵션 삽입
+    `INSERT OR IGNORE INTO wp_options (option_name, option_value, autoload) VALUES
+      ('siteurl',               '${siteUrl}',          'yes'),
+      ('home',                  '${siteUrl}',          'yes'),
+      ('blogname',              'CloudPress Site',      'yes'),
+      ('blogdescription',       'WordPress on Cloudflare', 'yes'),
+      ('admin_email',           '${adminEmail}',       'yes'),
+      ('permalink_structure',   '/%postname%/',         'yes'),
+      ('template',              'twentytwentyfour',     'yes'),
+      ('stylesheet',            'twentytwentyfour',     'yes'),
+      ('active_plugins',        '',                     'yes'),
+      ('wp_user_roles',         '',                     'yes'),
+      ('blogpublic',            '1',                    'yes'),
+      ('default_comment_status','open',                 'yes'),
+      ('wp_cloudpress_version', '3.1',                  'no')`,
+    // 관리자 계정 생성
+    `INSERT OR IGNORE INTO wp_users
+      (user_login, user_pass, user_nicename, user_email, user_url, user_registered, display_name)
+     VALUES
+      ('${adminUser}', '${adminPass}', '${adminUser}', '${adminEmail}', '${siteUrl}', '${now}', '${adminUser}')`,
+    // 관리자 권한 메타
+    `INSERT OR IGNORE INTO wp_usermeta (user_id, meta_key, meta_value)
+     VALUES (1, 'wp_capabilities', 'a:1:{s:13:"administrator";b:1;}')`,
+    `INSERT OR IGNORE INTO wp_usermeta (user_id, meta_key, meta_value)
+     VALUES (1, 'wp_user_level', '10')`,
+    // 기본 샘플 포스트
+    `INSERT OR IGNORE INTO wp_posts
+      (post_author, post_date, post_content, post_title, post_status, post_name, post_type, post_modified, guid)
+     VALUES
+      (1, '${now}', 'CloudPress에 오신 것을 환영합니다! 이 포스트는 자동으로 생성된 샘플입니다.', '안녕하세요!', 'publish', 'hello-world', 'post', '${now}', '${siteUrl}/?p=1')`,
+  ];
+
+  for (const sql of sqls) {
+    const r = await d1Run(db, sql);
+    if (!r.ok) console.warn("[d1-init] SQL 오류:", r.error, sql.slice(0, 60));
+  }
+  return true;
+}
+
+// ─── wp-config.php 생성 ────────────────────────────────────────────────────
+
+function buildWpConfig(env, siteUrl) {
   const secret = () => crypto.randomUUID().replace(/-/g, "");
+  const ghOwner = env.GITHUB_OWNER || "";
+  const ghRepo  = env.GITHUB_REPO  || "";
+  const ghToken = env.GITHUB_TOKEN || "";
+
   return `<?php
 /**
- * CloudPress WordPress 설정
- * Cloudflare D1 (SQLite) + Supabase Storage
+ * CloudPress WordPress 설정 (v3.1)
+ * GitHub Storage + Cloudflare D1
  */
 
-// ── 데이터베이스 설정 (D1 SQLite 브릿지) ──────────────────────
-// DB_HOST에 D1 바인딩 이름을 전달 → db.php에서 처리
+// ── 데이터베이스 (D1 SQLite) ─────────────────────────────────────────
 define('DB_NAME',     'cloudpress');
 define('DB_USER',     'cloudpress');
-define('DB_PASSWORD', '${secret()}');
+define('DB_PASSWORD', '');
 define('DB_HOST',     'localhost');
 define('DB_CHARSET',  'utf8mb4');
 define('DB_COLLATE',  '');
 
-// ── 인증 키 ──────────────────────────────────────────────────────
+// ── 인증 키 ───────────────────────────────────────────────────────────
 define('AUTH_KEY',         '${secret()}');
 define('SECURE_AUTH_KEY',  '${secret()}');
 define('LOGGED_IN_KEY',    '${secret()}');
@@ -227,485 +322,38 @@ define('SECURE_AUTH_SALT', '${secret()}');
 define('LOGGED_IN_SALT',   '${secret()}');
 define('NONCE_SALT',       '${secret()}');
 
-// ── 테이블 접두사 ─────────────────────────────────────────────────
+// ── 테이블 접두사 ─────────────────────────────────────────────────────
 $table_prefix = 'wp_';
 
-// ── 디버그 (프로덕션에서 false) ────────────────────────────────────
+// ── 디버그 ────────────────────────────────────────────────────────────
 define('WP_DEBUG', false);
 
-// ── Supabase Storage 설정 ─────────────────────────────────────────
-// wp-content/uploads → Supabase Storage 리다이렉트
-define('SUPABASE_URL',    getenv('SUPABASE_URL') ?: '');
-define('SUPABASE_KEY',    getenv('SUPABASE_KEY') ?: '');
-define('SITE_BUCKET',     getenv('SITE_BUCKET')  ?: 'site-${siteId.replace(/-/g, "").slice(0, 8)}');
+// ── GitHub Storage ────────────────────────────────────────────────────
+define('CLOUDPRESS_GITHUB_OWNER', '${ghOwner}');
+define('CLOUDPRESS_GITHUB_REPO',  '${ghRepo}');
+define('CLOUDPRESS_GITHUB_TOKEN', '${ghToken}');
 
-// ── 업로드 URL ─────────────────────────────────────────────────────
-define('WP_CONTENT_URL',  getenv('WP_HOME') . '/wp-content');
-define('WP_SITEURL',      getenv('WP_HOME') ?: 'https://example.com');
-define('WP_HOME',         getenv('WP_HOME') ?: 'https://example.com');
+// ── 사이트 URL ────────────────────────────────────────────────────────
+define('WP_SITEURL', '${siteUrl}');
+define('WP_HOME',    '${siteUrl}');
 
-// ── 파일 편집 비활성화 (서버리스 환경) ───────────────────────────
-define('DISALLOW_FILE_EDIT',   true);
-define('DISALLOW_FILE_MODS',   false);  // 플러그인/테마 설치 허용 (Supabase로)
-define('AUTOMATIC_UPDATER_DISABLED', true);
+// ── SQLite DB 경로 (php-wasm /tmp) ────────────────────────────────────
+define('SQLITE_DB_REALPATH', '/tmp/cloudpress.db');
 
-// ── SQLite 통합 ────────────────────────────────────────────────────
-define('SQLITE_DB_REALPATH', '/tmp/wordpress.db');
+// ── 서버리스 환경 설정 ────────────────────────────────────────────────
+define('DISALLOW_FILE_EDIT',          true);
+define('AUTOMATIC_UPDATER_DISABLED',  true);
 
 if (!defined('ABSPATH')) {
   define('ABSPATH', __DIR__ . '/');
 }
-
 require_once ABSPATH . 'wp-settings.php';
 `;
 }
 
-// ─── db.php - WordPress → D1 (SQLite) 브릿지 ─────────────────────────────
-function buildDbPhp() {
-  return `<?php
-/**
- * CloudPress DB 드라이버 (WordPress → Cloudflare D1 SQLite)
- * drop-in: wp-content/db.php
- *
- * WordPress의 wpdb를 상속하여 D1 HTTP API로 쿼리 전달
- * MySQL 쿼리를 SQLite 호환 형식으로 자동 변환
- */
-
-if (!defined('ABSPATH')) exit;
-
-class CloudPress_DB extends wpdb {
-
-  private $d1_endpoint;
-  private $d1_token;
-  private $query_buffer = [];
-  private $use_batch    = false;
-
-  public function __construct() {
-    // D1 엔드포인트는 환경변수로 전달
-    $this->d1_endpoint = getenv('D1_ENDPOINT') ?: '';
-    $this->d1_token    = getenv('D1_TOKEN')    ?: '';
-
-    // wpdb 기본 초기화
-    $this->charset = DB_CHARSET;
-    $this->collate = DB_COLLATE;
-
-    // 접두사 설정
-    global $table_prefix;
-    $this->set_prefix($table_prefix);
-
-    $this->ready = true;
-  }
-
-  /**
-   * MySQL → SQLite 쿼리 변환
-   */
-  private function mysql_to_sqlite(string $query): string {
-    // ENGINE=InnoDB, AUTO_INCREMENT 제거
-    $query = preg_replace('/\\s+ENGINE\\s*=\\s*\\w+/i', '', $query);
-    $query = preg_replace('/\\s+AUTO_INCREMENT\\s*=\\s*\\d+/i', '', $query);
-    $query = preg_replace('/\\s+DEFAULT\\s+CHARSET\\s*=\\s*\\w+/i', '', $query);
-    $query = preg_replace('/\\s+COLLATE\\s*=\\s*[\\w_]+/i', '', $query);
-
-    // UNSIGNED 제거
-    $query = str_replace(' UNSIGNED', '', $query);
-
-    // MySQL 타입 → SQLite 타입
-    $query = preg_replace('/\\bTINYINT\\(\\d+\\)/i', 'INTEGER', $query);
-    $query = preg_replace('/\\bSMALLINT\\(\\d+\\)/i', 'INTEGER', $query);
-    $query = preg_replace('/\\bMEDIUMINT\\(\\d+\\)/i', 'INTEGER', $query);
-    $query = preg_replace('/\\bBIGINT\\(\\d+\\)/i', 'INTEGER', $query);
-    $query = preg_replace('/\\bINT\\(\\d+\\)/i', 'INTEGER', $query);
-    $query = preg_replace('/\\bDOUBLE/i', 'REAL', $query);
-    $query = preg_replace('/\\bFLOAT/i', 'REAL', $query);
-    $query = preg_replace('/\\bDATETIME/i', 'TEXT', $query);
-    $query = preg_replace('/\\bTIMESTAMP/i', 'TEXT', $query);
-    $query = preg_replace('/\\bLONGTEXT/i', 'TEXT', $query);
-    $query = preg_replace('/\\bMEDIUMTEXT/i', 'TEXT', $query);
-    $query = preg_replace('/\\bTEXT/i', 'TEXT', $query);
-    $query = preg_replace('/\\bVARCHAR\\(\\d+\\)/i', 'TEXT', $query);
-    $query = preg_replace('/\\bCHAR\\(\\d+\\)/i', 'TEXT', $query);
-
-    // AUTO_INCREMENT → AUTOINCREMENT
-    $query = str_ireplace('AUTO_INCREMENT', 'AUTOINCREMENT', $query);
-
-    // SHOW TABLES 처리
-    if (stripos($query, 'SHOW TABLES') !== false) {
-      $prefix = $this->prefix;
-      return "SELECT name FROM sqlite_master WHERE type='table' AND name LIKE '{$prefix}%'";
-    }
-
-    // SHOW COLUMNS 처리
-    if (preg_match('/SHOW COLUMNS FROM \\`?([\\w]+)\\`?/i', $query, $m)) {
-      return "PRAGMA table_info({$m[1]})";
-    }
-
-    // SHOW CREATE TABLE 처리
-    if (preg_match('/SHOW CREATE TABLE \\`?([\\w]+)\\`?/i', $query, $m)) {
-      return "SELECT sql FROM sqlite_master WHERE type='table' AND name='{$m[1]}'";
-    }
-
-    // IF NOT EXISTS 충돌 처리
-    $query = preg_replace('/\\bIF NOT EXISTS\\b/i', 'IF NOT EXISTS', $query);
-
-    // IGNORE INSERT 처리
-    $query = preg_replace('/\\bINSERT IGNORE\\b/i', 'INSERT OR IGNORE', $query);
-
-    // ON DUPLICATE KEY UPDATE → INSERT OR REPLACE
-    $query = preg_replace('/\\bON DUPLICATE KEY UPDATE.+$/is', '', $query);
-
-    return $query;
-  }
-
-  /**
-   * D1 HTTP API 쿼리 실행
-   */
-  public function query($query) {
-    if (!$this->d1_endpoint || !$this->d1_token) {
-      // Fallback: SQLite 파일 (로컬 개발용)
-      return $this->sqlite_query($query);
-    }
-
-    $converted = $this->mysql_to_sqlite($query);
-    $this->last_query = $query;
-
-    try {
-      // 읽기 쿼리 판별
-      $is_read = (bool) preg_match('/^\\s*(SELECT|SHOW|PRAGMA|EXPLAIN)/i', $converted);
-      $endpoint = $this->d1_endpoint . ($is_read ? '/query' : '/execute');
-
-      $response = wp_remote_post($endpoint, [
-        'headers' => [
-          'Authorization' => 'Bearer ' . $this->d1_token,
-          'Content-Type'  => 'application/json',
-        ],
-        'body'    => json_encode(['sql' => $converted, 'params' => []]),
-        'timeout' => 10,
-      ]);
-
-      if (is_wp_error($response)) {
-        $this->last_error = $response->get_error_message();
-        return false;
-      }
-
-      $body = json_decode(wp_remote_retrieve_body($response), true);
-
-      if (!empty($body['error'])) {
-        $this->last_error = $body['error'];
-        return false;
-      }
-
-      // 결과 처리
-      if ($is_read && isset($body['results'])) {
-        $this->last_result = [];
-        foreach ($body['results'] as $row) {
-          $this->last_result[] = (object) $row;
-        }
-        $this->num_rows = count($this->last_result);
-        return $this->num_rows;
-      }
-
-      // 쓰기 결과
-      $this->rows_affected = $body['meta']['changes']    ?? 0;
-      $this->insert_id     = $body['meta']['last_row_id'] ?? 0;
-      return $this->rows_affected;
-
-    } catch (Exception $e) {
-      $this->last_error = $e->getMessage();
-      return false;
-    }
-  }
-
-  /**
-   * SQLite 파일 폴백 (php-wasm /tmp 사용)
-   */
-  private function sqlite_query(string $query) {
-    static $pdo = null;
-    if (!$pdo) {
-      $pdo = new PDO('sqlite:' . SQLITE_DB_REALPATH);
-      $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-    }
-    $converted = $this->mysql_to_sqlite($query);
-    $this->last_query = $query;
-
-    try {
-      $is_read = (bool) preg_match('/^\\s*(SELECT|SHOW|PRAGMA|EXPLAIN)/i', $converted);
-      $stmt = $pdo->query($converted);
-      if ($is_read) {
-        $this->last_result = $stmt->fetchAll(PDO::FETCH_OBJ);
-        $this->num_rows    = count($this->last_result);
-        return $this->num_rows;
-      }
-      $this->rows_affected = $stmt->rowCount();
-      $this->insert_id     = $pdo->lastInsertId();
-      return $this->rows_affected;
-    } catch (PDOException $e) {
-      $this->last_error = $e->getMessage();
-      // CREATE TABLE 오류는 무시 (이미 존재)
-      if (stripos($e->getMessage(), 'already exists') !== false) return 0;
-      return false;
-    }
-  }
-
-  public function get_results($query = null, $output = OBJECT) {
-    if ($query) $this->query($query);
-    if ($output === ARRAY_A) {
-      return array_map(fn($r) => (array) $r, $this->last_result ?: []);
-    }
-    return $this->last_result ?: [];
-  }
-
-  public function get_var($query = null, $column_offset = 0, $row_offset = 0) {
-    if ($query) $this->query($query);
-    $row = $this->last_result[$row_offset] ?? null;
-    if (!$row) return null;
-    $vals = array_values((array) $row);
-    return $vals[$column_offset] ?? null;
-  }
-
-  public function get_row($query = null, $output = OBJECT, $y = 0) {
-    if ($query) $this->query($query);
-    $row = $this->last_result[$y] ?? null;
-    if (!$row) return null;
-    if ($output === ARRAY_A) return (array) $row;
-    return $row;
-  }
-
-  public function prepare($query, ...$args) {
-    if (empty($args)) return $query;
-    // PDO 스타일 바인딩
-    $values = array_map(fn($v) => is_null($v) ? 'NULL' : "'" . addslashes($v) . "'", $args);
-    return vsprintf(str_replace('%s', '%s', $query), $values);
-  }
-}
-
-// WordPress DB 글로벌 교체
-global $wpdb;
-$wpdb = new CloudPress_DB();
-`;
-}
-
-// ─── php-wasm을 사용한 PHP 실행 ────────────────────────────────────────────
-async function runPhp(phpCode, env, options = {}) {
-  // Workers에서 php-wasm을 동적 import
-  // 실제 구현: php-wasm JS API를 Worker Service Binding으로 호출
-  // 또는 별도 PHP Worker를 Sub-Request로 호출
-
-  try {
-    // PHP Worker에 위임 (별도 php-runner worker)
-    if (env.PHP_RUNNER) {
-      const res = await env.PHP_RUNNER.fetch(new Request("https://php/run", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          code: phpCode,
-          env: options.phpEnv || {},
-          files: options.files || {},
-        }),
-      }));
-      return res;
-    }
-
-    // PHP Runner 없을 경우 → php-wasm CDN 직접 로드
-    const phpWasm = await import(PHP_WASM_CDN);
-    const php = await phpWasm.startPHP({ dataRoot: "/tmp" });
-
-    // 환경변수 설정
-    if (options.phpEnv) {
-      for (const [k, v] of Object.entries(options.phpEnv)) {
-        php.setEnv(k, v);
-      }
-    }
-
-    // 파일 마운트
-    if (options.files) {
-      for (const [path, content] of Object.entries(options.files)) {
-        php.writeFile(path, typeof content === "string" ? content : content);
-      }
-    }
-
-    const result = await php.run({ code: phpCode });
-    return new Response(result.text, {
-      status: result.exitCode === 0 ? 200 : 500,
-      headers: { "Content-Type": "text/html; charset=utf-8" },
-    });
-  } catch (e) {
-    console.error("[php-wasm]", e.message);
-    return new Response(`PHP 실행 오류: ${e.message}`, { status: 500 });
-  }
-}
-
-// ─── WordPress 요청 처리 ────────────────────────────────────────────────────
-async function handleWordPressRequest(request, env, siteId) {
-  const url = new URL(request.url);
-  const storage = new SupabaseStorage(
-    env.SUPABASE_URL,
-    env.SUPABASE_SERVICE_KEY
-  );
-
-  // 설치 상태 확인
-  const { bucket, installed, installing } = await ensureWordPressInstalled(
-    env, siteId, storage
-  );
-
-  if (!installed && installing) {
-    return new Response(setupPage(siteId), {
-      headers: { "Content-Type": "text/html; charset=utf-8" },
-    });
-  }
-
-  // 정적 파일 (이미지, CSS, JS 등) → Supabase에서 직접 서빙
-  const staticExts = /\.(css|js|jpg|jpeg|png|gif|webp|svg|ico|woff2?|ttf|eot|map)$/i;
-  if (staticExts.test(url.pathname)) {
-    const filePath = `wordpress${url.pathname}`;
-    const file = await storage.download(bucket, filePath);
-    if (file) return file;
-
-    // wp-includes, wp-admin 정적 파일도 Supabase에서
-    const wpPath = `wordpress${url.pathname}`;
-    const wpFile = await storage.download(bucket, wpPath);
-    if (wpFile) return wpFile;
-
-    return new Response("Not Found", { status: 404 });
-  }
-
-  // wp-content/uploads → Supabase 미디어 서빙
-  if (url.pathname.startsWith("/wp-content/uploads/")) {
-    const mediaPath = url.pathname.replace("/wp-content/uploads/", "");
-    const media = await storage.download(bucket, `wordpress/wp-content/uploads/${mediaPath}`);
-    if (media) return media;
-    return new Response("미디어를 찾을 수 없습니다.", { status: 404 });
-  }
-
-  // KV 페이지 캐시 확인 (GET 요청만)
-  if (request.method === "GET" && env.CACHE) {
-    const cacheKey = `page:${siteId}:${url.pathname}${url.search}`;
-    const cached = await env.CACHE.get(cacheKey);
-    if (cached) {
-      return new Response(cached, {
-        headers: {
-          "Content-Type": "text/html; charset=utf-8",
-          "X-Cache": "HIT",
-        },
-      });
-    }
-  }
-
-  // PHP 파일 결정
-  let phpFile = url.pathname;
-  if (phpFile === "/" || phpFile === "") phpFile = "/index.php";
-  if (!phpFile.endsWith(".php")) phpFile = phpFile.replace(/\/$/, "") + "/index.php";
-
-  // Supabase에서 PHP 파일 로드
-  const phpPath = `wordpress${phpFile}`;
-  const phpFileRes = await storage.download(bucket, phpPath);
-
-  if (!phpFileRes) {
-    // 파일 없음 → WordPress 404 처리를 index.php로
-    phpFile = "/index.php";
-  }
-
-  // php-wasm으로 WordPress 실행
-  const siteUrl = `${url.protocol}//${url.host}`;
-  const phpEnv = {
-    WP_HOME: siteUrl,
-    SUPABASE_URL: env.SUPABASE_URL,
-    SUPABASE_KEY: env.SUPABASE_SERVICE_KEY,
-    SITE_BUCKET: bucket,
-    D1_ENDPOINT: env.D1_ENDPOINT || "",
-    D1_TOKEN: env.D1_TOKEN || "",
-    REQUEST_URI: url.pathname + url.search,
-    REQUEST_METHOD: request.method,
-    HTTP_HOST: url.host,
-    SERVER_NAME: url.host,
-    SERVER_PORT: url.port || "443",
-    HTTPS: url.protocol === "https:" ? "on" : "off",
-    CONTENT_TYPE: request.headers.get("Content-Type") || "",
-    HTTP_COOKIE: request.headers.get("Cookie") || "",
-    HTTP_AUTHORIZATION: request.headers.get("Authorization") || "",
-  };
-
-  // POST 데이터 처리
-  let postData = "";
-  if (request.method === "POST") {
-    const body = await request.text();
-    postData = body;
-    phpEnv.CONTENT_LENGTH = String(body.length);
-    phpEnv.stdin = body;
-  }
-
-  // WordPress 실행 PHP 코드
-  const runCode = `<?php
-// CloudPress WordPress 실행 래퍼
-define('CLOUDPRESS_RUNNER', true);
-
-// 환경 설정
-$_SERVER['REQUEST_URI']    = getenv('REQUEST_URI');
-$_SERVER['REQUEST_METHOD'] = getenv('REQUEST_METHOD') ?: 'GET';
-$_SERVER['HTTP_HOST']      = getenv('HTTP_HOST');
-$_SERVER['SERVER_NAME']    = getenv('SERVER_NAME');
-$_SERVER['HTTPS']          = getenv('HTTPS') === 'on' ? 'on' : '';
-$_SERVER['SERVER_PORT']    = getenv('SERVER_PORT') ?: '443';
-$_SERVER['HTTP_COOKIE']    = getenv('HTTP_COOKIE');
-
-// POST 데이터 파싱
-if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-  $rawInput = file_get_contents('php://stdin');
-  $ct = getenv('CONTENT_TYPE');
-  if (strpos($ct, 'application/json') !== false) {
-    $jsonData = json_decode($rawInput, true);
-    if ($jsonData) $_POST = $jsonData;
-  } else {
-    parse_str($rawInput, $_POST);
-  }
-}
-
-// 쿠키 파싱
-$cookieStr = $_SERVER['HTTP_COOKIE'];
-if ($cookieStr) {
-  foreach (explode(';', $cookieStr) as $cookie) {
-    [$k, $v] = array_pad(explode('=', trim($cookie), 2), 2, '');
-    $_COOKIE[trim($k)] = urldecode(trim($v));
-  }
-}
-
-// WordPress 루트 경로
-define('ABSPATH', '/wordpress/');
-$_SERVER['DOCUMENT_ROOT'] = '/wordpress';
-
-// WordPress 로드 & 실행
-chdir('/wordpress');
-require_once '/wordpress/wp-load.php';
-`;
-
-  // Supabase에서 wp-config.php 및 필요 파일 로드
-  const wpConfigRes = await storage.download(bucket, "wordpress/wp-config.php");
-  const wpConfigContent = wpConfigRes ? await wpConfigRes.text() : buildWpConfig(siteId, env);
-
-  const files = {
-    "/wordpress/wp-config.php": wpConfigContent,
-    "/wordpress/wp-content/db.php": buildDbPhp(),
-  };
-
-  const response = await runPhp(runCode, env, { phpEnv, files });
-
-  // 캐시 저장 (정적 페이지만, GET 요청만)
-  if (request.method === "GET" && response.status === 200 && env.CACHE) {
-    const ct = response.headers.get("Content-Type") || "";
-    if (ct.includes("text/html")) {
-      const html = await response.clone().text();
-      // 로그인 페이지 등은 캐시 안 함
-      if (!html.includes("wp-admin") || url.pathname.startsWith("/wp-admin")) {
-        const cacheKey = `page:${siteId}:${url.pathname}${url.search}`;
-        await env.CACHE.put(cacheKey, html, { expirationTtl: 3600 }).catch(() => {});
-      }
-    }
-  }
-
-  return response;
-}
-
 // ─── 설치 중 페이지 ────────────────────────────────────────────────────────
-function setupPage(siteId) {
+
+function setupPage() {
   return `<!DOCTYPE html>
 <html lang="ko">
 <head>
@@ -713,95 +361,39 @@ function setupPage(siteId) {
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>CloudPress - WordPress 설치 중</title>
   <style>
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-      min-height: 100vh;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      color: #333;
-    }
-    .card {
-      background: white;
-      border-radius: 20px;
-      padding: 48px;
-      max-width: 480px;
-      width: 90%;
-      text-align: center;
-      box-shadow: 0 20px 60px rgba(0,0,0,0.2);
-    }
-    .logo {
-      width: 64px;
-      height: 64px;
-      background: linear-gradient(135deg, #667eea, #764ba2);
-      border-radius: 16px;
-      margin: 0 auto 24px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 32px;
-    }
-    h1 { font-size: 24px; font-weight: 700; margin-bottom: 12px; }
-    p { color: #666; line-height: 1.6; margin-bottom: 24px; }
-    .progress {
-      background: #f0f0f0;
-      border-radius: 100px;
-      height: 8px;
-      overflow: hidden;
-    }
-    .bar {
-      height: 100%;
-      background: linear-gradient(90deg, #667eea, #764ba2);
-      border-radius: 100px;
-      animation: progress 2s ease-in-out infinite;
-      width: 60%;
-    }
-    @keyframes progress {
-      0% { width: 20%; }
-      50% { width: 80%; }
-      100% { width: 20%; }
-    }
-    .steps {
-      text-align: left;
-      margin-top: 24px;
-      display: flex;
-      flex-direction: column;
-      gap: 8px;
-    }
-    .step {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      font-size: 14px;
-      color: #888;
-    }
-    .step.done { color: #22c55e; }
-    .step.active { color: #667eea; font-weight: 600; }
-    .dot {
-      width: 8px; height: 8px;
-      border-radius: 50%;
-      background: currentColor;
-      flex-shrink: 0;
-    }
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+      background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);
+      min-height:100vh;display:flex;align-items:center;justify-content:center}
+    .card{background:#fff;border-radius:20px;padding:48px;max-width:480px;
+      width:90%;text-align:center;box-shadow:0 20px 60px rgba(0,0,0,.2)}
+    .logo{width:64px;height:64px;background:linear-gradient(135deg,#667eea,#764ba2);
+      border-radius:16px;margin:0 auto 24px;display:flex;align-items:center;
+      justify-content:center;font-size:32px}
+    h1{font-size:24px;font-weight:700;margin-bottom:12px;color:#1a1a2e}
+    p{color:#666;line-height:1.6;margin-bottom:24px}
+    .progress{background:#f0f0f0;border-radius:100px;height:8px;overflow:hidden}
+    .bar{height:100%;background:linear-gradient(90deg,#667eea,#764ba2);
+      border-radius:100px;animation:prog 2s ease-in-out infinite}
+    @keyframes prog{0%{width:20%}50%{width:80%}100%{width:20%}}
+    .steps{text-align:left;margin-top:24px;display:flex;flex-direction:column;gap:8px}
+    .step{display:flex;align-items:center;gap:12px;font-size:14px;color:#aaa}
+    .step.done{color:#22c55e}.step.active{color:#667eea;font-weight:600}
+    .dot{width:8px;height:8px;border-radius:50%;background:currentColor;flex-shrink:0}
   </style>
-  <script>
-    // 3초마다 갱신
-    setTimeout(() => location.reload(), 5000);
-  </script>
+  <script>setTimeout(()=>location.reload(),6000)</script>
 </head>
 <body>
   <div class="card">
     <div class="logo">🚀</div>
     <h1>WordPress 설치 중</h1>
-    <p>CloudPress가 WordPress를 서버리스 환경에 자동 설치하고 있습니다.<br>잠시만 기다려주세요.</p>
+    <p>CloudPress가 WordPress를 GitHub 저장소와 Cloudflare D1에<br>자동으로 설치하고 있습니다. 잠시만 기다려주세요.</p>
     <div class="progress"><div class="bar"></div></div>
     <div class="steps">
-      <div class="step done"><div class="dot"></div> Cloudflare Worker 생성</div>
-      <div class="step done"><div class="dot"></div> Supabase Storage 버킷 생성</div>
-      <div class="step active"><div class="dot"></div> WordPress 코어 파일 다운로드 중...</div>
-      <div class="step"><div class="dot"></div> 데이터베이스 초기화</div>
+      <div class="step done"><div class="dot"></div> Cloudflare Worker 생성 완료</div>
+      <div class="step done"><div class="dot"></div> D1 데이터베이스 생성 완료</div>
+      <div class="step done"><div class="dot"></div> KV 네임스페이스 생성 완료</div>
+      <div class="step active"><div class="dot"></div> GitHub에 WordPress 파일 업로드 중...</div>
       <div class="step"><div class="dot"></div> WordPress 초기 설정</div>
     </div>
   </div>
@@ -809,7 +401,197 @@ function setupPage(siteId) {
 </html>`;
 }
 
+// ─── PHP 실행 ────────────────────────────────────────────────────────────────
+
+async function runPhp(phpCode, env, options = {}) {
+  try {
+    if (env.PHP_RUNNER) {
+      const res = await env.PHP_RUNNER.fetch(
+        new Request("https://php/run", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            code:  phpCode,
+            env:   options.phpEnv  || {},
+            files: options.files   || {},
+          }),
+        })
+      );
+      return res;
+    }
+    // PHP Runner 없음 → 안내 페이지
+    return new Response(
+      "<?xml version='1.0'?><error>PHP_RUNNER 바인딩이 필요합니다.</error>",
+      { status: 503, headers: { "Content-Type": "text/plain; charset=utf-8" } }
+    );
+  } catch (e) {
+    return new Response(`PHP 실행 오류: ${e.message}`, { status: 500 });
+  }
+}
+
+// ─── WordPress 요청 처리 ────────────────────────────────────────────────────
+
+async function handleWordPressRequest(request, env) {
+  const url = new URL(request.url);
+
+  const gh = (env.GITHUB_TOKEN && env.GITHUB_OWNER && env.GITHUB_REPO)
+    ? new GitHubStorage(env.GITHUB_TOKEN, env.GITHUB_OWNER, env.GITHUB_REPO)
+    : null;
+
+  // GitHub 설정 미완료 → 설정 안내
+  if (!gh) {
+    return new Response(
+      "⚠️ GitHub 환경변수(GITHUB_TOKEN, GITHUB_OWNER, GITHUB_REPO)가 설정되지 않았습니다.\n" +
+      "CloudPress 관리자 설정에서 GitHub 저장소를 연결해주세요.",
+      { status: 503, headers: { "Content-Type": "text/plain; charset=utf-8" } }
+    );
+  }
+
+  // 정적 파일 확장자 → GitHub Raw 직서빙
+  const staticExt = /\.(css|js|jpg|jpeg|png|gif|webp|svg|ico|woff2?|ttf|eot|otf|map|json)$/i;
+  if (staticExt.test(url.pathname)) {
+    // wp-includes / wp-admin / wp-content 정적 파일
+    const ghPath = url.pathname.startsWith("/") ? url.pathname.slice(1) : url.pathname;
+    const file = await gh.fetchRaw(`wp-core/${ghPath}`);
+    if (file) return file;
+    // wp-content (테마/플러그인/업로드)
+    if (url.pathname.startsWith("/wp-content/")) {
+      const contentPath = url.pathname.slice("/wp-content/".length);
+      const contentFile = await gh.fetchRaw(`wp-content/${contentPath}`);
+      if (contentFile) return contentFile;
+    }
+    return new Response("Not Found", { status: 404 });
+  }
+
+  // wp-content/uploads 미디어 → GitHub Raw
+  if (url.pathname.startsWith("/wp-content/uploads/")) {
+    const mediaPath = url.pathname.slice("/wp-content/uploads/".length);
+    const media = await gh.fetchRaw(`uploads/${mediaPath}`);
+    if (media) return media;
+    return new Response("미디어를 찾을 수 없습니다.", { status: 404 });
+  }
+
+  // wp-content (테마/플러그인) → GitHub Raw
+  if (url.pathname.startsWith("/wp-content/")) {
+    const contentPath = url.pathname.slice("/wp-content/".length);
+    const file = await gh.fetchRaw(`wp-content/${contentPath}`);
+    if (file) return file;
+    return new Response("Not Found", { status: 404 });
+  }
+
+  // 설치 상태 확인
+  const installed = await checkInstalled(env.DB, env.KV);
+
+  // GitHub에 wp-core 존재 여부 확인
+  const coreReady = gh ? await gh.exists("wp-core/wp-load.php") : false;
+
+  if (!installed || !coreReady) {
+    // wp-admin 경로는 대기 페이지 표시
+    return new Response(setupPage(), {
+      headers: { "Content-Type": "text/html; charset=utf-8" },
+    });
+  }
+
+  // KV 페이지 캐시 (GET만)
+  const cacheKey = `page:${url.pathname}${url.search}`;
+  if (request.method === "GET" && env.CACHE) {
+    const cached = await getCached(env.CACHE, cacheKey);
+    if (cached) {
+      return new Response(cached, {
+        headers: {
+          "Content-Type": "text/html; charset=utf-8",
+          "X-Cache":      "HIT",
+        },
+      });
+    }
+  }
+
+  // wp-admin 경로 처리 — wp-login.php
+  if (url.pathname === "/wp-login.php" || url.pathname.startsWith("/wp-admin")) {
+    // GitHub에서 wp-login.php 가져와서 PHP 실행
+    const siteUrl  = `${url.protocol}//${url.host}`;
+    const phpEnv   = buildPhpEnv(request, env, url, siteUrl);
+    const wpConfig = buildWpConfig(env, siteUrl);
+
+    const phpFile  = url.pathname === "/wp-login.php" ? "wp-login.php" : url.pathname.slice(1);
+    const phpRes   = await gh.getFile(`wp-core/${phpFile}`);
+    if (!phpRes) {
+      return new Response("WordPress 파일을 찾을 수 없습니다. 파일이 GitHub에 업로드되었는지 확인해주세요.", {
+        status: 503,
+        headers: { "Content-Type": "text/plain; charset=utf-8" },
+      });
+    }
+
+    const response = await runPhp(phpRes.text, env, {
+      phpEnv,
+      files: { "/wordpress/wp-config.php": wpConfig },
+    });
+    return response;
+  }
+
+  // 일반 PHP 요청
+  let phpPath = url.pathname;
+  if (phpPath === "/" || phpPath === "") phpPath = "index.php";
+  if (!phpPath.endsWith(".php")) phpPath = phpPath.replace(/\/$/, "") + "/index.php";
+
+  const siteUrl = `${url.protocol}//${url.host}`;
+  const phpEnv  = buildPhpEnv(request, env, url, siteUrl);
+
+  // GitHub에서 PHP 파일 로드
+  const phpFile = phpPath.startsWith("/") ? phpPath.slice(1) : phpPath;
+  const phpRes  = await gh.getFile(`wp-core/${phpFile}`).catch(() => null)
+    || await gh.getFile(`wp-core/index.php`);
+
+  if (!phpRes) {
+    return new Response("WordPress가 준비되지 않았습니다.", {
+      status: 503,
+      headers: { "Content-Type": "text/plain; charset=utf-8" },
+    });
+  }
+
+  const wpConfig = buildWpConfig(env, siteUrl);
+  const response = await runPhp(phpRes.text, env, {
+    phpEnv,
+    files: { "/wordpress/wp-config.php": wpConfig },
+  });
+
+  // 성공적인 HTML 응답 캐시
+  if (request.method === "GET" && response.status === 200 && env.CACHE) {
+    const ct = response.headers.get("Content-Type") || "";
+    if (ct.includes("text/html")) {
+      const html = await response.clone().text();
+      if (!html.includes("logged-in") && !url.pathname.startsWith("/wp-admin")) {
+        await setCached(env.CACHE, cacheKey, html, 3600);
+      }
+    }
+  }
+
+  return response;
+}
+
+function buildPhpEnv(request, env, url, siteUrl) {
+  return {
+    WP_HOME:           siteUrl,
+    WP_SITEURL:        siteUrl,
+    GITHUB_OWNER:      env.GITHUB_OWNER || "",
+    GITHUB_REPO:       env.GITHUB_REPO  || "",
+    GITHUB_TOKEN:      env.GITHUB_TOKEN || "",
+    REQUEST_URI:       url.pathname + url.search,
+    REQUEST_METHOD:    request.method,
+    HTTP_HOST:         url.host,
+    SERVER_NAME:       url.host,
+    SERVER_PORT:       url.port || "443",
+    HTTPS:             url.protocol === "https:" ? "on" : "off",
+    CONTENT_TYPE:      request.headers.get("Content-Type")  || "",
+    HTTP_COOKIE:       request.headers.get("Cookie")        || "",
+    HTTP_AUTHORIZATION:request.headers.get("Authorization") || "",
+    HTTP_REFERER:      request.headers.get("Referer")       || "",
+    HTTP_ACCEPT_LANGUAGE: request.headers.get("Accept-Language") || "ko",
+  };
+}
+
 // ─── JWT 인증 ───────────────────────────────────────────────────────────────
+
 async function verifyJWT(token, secret) {
   try {
     const parts = token.split(".");
@@ -835,7 +617,9 @@ async function verifyJWT(token, secret) {
       new TextEncoder().encode(data)
     );
     if (!valid) return null;
-    const payload = JSON.parse(atob(pad(body.replace(/-/g, "+").replace(/_/g, "/"))));
+    const payload = JSON.parse(
+      atob(pad(body.replace(/-/g, "+").replace(/_/g, "/")))
+    );
     if (payload.exp < Math.floor(Date.now() / 1000)) return null;
     return payload;
   } catch {
@@ -844,92 +628,105 @@ async function verifyJWT(token, secret) {
 }
 
 // ─── 메인 Fetch 핸들러 ─────────────────────────────────────────────────────
+
 export default {
   async fetch(request, env, ctx) {
-    const url = new URL(request.url);
+    const url    = new URL(request.url);
     const method = request.method.toUpperCase();
 
-    // OPTIONS (CORS preflight)
+    // CORS preflight
     if (method === "OPTIONS") {
       return new Response(null, {
         status: 204,
         headers: {
-          "Access-Control-Allow-Origin": "*",
+          "Access-Control-Allow-Origin":  "*",
           "Access-Control-Allow-Methods": "GET,POST,PUT,DELETE,OPTIONS",
           "Access-Control-Allow-Headers": "Content-Type,Authorization",
         },
       });
     }
 
-    // ── CloudPress 관리 API ────────────────────────────────────────────────
+    // ── CloudPress 관리 API ──────────────────────────────────────────────
 
     // 건강 체크
     if (url.pathname === "/api/health") {
       return jsonOk({
-        status: "ok",
-        version: "3.0.0",
-        php: "8.2 (WebAssembly)",
-        storage: "Supabase",
-        db: "Cloudflare D1",
+        status:  "ok",
+        version: "3.1.0",
+        storage: "GitHub",
+        db:      "Cloudflare D1",
+        cache:   "Cloudflare KV",
         bindings: {
-          DB: !!env.DB,
-          KV: !!env.KV,
-          CACHE: !!env.CACHE,
-          INSTALL_QUEUE: !!env.INSTALL_QUEUE,
+          DB:         !!env.DB,
+          KV:         !!env.KV,
+          CACHE:      !!env.CACHE,
+          PHP_RUNNER: !!env.PHP_RUNNER,
         },
-        supabase: !!env.SUPABASE_URL,
+        github: {
+          configured: !!(env.GITHUB_TOKEN && env.GITHUB_OWNER && env.GITHUB_REPO),
+          owner:      env.GITHUB_OWNER || null,
+          repo:       env.GITHUB_REPO  || null,
+        },
         ts: new Date().toISOString(),
       });
     }
 
-    // ── 사이트 라우팅 ──────────────────────────────────────────────────────
-    // 호스트 기반 라우팅: site-{id}.workers.dev 또는 커스텀 도메인
-
-    // 사이트 ID 결정
-    let siteId = null;
-
-    // 1) 쿼리스트링으로 직접 지정 (테스트용)
-    siteId = url.searchParams.get("__site_id");
-
-    // 2) 호스트명에서 추출 (cp-site-XXXXXXXX.workers.dev)
-    if (!siteId) {
-      const hostMatch = url.hostname.match(/^cp-site-([a-f0-9]+)\.workers\.dev$/);
-      if (hostMatch) siteId = hostMatch[1];
-    }
-
-    // 3) DB에서 커스텀 도메인으로 조회
-    if (!siteId && env.DB) {
-      try {
-        const site = await env.DB.prepare(
-          "SELECT id FROM sites WHERE primary_domain = ? AND status = 'active' LIMIT 1"
-        )
-          .bind(url.hostname)
-          .first();
-        if (site) siteId = site.id;
-      } catch {}
-    }
-
-    if (siteId) {
-      // Supabase 환경변수 확인
-      if (!env.SUPABASE_URL || !env.SUPABASE_SERVICE_KEY) {
-        return new Response(
-          "⚠️ SUPABASE_URL 및 SUPABASE_SERVICE_KEY 환경변수가 필요합니다.\n" +
-          "wrangler secret put SUPABASE_URL\n" +
-          "wrangler secret put SUPABASE_SERVICE_KEY",
-          { status: 503, headers: { "Content-Type": "text/plain; charset=utf-8" } }
-        );
+    // WordPress DB 초기화 API (프로비저닝 시 호출)
+    if (url.pathname === "/api/wp-init" && method === "POST") {
+      const authHeader = request.headers.get("Authorization") || "";
+      const token      = authHeader.replace("Bearer ", "");
+      const secret     = env.JWT_SECRET || env.CLOUDPRESS_SECRET || "";
+      if (secret) {
+        const payload = await verifyJWT(token, secret);
+        if (!payload) return jsonErr("인증이 필요합니다.", 401);
       }
 
-      // WordPress 요청 처리
-      return handleWordPressRequest(request, env, siteId);
+      let body = {};
+      try { body = await request.json(); } catch {}
+
+      const siteUrl    = body.site_url    || `https://${url.host}`;
+      const adminUser  = body.admin_user  || "admin";
+      const adminPass  = body.admin_pass  || "changeme";
+      const adminEmail = body.admin_email || "admin@example.com";
+
+      if (!env.DB) return jsonErr("DB 바인딩이 없습니다.", 503);
+
+      const ok = await initWordPressDB(env.DB, siteUrl, adminUser, adminPass, adminEmail);
+      if (ok) {
+        await setCached(env.KV, "wp:installed", "1", 86400 * 365);
+        return jsonOk({ success: true, message: "WordPress DB 초기화 완료" });
+      }
+      return jsonErr("DB 초기화 실패", 500);
     }
 
-    // ── CloudPress 플랫폼 대시보드 (정적 파일) ────────────────────────────
+    // 캐시 퍼지 API
+    if (url.pathname === "/api/cache-purge" && method === "POST") {
+      const authHeader = request.headers.get("Authorization") || "";
+      const token      = authHeader.replace("Bearer ", "");
+      const secret     = env.JWT_SECRET || env.CLOUDPRESS_SECRET || "";
+      if (secret) {
+        const payload = await verifyJWT(token, secret);
+        if (!payload) return jsonErr("인증이 필요합니다.", 401);
+      }
+      // KV 캐시는 개별 삭제가 필요하므로 설치 플래그만 리셋
+      await env.KV?.delete("wp:installed").catch(() => {});
+      return jsonOk({ success: true, message: "캐시 퍼지 완료" });
+    }
+
+    // ── 사이트 라우팅 ──────────────────────────────────────────────────
+
+    // 이 Worker 자체가 하나의 WordPress 사이트를 서빙
+    // (CloudPress 플랫폼에서 각 사이트마다 별도 Worker를 배포)
+    if (env.GITHUB_OWNER && env.GITHUB_REPO) {
+      return handleWordPressRequest(request, env);
+    }
+
+    // ── CloudPress 플랫폼 대시보드 (정적 파일) ──────────────────────────
     if (env.ASSETS) {
       return env.ASSETS.fetch(request);
     }
 
-    return new Response("CloudPress WordPress Hosting Platform v3.0", {
+    return new Response("CloudPress WordPress Hosting Platform v3.1", {
       headers: { "Content-Type": "text/plain; charset=utf-8" },
     });
   },

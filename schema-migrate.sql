@@ -20,3 +20,37 @@ ALTER TABLE domain_aliases ADD COLUMN cf_nameservers TEXT;
 -- 로그 인덱스 추가 (없으면)
 CREATE INDEX IF NOT EXISTS idx_php_logs_read ON php_logs(site_id, is_read);
 CREATE INDEX IF NOT EXISTS idx_sites_status ON sites(status);
+
+-- ── v3 마이그레이션 (admin_settings 테이블 추가) ────────────────────────────
+-- 실행: wrangler d1 execute cloudpress-db --remote --file=schema-migrate.sql
+CREATE TABLE IF NOT EXISTS admin_settings (
+  key   TEXT PRIMARY KEY,
+  value TEXT NOT NULL DEFAULT ''
+);
+
+-- admin_settings 기본값 삽입 (없는 경우만)
+INSERT OR IGNORE INTO admin_settings (key, value) VALUES ('platform_domain', 'cloudpress.app');
+INSERT OR IGNORE INTO admin_settings (key, value) VALUES ('smtp_from', 'noreply@cloudpress.app');
+
+-- ── v4 마이그레이션 (payments 테이블 + sites 플랜 컬럼) ─────────────────────
+CREATE TABLE IF NOT EXISTS payments (
+  id               TEXT PRIMARY KEY,
+  user_id          TEXT NOT NULL,
+  site_id          TEXT NOT NULL,
+  plan             TEXT NOT NULL,
+  billing_cycle    TEXT NOT NULL DEFAULT 'monthly',
+  amount           INTEGER NOT NULL,
+  status           TEXT NOT NULL DEFAULT 'pending',
+  toss_order_id    TEXT UNIQUE,
+  toss_payment_key TEXT,
+  toss_receipt_url TEXT,
+  expires_at       TEXT,
+  created_at       TEXT DEFAULT CURRENT_TIMESTAMP
+);
+
+ALTER TABLE sites ADD COLUMN site_plan TEXT DEFAULT 'free';
+ALTER TABLE sites ADD COLUMN plan_expires_at TEXT;
+
+CREATE INDEX IF NOT EXISTS idx_payments_user   ON payments(user_id);
+CREATE INDEX IF NOT EXISTS idx_payments_site   ON payments(site_id);
+CREATE INDEX IF NOT EXISTS idx_payments_status ON payments(status);

@@ -15,12 +15,26 @@
         .php-card:hover     { border-color: #6366f1; }
         .php-card.selected  { border-color: #6366f1; background: #1e1b4b44; }
         .php-card.eol       { opacity: 0.5; }
+
+        /* 프로비저닝 진행 표시 */
+        @keyframes pulse-bar {
+            0%,100% { opacity:1; } 50% { opacity:.5; }
+        }
+        .progress-bar-anim { animation: pulse-bar 1.5s ease-in-out infinite; }
+
+        .provision-step { transition: all .3s; }
+        .provision-step.done  { color: #34d399; }
+        .provision-step.doing { color: #60a5fa; }
+        .provision-step.wait  { color: #4b5563; }
+        .provision-step.error { color: #f87171; }
     </style>
 </head>
 <body class="bg-[#050505] text-white md:flex md:h-screen">
     <script>
         if (!localStorage.getItem('admin_token')) window.location.href = '/login.html';
-    <!-- ── 모바일 헤더 (md 이상에서 숨김) ── -->
+    </script>
+
+    <!-- ── 모바일 헤더 ── -->
     <header class="md:hidden sticky top-0 z-50 bg-[#050505]/95 backdrop-blur-lg border-b border-white/10">
         <div class="flex justify-between items-center px-4 py-3">
             <a href="/dashboard.html" class="text-xl font-black text-blue-500">CLOUD<span class="text-white">PRESS</span></a>
@@ -28,13 +42,12 @@
                 <i class="fas fa-bars text-xl"></i>
             </button>
         </div>
-        <!-- 드롭다운 메뉴 -->
         <div id="mobileMenu" class="hidden border-t border-white/10 py-2 px-2 space-y-1">
             <a href="/dashboard.html" class="flex items-center gap-3 px-4 py-3 rounded-xl hover:bg-white/5 transition text-gray-400"><i class="fas fa-tachometer-alt w-5 text-center"></i> 대시보드</a>
-            <a href="/hosting.html" class="flex items-center gap-3 px-4 py-3 rounded-xl hover:bg-white/5 transition font-bold text-white"><i class="fas fa-globe w-5 text-center"></i> 내 호스팅</a>
-            <a href="/traffic.html" class="flex items-center gap-3 px-4 py-3 rounded-xl hover:bg-white/5 transition text-gray-400"><i class="fas fa-chart-line w-5 text-center"></i> 트래픽</a>
-            <a href="/storage.html" class="flex items-center gap-3 px-4 py-3 rounded-xl hover:bg-white/5 transition text-gray-400"><i class="fas fa-hdd w-5 text-center"></i> 스토리지</a>
-            <a href="/account.html" class="flex items-center gap-3 px-4 py-3 rounded-xl hover:bg-white/5 transition text-gray-400"><i class="fas fa-user-circle w-5 text-center"></i> 내 계정</a>
+            <a href="/hosting.html"   class="flex items-center gap-3 px-4 py-3 rounded-xl hover:bg-white/5 transition font-bold text-white"><i class="fas fa-globe w-5 text-center"></i> 내 호스팅</a>
+            <a href="/traffic.html"   class="flex items-center gap-3 px-4 py-3 rounded-xl hover:bg-white/5 transition text-gray-400"><i class="fas fa-chart-line w-5 text-center"></i> 트래픽</a>
+            <a href="/storage.html"   class="flex items-center gap-3 px-4 py-3 rounded-xl hover:bg-white/5 transition text-gray-400"><i class="fas fa-hdd w-5 text-center"></i> 스토리지</a>
+            <a href="/account.html"   class="flex items-center gap-3 px-4 py-3 rounded-xl hover:bg-white/5 transition text-gray-400"><i class="fas fa-user-circle w-5 text-center"></i> 내 계정</a>
             <div class="border-t border-white/10 mt-2 pt-2">
                 <button onclick="logout()" class="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-red-400 hover:bg-red-900/20 transition">
                     <i class="fas fa-sign-out-alt w-5 text-center"></i> 로그아웃
@@ -46,7 +59,6 @@
         document.getElementById('mobileMenuBtn').addEventListener('click', () => {
             document.getElementById('mobileMenu').classList.toggle('hidden');
         });
-        // 메뉴 링크 클릭시 닫기
         document.querySelectorAll('#mobileMenu a').forEach(a => {
             a.addEventListener('click', () => document.getElementById('mobileMenu').classList.add('hidden'));
         });
@@ -103,19 +115,16 @@
                     <h2 class="text-lg font-bold flex items-center gap-2">
                         <i class="fas fa-info-circle text-blue-400"></i> 기본 정보
                     </h2>
-
                     <div class="space-y-2">
                         <label class="text-sm text-gray-400">사이트 이름 <span class="text-red-400">*</span></label>
                         <input id="site_name" type="text" placeholder="예: 내 블로그"
                             class="w-full p-4 bg-white/5 border border-white/10 rounded-xl outline-none focus:border-blue-500 transition">
                     </div>
-
                     <div class="p-4 bg-blue-900/20 border border-blue-500/30 rounded-xl text-sm text-blue-300">
                         <i class="fas fa-info-circle mr-2"></i>
                         도메인은 호스팅 생성 후 <strong>호스팅 상세 &gt; 도메인 탭</strong>에서 추가할 수 있습니다.
                     </div>
                 </div>
-
                 <button onclick="goStep(2)"
                     class="w-full bg-blue-600 py-4 rounded-xl font-bold text-lg hover:bg-blue-500 transition flex items-center justify-center gap-2">
                     다음 단계 <i class="fas fa-arrow-right"></i>
@@ -135,15 +144,12 @@
                         PHP 버전은 나중에도 무중단으로 변경할 수 있습니다.
                         <span class="text-green-400">보안 릴리스</span>는 최신 보안 패치가 적용된 버전입니다.
                     </p>
-
                     <div id="php-loading" class="text-center py-8 text-gray-500">
                         <i class="fas fa-spinner fa-spin text-2xl mb-3"></i>
                         <p class="text-sm">php.net에서 최신 버전을 불러오는 중...</p>
                     </div>
-
                     <div id="php-versions" class="hidden grid grid-cols-1 gap-3"></div>
                 </div>
-
                 <div class="flex gap-3">
                     <button onclick="goStep(1)"
                         class="flex-1 border border-white/20 py-4 rounded-xl font-bold hover:bg-white/5 transition">
@@ -162,13 +168,11 @@
                     <h2 class="text-lg font-bold flex items-center gap-2">
                         <i class="fab fa-wordpress text-blue-400"></i> WordPress 관리자 설정
                     </h2>
-
                     <div class="space-y-2">
                         <label class="text-sm text-gray-400">관리자 아이디 <span class="text-red-400">*</span></label>
                         <input id="wp_admin_user" type="text" placeholder="예: admin"
                             class="w-full p-4 bg-white/5 border border-white/10 rounded-xl outline-none focus:border-blue-500 transition font-mono">
                     </div>
-
                     <div class="space-y-2">
                         <label class="text-sm text-gray-400">관리자 비밀번호 <span class="text-red-400">*</span></label>
                         <div class="relative">
@@ -180,7 +184,6 @@
                             </button>
                         </div>
                     </div>
-
                     <div class="space-y-2">
                         <label class="text-sm text-gray-400">관리자 이메일 <span class="text-red-400">*</span></label>
                         <input id="wp_admin_email" type="email" placeholder="admin@example.com"
@@ -192,7 +195,6 @@
                 <div class="p-5 bg-blue-900/20 border border-blue-500/30 rounded-2xl text-sm space-y-2">
                     <h3 class="font-bold text-blue-300 mb-3"><i class="fas fa-list-check mr-2"></i>생성 요약</h3>
                     <div class="flex justify-between"><span class="text-gray-400">사이트 이름</span><span id="sum-name" class="font-mono">-</span></div>
-
                     <div class="flex justify-between"><span class="text-gray-400">PHP 버전</span><span id="sum-php" class="font-mono text-indigo-300">-</span></div>
                     <div class="flex justify-between"><span class="text-gray-400">스토리지</span><span class="text-green-300">자동 할당</span></div>
                     <div class="flex justify-between"><span class="text-gray-400">SSL</span><span class="text-green-300">자동 발급</span></div>
@@ -210,19 +212,146 @@
                 </div>
             </div>
 
-            <!-- 생성 완료 -->
-            <div id="step-done" class="hidden text-center py-12">
-                <div class="text-6xl text-green-400 mb-6"><i class="fas fa-check-circle"></i></div>
-                <h2 class="text-2xl font-black mb-3">호스팅이 생성되었습니다!</h2>
-                <p class="text-gray-400 mb-2" id="done-domain"></p>
-                <p class="text-gray-500 text-sm mb-8">DNS 전파에 최대 48시간이 소요될 수 있습니다.</p>
-                <div class="flex gap-3 justify-center">
-                    <a id="done-detail-link" href="/hosting.html"
-                        class="bg-blue-600 px-6 py-3 rounded-xl font-bold hover:bg-blue-500 transition">
-                        <i class="fas fa-cog mr-2"></i> 호스팅 관리
+            <!-- ── 프로비저닝 진행 화면 ── -->
+            <div id="step-provisioning" class="hidden">
+                <div class="p-8 bg-[#111] border border-white/10 rounded-2xl space-y-6">
+                    <!-- 헤더 -->
+                    <div class="text-center">
+                        <div class="text-4xl mb-3">⚙️</div>
+                        <h2 class="text-xl font-bold mb-1">호스팅을 생성하고 있습니다</h2>
+                        <p class="text-sm text-gray-400">Cloudflare 리소스 생성 및 WordPress 초기화 중...<br>
+                            완료까지 <strong class="text-blue-400">13~15분</strong> 소요됩니다. 이 페이지를 닫아도 됩니다.</p>
+                    </div>
+
+                    <!-- 경과 시간 -->
+                    <div class="flex items-center justify-between text-sm text-gray-500 px-2">
+                        <span><i class="fas fa-clock mr-1"></i> 경과: <span id="elapsed-time" class="text-white font-mono">0:00</span></span>
+                        <span class="text-xs">예상 완료: <span id="eta-time" class="text-green-400">약 15분</span></span>
+                    </div>
+
+                    <!-- 전체 진행바 -->
+                    <div class="space-y-2">
+                        <div class="flex justify-between text-xs text-gray-500">
+                            <span>전체 진행</span>
+                            <span id="overall-pct">0%</span>
+                        </div>
+                        <div class="h-2 bg-white/5 rounded-full overflow-hidden">
+                            <div id="overall-bar" class="h-full bg-gradient-to-r from-blue-600 to-indigo-500 rounded-full transition-all duration-700" style="width:0%"></div>
+                        </div>
+                    </div>
+
+                    <!-- 단계별 상태 -->
+                    <div class="space-y-3">
+                        <div class="text-xs text-gray-500 font-bold uppercase tracking-wider mb-2">단계별 진행</div>
+
+                        <div id="ps-github" class="provision-step wait flex items-center gap-3 p-3 bg-white/3 rounded-xl">
+                            <span id="ps-github-ico" class="text-lg w-6 text-center">⏳</span>
+                            <div class="flex-1">
+                                <div class="font-medium text-sm">GitHub 저장소 생성</div>
+                                <div class="text-xs text-gray-500">WordPress 파일 저장소 초기화</div>
+                            </div>
+                        </div>
+
+                        <div id="ps-d1" class="provision-step wait flex items-center gap-3 p-3 bg-white/3 rounded-xl">
+                            <span id="ps-d1-ico" class="text-lg w-6 text-center">⏳</span>
+                            <div class="flex-1">
+                                <div class="font-medium text-sm">D1 데이터베이스 생성</div>
+                                <div class="text-xs text-gray-500">WordPress 전용 D1 DB 프로비저닝</div>
+                            </div>
+                        </div>
+
+                        <div id="ps-worker" class="provision-step wait flex items-center gap-3 p-3 bg-white/3 rounded-xl">
+                            <span id="ps-worker-ico" class="text-lg w-6 text-center">⏳</span>
+                            <div class="flex-1">
+                                <div class="font-medium text-sm">Cloudflare Worker 배포</div>
+                                <div class="text-xs text-gray-500">D1 / KV 바인딩 연결 + 코드 업로드</div>
+                            </div>
+                        </div>
+
+                        <div id="ps-wp_init" class="provision-step wait flex items-center gap-3 p-3 bg-white/3 rounded-xl">
+                            <span id="ps-wp_init-ico" class="text-lg w-6 text-center">⏳</span>
+                            <div class="flex-1">
+                                <div class="font-medium text-sm">WordPress DB 초기화</div>
+                                <div class="text-xs text-gray-500">테이블·기본 데이터 생성</div>
+                            </div>
+                        </div>
+
+                        <div id="ps-wp_files" class="provision-step wait flex items-center gap-3 p-3 bg-white/3 rounded-xl">
+                            <span id="ps-wp_files-ico" class="text-lg w-6 text-center">⏳</span>
+                            <div class="flex-1">
+                                <div class="font-medium text-sm">WordPress 파일 업로드</div>
+                                <div class="text-xs text-gray-500">GitHub에 핵심 파일 배포 (가장 오래 걸림)</div>
+                            </div>
+                            <div id="ps-wp_files-bar" class="w-16 h-1 bg-white/10 rounded-full overflow-hidden hidden">
+                                <div class="h-full bg-blue-500 progress-bar-anim" style="width:60%"></div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 최근 로그 -->
+                    <div>
+                        <div class="text-xs text-gray-500 font-bold uppercase tracking-wider mb-2">최근 로그</div>
+                        <div id="provision-logs" class="bg-black/40 rounded-xl p-4 h-32 overflow-y-auto space-y-1 font-mono text-xs text-gray-400">
+                            <div class="text-blue-400">▶ 프로비저닝 시작...</div>
+                        </div>
+                    </div>
+
+                    <!-- 알림 허용 배너 -->
+                    <div id="notif-banner" class="p-3 bg-indigo-900/30 border border-indigo-500/30 rounded-xl text-xs text-indigo-300 flex items-center gap-3">
+                        <i class="fas fa-bell text-indigo-400"></i>
+                        <span>완료 시 크롬 알림을 받으시겠습니까?</span>
+                        <button onclick="requestNotifPermission()"
+                            class="ml-auto bg-indigo-600 hover:bg-indigo-500 text-white px-3 py-1 rounded-lg font-bold transition">
+                            허용
+                        </button>
+                        <button onclick="document.getElementById('notif-banner').remove()"
+                            class="text-gray-500 hover:text-white px-2">✕</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ── 생성 완료 화면 ── -->
+            <div id="step-done" class="hidden">
+                <div class="text-center py-10">
+                    <div class="text-6xl text-green-400 mb-6 animate-bounce">🎉</div>
+                    <h2 class="text-2xl font-black mb-3">호스팅 생성 완료!</h2>
+                    <p class="text-gray-400 mb-2" id="done-domain"></p>
+                    <p class="text-gray-500 text-sm mb-2">총 소요 시간: <span id="done-elapsed" class="text-white font-mono">-</span></p>
+                    <p class="text-gray-500 text-sm mb-8">완료 이메일이 발송되었습니다. 📧</p>
+                </div>
+
+                <!-- 바로가기 버튼 -->
+                <div class="grid grid-cols-1 gap-3 mb-6">
+                    <a id="done-site-link" href="#"
+                        class="flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-500 py-4 rounded-xl font-bold text-lg transition">
+                        <i class="fas fa-globe"></i> 사이트 방문하기
                     </a>
-                    <a href="/hosting.html"
-                        class="border border-white/20 px-6 py-3 rounded-xl font-bold hover:bg-white/5 transition text-gray-300">
+                    <a id="done-detail-link" href="/hosting.html"
+                        class="flex items-center justify-center gap-2 bg-[#111] border border-white/10 hover:bg-white/5 py-4 rounded-xl font-bold transition">
+                        <i class="fas fa-cog"></i> 호스팅 관리 콘솔
+                    </a>
+                    <a id="done-wp-link" href="#"
+                        class="flex items-center justify-center gap-2 border border-white/10 hover:bg-white/5 py-3 rounded-xl font-medium text-gray-300 transition">
+                        <i class="fab fa-wordpress mr-1"></i> WordPress 관리자 (wp-admin)
+                    </a>
+                </div>
+
+                <a href="/hosting.html" class="block text-center text-sm text-gray-500 hover:text-white transition">
+                    ← 내 호스팅 목록으로
+                </a>
+            </div>
+
+            <!-- ── 생성 오류 화면 ── -->
+            <div id="step-error" class="hidden text-center py-12">
+                <div class="text-5xl text-red-400 mb-4">❌</div>
+                <h2 class="text-xl font-bold mb-2">생성 중 오류가 발생했습니다</h2>
+                <p class="text-gray-400 text-sm mb-6" id="error-msg">서버 오류가 발생했습니다.</p>
+                <div class="flex gap-3 justify-center">
+                    <button onclick="location.reload()"
+                        class="bg-blue-600 px-6 py-3 rounded-xl font-bold hover:bg-blue-500 transition">
+                        다시 시도
+                    </button>
+                    <a href="/hosting.html" class="border border-white/20 px-6 py-3 rounded-xl font-bold hover:bg-white/5 transition text-gray-300">
                         목록으로
                     </a>
                 </div>
@@ -232,162 +361,377 @@
 
     <script src="/src/auth-frontend.js"></script>
     <script>
-        const TOKEN   = localStorage.getItem('admin_token');
-        const HEADERS = { 'Authorization': `Bearer ${TOKEN}`, 'Content-Type': 'application/json' };
+    const TOKEN   = localStorage.getItem('admin_token');
+    const HEADERS = { 'Authorization': `Bearer ${TOKEN}`, 'Content-Type': 'application/json' };
 
-        let selectedPhp = '8.2';
-        let currentStep = 1;
+    let selectedPhp   = '8.2';
+    let currentStep   = 1;
+    let pollInterval  = null;
+    let elapsedSec    = 0;
+    let elapsedTimer  = null;
+    let createdSiteId = null;
 
-        function showAlert(msg, type = 'error') {
-            const el = document.getElementById('alertMsg');
-            el.textContent = msg;
-            el.className = type === 'success'
-                ? 'mb-6 p-3 rounded-xl text-sm text-center bg-green-900/40 border border-green-500/40 text-green-400'
-                : 'mb-6 p-3 rounded-xl text-sm text-center bg-red-900/40 border border-red-500/40 text-red-400';
-            el.classList.remove('hidden');
-            setTimeout(() => el.classList.add('hidden'), 4000);
+    // ── 알림 허용 ────────────────────────────────────────────────────────────
+    async function requestNotifPermission() {
+        if (!('Notification' in window)) {
+            alert('이 브라우저는 알림을 지원하지 않습니다.');
+            return;
         }
+        const perm = await Notification.requestPermission();
+        if (perm === 'granted') {
+            document.getElementById('notif-banner').innerHTML =
+                '<i class="fas fa-check-circle text-green-400 mr-2"></i><span class="text-green-300">알림이 허용되었습니다. 완료 시 알려드립니다!</span>';
+        }
+    }
 
-        function goStep(n) {
-            if (n === 2) {
-                const name = document.getElementById('site_name').value.trim();
-                if (!name) { showAlert('사이트 이름을 입력해주세요.'); return; }
-                loadPhpVersions();
-            }
-            if (n === 3) {
-                document.getElementById('sum-name').textContent   = document.getElementById('site_name').value;
-                document.getElementById('sum-php').textContent    = `PHP ${selectedPhp}`;
-            }
-
-            // step visibility
-            [1, 2, 3].forEach(i => {
-                document.getElementById(`step-${i}`).classList.add('hidden');
-                const ind = document.getElementById(`step-${i}-ind`);
-                if (i < n) {
-                    ind.className = 'step-done flex-1 p-3 border rounded-xl text-center text-sm font-bold text-green-400';
-                    ind.innerHTML = `<span>✓</span> ${i === 1 ? '기본 정보' : i === 2 ? 'PHP 버전' : 'WP 설정'}`;
-                } else if (i === n) {
-                    ind.className = 'step-active flex-1 p-3 border rounded-xl text-center text-sm font-bold';
-                    const labels = { 1: '기본 정보', 2: 'PHP 버전', 3: 'WP 설정' };
-                    ind.innerHTML = `<span class="text-blue-400">${i}</span> ${labels[i]}`;
-                } else {
-                    ind.className = 'step-inactive flex-1 p-3 border rounded-xl text-center text-sm font-bold text-gray-600';
-                    const labels = { 1: '기본 정보', 2: 'PHP 버전', 3: 'WP 설정' };
-                    ind.innerHTML = `<span>${i}</span> ${labels[i]}`;
-                }
+    function sendChromeNotif(title, body, url) {
+        if (Notification.permission === 'granted') {
+            const n = new Notification(title, {
+                body,
+                icon: '/favicon-192x192.png',
+                badge: '/favicon-32x32.png',
+                tag: 'cloudpress-hosting',
+                requireInteraction: true,
             });
-            document.getElementById(`step-${n}`).classList.remove('hidden');
-            currentStep = n;
-            document.getElementById('alertMsg').classList.add('hidden');
+            if (url) n.onclick = () => { window.focus(); window.open(url, '_blank'); n.close(); };
         }
+    }
 
-        async function loadPhpVersions() {
-            const loading  = document.getElementById('php-loading');
-            const list     = document.getElementById('php-versions');
-            loading.classList.remove('hidden');
-            list.classList.add('hidden');
+    // ── 경과 시간 타이머 ─────────────────────────────────────────────────────
+    function startElapsedTimer() {
+        elapsedSec = 0;
+        elapsedTimer = setInterval(() => {
+            elapsedSec++;
+            const m = Math.floor(elapsedSec / 60);
+            const s = elapsedSec % 60;
+            document.getElementById('elapsed-time').textContent = `${m}:${String(s).padStart(2,'0')}`;
 
-            try {
-                const res  = await fetch('/api/php-versions', { headers: HEADERS });
-                const data = await res.json();
+            // ETA 업데이트
+            const remaining = Math.max(0, 900 - elapsedSec);
+            const rm = Math.floor(remaining / 60);
+            const rs = remaining % 60;
+            document.getElementById('eta-time').textContent = remaining > 0
+                ? `약 ${rm}분 ${rs > 0 ? rs+'초' : ''}`
+                : '거의 완료!';
+        }, 1000);
+    }
+    function stopElapsedTimer() {
+        if (elapsedTimer) { clearInterval(elapsedTimer); elapsedTimer = null; }
+    }
 
-                document.getElementById('php-source').textContent =
-                    data.source === 'php.net' ? '✓ php.net 실시간' : '⚠ 오프라인 데이터';
+    // ── 단계 상태 아이콘 ─────────────────────────────────────────────────────
+    function setStep(key, state) {
+        const el  = document.getElementById(`ps-${key}`);
+        const ico = document.getElementById(`ps-${key}-ico`);
+        if (!el || !ico) return;
+        el.classList.remove('done','doing','wait','error');
+        const map = { done:'✅', doing:'🔄', wait:'⏳', error:'❌' };
+        ico.textContent = map[state] || '⏳';
+        el.classList.add(state);
 
-                list.innerHTML = data.versions.map(v => `
-                    <div class="php-card border border-white/10 rounded-xl p-4 ${v.version.startsWith(selectedPhp.split('.')[0] + '.' + selectedPhp.split('.')[1]) ? 'selected' : ''} ${!v.supported ? 'eol' : ''}"
-                         onclick="selectPhp('${v.version}', this)">
-                        <div class="flex justify-between items-center">
-                            <div>
-                                <span class="font-mono font-bold text-lg">${v.display_version || ('PHP ' + v.version.split('.').slice(0,2).join('.'))}</span>
-                                <span class="text-xs text-gray-500 ml-1">(${v.version})</span>
-                                ${v.is_security_release ? '<span class="text-xs bg-green-900/40 border border-green-500/30 text-green-400 px-2 py-0.5 rounded-full ml-2">보안 릴리스</span>' : ''}
-                                ${!v.supported ? '<span class="text-xs bg-red-900/40 border border-red-500/30 text-red-400 px-2 py-0.5 rounded-full ml-2">' + (v.support_label || 'EOL') + '</span>' : '<span class="text-xs bg-blue-900/40 border border-blue-500/30 text-blue-400 px-2 py-0.5 rounded-full ml-2">' + (v.support_label || '지원됨') + '</span>'}
-                            </div>
-                            <div class="text-right">
-                                <div class="text-xs text-gray-500">${v.date || ''}</div>
-                                <i class="fas fa-check-circle text-indigo-400 selected-icon hidden"></i>
-                            </div>
+        if (key === 'wp_files') {
+            const bar = document.getElementById('ps-wp_files-bar');
+            if (bar) bar.classList.toggle('hidden', state !== 'doing');
+        }
+    }
+
+    // ── 전체 진행도 계산 ─────────────────────────────────────────────────────
+    function updateOverallProgress(steps) {
+        const weights = { github: 10, d1: 15, worker: 20, wp_init: 15, wp_files: 40 };
+        let done = 0, total = 100;
+        for (const [k, w] of Object.entries(weights)) {
+            if (steps[k]) done += w;
+        }
+        document.getElementById('overall-pct').textContent = `${done}%`;
+        document.getElementById('overall-bar').style.width = `${done}%`;
+    }
+
+    // ── 로그 추가 ────────────────────────────────────────────────────────────
+    function addLog(msg, level = 'info') {
+        const container = document.getElementById('provision-logs');
+        const colors = { info: 'text-gray-300', warning: 'text-yellow-400', error: 'text-red-400' };
+        const line = document.createElement('div');
+        line.className = colors[level] || colors.info;
+        line.textContent = `▸ ${msg}`;
+        container.appendChild(line);
+        container.scrollTop = container.scrollHeight;
+    }
+
+    // ── 상태 폴링 ─────────────────────────────────────────────────────────
+    let lastLogCount = 0;
+
+    async function pollStatus() {
+        if (!createdSiteId) return;
+        try {
+            const res  = await fetch(`/api/notify/site-status?id=${createdSiteId}`, { headers: HEADERS });
+
+            // JSON 파싱 실패 대비
+            const text = await res.text();
+            let data;
+            try { data = JSON.parse(text); } catch { return; }
+
+            if (!data.success) return;
+
+            // 단계 상태 업데이트
+            const s = data.steps || {};
+            const prevSteps = { ...s };
+
+            if (data.status === 'provisioning') {
+                // 어떤 단계가 완료됐는지 추론
+                if (s.github)   setStep('github',   'done');  else setStep('github',   'doing');
+                if (s.d1)       setStep('d1',        'done');  else if (s.github)   setStep('d1',     'doing');
+                if (s.worker)   setStep('worker',    'done');  else if (s.d1)       setStep('worker', 'doing');
+                if (s.wp_init)  setStep('wp_init',   'done');  else if (s.worker)   setStep('wp_init','doing');
+                if (s.wp_files) setStep('wp_files',  'done');  else if (s.wp_init)  setStep('wp_files','doing');
+            }
+
+            updateOverallProgress(s);
+
+            // 새 로그 추가
+            const logs = (data.logs || []).slice(lastLogCount);
+            logs.forEach(l => addLog(l.message, l.level));
+            lastLogCount = data.logs?.length || 0;
+
+            // 완료
+            if (data.is_complete) {
+                clearInterval(pollInterval);
+                stopElapsedTimer();
+
+                ['github','d1','worker','wp_init','wp_files'].forEach(k => {
+                    if (s[k]) setStep(k, 'done');
+                });
+                updateOverallProgress({ github:true, d1:true, worker:true, wp_init:true, wp_files: s.wp_files });
+
+                addLog('✅ 호스팅 생성 완료!', 'info');
+                showDoneScreen(data);
+
+                // 크롬 알림
+                sendChromeNotif(
+                    '🎉 CloudPress 호스팅 생성 완료!',
+                    `${data.site_name} 사이트가 준비되었습니다. 클릭하여 방문하세요.`,
+                    `https://${data.domain}`
+                );
+
+                // 완료 이메일 발송 요청
+                fetch('/api/notify/hosting-complete', {
+                    method: 'POST',
+                    headers: HEADERS,
+                    body: JSON.stringify({ site_id: createdSiteId }),
+                }).catch(() => {});
+            }
+
+            // 오류
+            if (data.is_error) {
+                clearInterval(pollInterval);
+                stopElapsedTimer();
+                document.getElementById('step-provisioning').classList.add('hidden');
+                document.getElementById('step-error').classList.remove('hidden');
+                document.getElementById('error-msg').textContent =
+                    '프로비저닝 중 오류가 발생했습니다. 로그를 확인해주세요.';
+            }
+
+        } catch (e) {
+            // 네트워크 오류는 무시하고 계속 폴링
+            console.warn('[poll] error:', e.message);
+        }
+    }
+
+    // ── 완료 화면 표시 ────────────────────────────────────────────────────────
+    function showDoneScreen(data) {
+        document.getElementById('step-provisioning').classList.add('hidden');
+        document.getElementById('step-done').classList.remove('hidden');
+
+        const domain  = data.domain || '';
+        const siteUrl = `https://${domain}`;
+
+        document.getElementById('done-domain').textContent = domain
+            ? `🌐 ${domain}`
+            : '도메인이 준비 중입니다.';
+        document.getElementById('done-elapsed').textContent = (() => {
+            const m = Math.floor(elapsedSec / 60);
+            const s = elapsedSec % 60;
+            return `${m}분 ${s}초`;
+        })();
+
+        if (domain) {
+            document.getElementById('done-site-link').href   = siteUrl;
+            document.getElementById('done-wp-link').href     = `${siteUrl}/wp-admin`;
+        }
+        document.getElementById('done-detail-link').href = `/hosting-detail.html?id=${createdSiteId}`;
+    }
+
+    // ── 폼 유틸 ──────────────────────────────────────────────────────────────
+    function showAlert(msg, type = 'error') {
+        const el = document.getElementById('alertMsg');
+        el.textContent = msg;
+        el.className = type === 'success'
+            ? 'mb-6 p-3 rounded-xl text-sm text-center bg-green-900/40 border border-green-500/40 text-green-400'
+            : 'mb-6 p-3 rounded-xl text-sm text-center bg-red-900/40 border border-red-500/40 text-red-400';
+        el.classList.remove('hidden');
+        setTimeout(() => el.classList.add('hidden'), 4000);
+    }
+
+    function goStep(n) {
+        if (n === 2) {
+            const name = document.getElementById('site_name').value.trim();
+            if (!name) { showAlert('사이트 이름을 입력해주세요.'); return; }
+            loadPhpVersions();
+        }
+        if (n === 3) {
+            document.getElementById('sum-name').textContent = document.getElementById('site_name').value;
+            document.getElementById('sum-php').textContent  = `PHP ${selectedPhp}`;
+        }
+        [1, 2, 3].forEach(i => {
+            document.getElementById(`step-${i}`).classList.add('hidden');
+            const ind = document.getElementById(`step-${i}-ind`);
+            if (i < n) {
+                ind.className = 'step-done flex-1 p-3 border rounded-xl text-center text-sm font-bold text-green-400';
+                ind.innerHTML = `<span>✓</span> ${i===1?'기본 정보':i===2?'PHP 버전':'WP 설정'}`;
+            } else if (i === n) {
+                ind.className = 'step-active flex-1 p-3 border rounded-xl text-center text-sm font-bold';
+                const labels = {1:'기본 정보',2:'PHP 버전',3:'WP 설정'};
+                ind.innerHTML = `<span class="text-blue-400">${i}</span> ${labels[i]}`;
+            } else {
+                ind.className = 'step-inactive flex-1 p-3 border rounded-xl text-center text-sm font-bold text-gray-600';
+                const labels = {1:'기본 정보',2:'PHP 버전',3:'WP 설정'};
+                ind.innerHTML = `<span>${i}</span> ${labels[i]}`;
+            }
+        });
+        document.getElementById(`step-${n}`).classList.remove('hidden');
+        currentStep = n;
+        document.getElementById('alertMsg').classList.add('hidden');
+    }
+
+    async function loadPhpVersions() {
+        const loading = document.getElementById('php-loading');
+        const list    = document.getElementById('php-versions');
+        loading.classList.remove('hidden');
+        list.classList.add('hidden');
+        try {
+            const res  = await fetch('/api/php-versions', { headers: HEADERS });
+            const data = await res.json();
+            document.getElementById('php-source').textContent =
+                data.source === 'php.net' ? '✓ php.net 실시간' : '⚠ 오프라인 데이터';
+            list.innerHTML = data.versions.map(v => `
+                <div class="php-card border border-white/10 rounded-xl p-4 ${v.version.startsWith(selectedPhp.split('.')[0]+'.'+selectedPhp.split('.')[1])?'selected':''} ${!v.supported?'eol':''}"
+                     onclick="selectPhp('${v.version}', this)">
+                    <div class="flex justify-between items-center">
+                        <div>
+                            <span class="font-mono font-bold text-lg">${v.display_version||('PHP '+v.version.split('.').slice(0,2).join('.'))}</span>
+                            <span class="text-xs text-gray-500 ml-1">(${v.version})</span>
+                            ${v.is_security_release?'<span class="text-xs bg-green-900/40 border border-green-500/30 text-green-400 px-2 py-0.5 rounded-full ml-2">보안 릴리스</span>':''}
+                            ${!v.supported?'<span class="text-xs bg-red-900/40 border border-red-500/30 text-red-400 px-2 py-0.5 rounded-full ml-2">'+(v.support_label||'EOL')+'</span>':'<span class="text-xs bg-blue-900/40 border border-blue-500/30 text-blue-400 px-2 py-0.5 rounded-full ml-2">'+(v.support_label||'지원됨')+'</span>'}
+                        </div>
+                        <div class="text-right">
+                            <div class="text-xs text-gray-500">${v.date||''}</div>
+                            <i class="fas fa-check-circle text-indigo-400 selected-icon hidden"></i>
                         </div>
                     </div>
-                `).join('');
+                </div>
+            `).join('');
+            const cards = list.querySelectorAll('.php-card');
+            if (cards.length > 0) selectPhp(data.versions[0].version, cards[0]);
+            loading.classList.add('hidden');
+            list.classList.remove('hidden');
+        } catch {
+            loading.innerHTML = `<p class="text-red-400 text-sm">PHP 버전을 불러오지 못했습니다. 기본값(8.2)을 사용합니다.</p>`;
+            selectedPhp = '8.2';
+        }
+    }
 
-                // 기본값 선택
-                const cards = list.querySelectorAll('.php-card');
-                if (cards.length > 0) selectPhp(data.versions[0].version, cards[0]);
+    function selectPhp(version, el) {
+        selectedPhp = version;
+        document.querySelectorAll('.php-card').forEach(c => {
+            c.classList.remove('selected');
+            c.querySelector('.selected-icon')?.classList.add('hidden');
+        });
+        el.classList.add('selected');
+        el.querySelector('.selected-icon')?.classList.remove('hidden');
+    }
 
-                loading.classList.add('hidden');
-                list.classList.remove('hidden');
-            } catch (e) {
-                loading.innerHTML = `<p class="text-red-400 text-sm">PHP 버전을 불러오지 못했습니다. 기본값(8.2)을 사용합니다.</p>`;
-                selectedPhp = '8.2';
-            }
+    function toggleWpPass() {
+        const inp = document.getElementById('wp_admin_pass');
+        const ico = document.getElementById('wp-eye');
+        inp.type = inp.type === 'password' ? 'text' : 'password';
+        ico.classList.toggle('fa-eye');
+        ico.classList.toggle('fa-eye-slash');
+    }
+
+    // ── 호스팅 생성 ──────────────────────────────────────────────────────────
+    async function createHosting() {
+        const site_name      = document.getElementById('site_name').value.trim();
+        const wp_admin_user  = document.getElementById('wp_admin_user').value.trim();
+        const wp_admin_pass  = document.getElementById('wp_admin_pass').value;
+        const wp_admin_email = document.getElementById('wp_admin_email').value.trim();
+
+        if (!site_name)     { showAlert('사이트 이름을 입력해주세요.'); return; }
+        if (!wp_admin_user) { showAlert('WordPress 관리자 아이디를 입력해주세요.'); return; }
+        if (!wp_admin_pass || wp_admin_pass.length < 8) {
+            showAlert('WordPress 관리자 비밀번호는 8자 이상이어야 합니다.'); return;
+        }
+        if (!wp_admin_email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(wp_admin_email)) {
+            showAlert('올바른 관리자 이메일을 입력해주세요.'); return;
         }
 
-        function selectPhp(version, el) {
-            selectedPhp = version;
-            document.querySelectorAll('.php-card').forEach(c => {
-                c.classList.remove('selected');
-                c.querySelector('.selected-icon')?.classList.add('hidden');
+        const btn = document.getElementById('create-btn');
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i> 생성 요청 중...';
+
+        try {
+            const res  = await fetch('/api/sites', {
+                method:  'POST',
+                headers: HEADERS,
+                body:    JSON.stringify({ site_name, php_version: selectedPhp, wp_admin_user, wp_admin_pass, wp_admin_email }),
             });
-            el.classList.add('selected');
-            el.querySelector('.selected-icon')?.classList.remove('hidden');
-        }
+            const data = await res.json();
 
-        function toggleWpPass() {
-            const inp = document.getElementById('wp_admin_pass');
-            const ico = document.getElementById('wp-eye');
-            inp.type = inp.type === 'password' ? 'text' : 'password';
-            ico.classList.toggle('fa-eye');
-            ico.classList.toggle('fa-eye-slash');
-        }
+            if (res.ok && data.success) {
+                createdSiteId = data.id;
 
-        async function createHosting() {
-            const site_name     = document.getElementById('site_name').value.trim();
-
-            const wp_admin_user = document.getElementById('wp_admin_user').value.trim();
-            const wp_admin_pass = document.getElementById('wp_admin_pass').value;
-            const wp_admin_email= document.getElementById('wp_admin_email').value.trim();
-
-            if (!site_name)      { showAlert('사이트 이름을 입력해주세요.'); return; }
-            if (!wp_admin_user)  { showAlert('WordPress 관리자 아이디를 입력해주세요.'); return; }
-            if (!wp_admin_pass || wp_admin_pass.length < 8) { showAlert('WordPress 관리자 비밀번호는 8자 이상이어야 합니다.'); return; }
-            if (!wp_admin_email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(wp_admin_email)) {
-                showAlert('올바른 관리자 이메일을 입력해주세요.'); return;
-            }
-
-            const btn = document.getElementById('create-btn');
-            btn.disabled = true;
-            btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i> 생성 중...';
-
-            try {
-                const res  = await fetch('/api/sites', {
-                    method:  'POST',
-                    headers: { ...HEADERS, 'Content-Type': 'application/json' },
-                    body:    JSON.stringify({
-                        site_name, // 도메인은 상세에서 추가
-                        php_version: selectedPhp,
-                        wp_admin_user, wp_admin_pass, wp_admin_email,
-                    }),
+                // 스텝 인디케이터 완료 처리
+                [1,2,3].forEach(i => {
+                    document.getElementById(`step-${i}`).classList.add('hidden');
+                    const ind = document.getElementById(`step-${i}-ind`);
+                    ind.className = 'step-done flex-1 p-3 border rounded-xl text-center text-sm font-bold text-green-400';
+                    ind.innerHTML = `<span>✓</span> ${i===1?'기본 정보':i===2?'PHP 버전':'WP 설정'}`;
                 });
-                const data = await res.json();
 
-                if (res.ok && data.success) {
-                    [1, 2, 3].forEach(i => document.getElementById(`step-${i}`).classList.add('hidden'));
-                    document.getElementById('step-done').classList.remove('hidden');
-                    document.getElementById('done-domain').textContent = 'Cloudflare Worker/D1/KV 및 Supabase 버킷이 자동 생성 중입니다. 도메인 탭에서 커스텀 도메인을 연결하세요.';
-                    document.getElementById('done-detail-link').href = `/hosting-detail.html?id=${data.id}`;
-                } else {
-                    showAlert(data.error || '호스팅 생성에 실패했습니다.');
-                    btn.disabled = false;
-                    btn.innerHTML = '<i class="fas fa-rocket mr-2"></i> 호스팅 생성';
+                // 프로비저닝 화면 표시
+                document.getElementById('step-provisioning').classList.remove('hidden');
+                addLog(`호스팅 ID: ${data.id} 생성 시작`);
+
+                // 경과 타이머 시작
+                startElapsedTimer();
+
+                // 크롬 알림 권한 확인
+                if (Notification.permission === 'granted') {
+                    document.getElementById('notif-banner').remove();
+                } else if (Notification.permission === 'denied') {
+                    document.getElementById('notif-banner').remove();
                 }
-            } catch (e) {
-                showAlert('네트워크 오류가 발생했습니다.');
+
+                // 폴링 시작 (15초 간격 - API rate limit 고려)
+                pollInterval = setInterval(pollStatus, 15000);
+                // 첫 폴링은 5초 후
+                setTimeout(pollStatus, 5000);
+
+            } else {
+                showAlert(data.error || '호스팅 생성에 실패했습니다.');
                 btn.disabled = false;
                 btn.innerHTML = '<i class="fas fa-rocket mr-2"></i> 호스팅 생성';
             }
+        } catch {
+            showAlert('네트워크 오류가 발생했습니다.');
+            btn.disabled = false;
+            btn.innerHTML = '<i class="fas fa-rocket mr-2"></i> 호스팅 생성';
         }
+    }
+
+    // 페이지 언로드 시 폴링 정리
+    window.addEventListener('beforeunload', () => {
+        if (pollInterval) clearInterval(pollInterval);
+        stopElapsedTimer();
+    });
     </script>
 </body>
 </html>

@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>결제 완료 | CloudPress</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" rel="stylesheet">
+    <style>
+        body { background-color: #050505; color: white; font-family: 'Pretendard', sans-serif; }
+        @keyframes bounce { 0%,100%{transform:translateY(-8px)} 50%{transform:translateY(0)} }
+        .emoji-bounce { animation: bounce 1s ease-in-out infinite; display:inline-block; }
+    </style>
+</head>
+<body class="bg-[#050505] min-h-screen flex items-center justify-center p-6">
+
+<div class="max-w-md w-full mx-auto">
+    <!-- 로딩 상태 -->
+    <div id="state-loading" class="text-center">
+        <div class="text-4xl mb-4"><i class="fas fa-spinner fa-spin text-blue-400"></i></div>
+        <h2 class="text-xl font-bold mb-2">결제를 처리 중입니다...</h2>
+        <p class="text-gray-500 text-sm">잠시만 기다려주세요.</p>
+    </div>
+
+    <!-- 성공 상태 -->
+    <div id="state-success" class="hidden text-center">
+        <div class="text-6xl mb-6 emoji-bounce">🎉</div>
+        <h1 class="text-3xl font-black mb-3">결제 완료!</h1>
+        <p class="text-gray-400 mb-1" id="success-msg"></p>
+        <p class="text-gray-500 text-sm mb-8" id="success-expire"></p>
+
+        <div class="p-5 bg-[#111] border border-white/10 rounded-2xl mb-6 text-left space-y-3 text-sm">
+            <div class="text-xs text-gray-500 font-bold uppercase tracking-wider mb-2">결제 정보</div>
+            <div class="flex justify-between">
+                <span class="text-gray-400">플랜</span>
+                <span class="font-bold" id="info-plan"></span>
+            </div>
+            <div class="flex justify-between">
+                <span class="text-gray-400">결제 금액</span>
+                <span class="font-bold text-blue-300" id="info-amount"></span>
+            </div>
+            <div class="flex justify-between">
+                <span class="text-gray-400">만료일</span>
+                <span id="info-expire"></span>
+            </div>
+        </div>
+
+        <div class="flex flex-col gap-3">
+            <a id="link-console" href="/hosting.html"
+                class="bg-blue-600 hover:bg-blue-500 py-4 rounded-xl font-bold text-center transition">
+                <i class="fas fa-tachometer-alt mr-2"></i>콘솔에서 확인하기
+            </a>
+            <a id="link-receipt" href="#" target="_blank"
+                class="hidden border border-white/20 hover:bg-white/5 py-3 rounded-xl font-medium text-gray-300 text-center transition text-sm">
+                <i class="fas fa-receipt mr-2"></i>영수증 보기
+            </a>
+            <a href="/pricing.html" class="text-sm text-gray-500 hover:text-white transition text-center">
+                요금제 페이지로 돌아가기
+            </a>
+        </div>
+    </div>
+
+    <!-- 오류 상태 -->
+    <div id="state-error" class="hidden text-center">
+        <div class="text-5xl mb-4">❌</div>
+        <h2 class="text-xl font-bold mb-2">결제 처리 오류</h2>
+        <p class="text-gray-400 text-sm mb-2" id="error-msg">결제 승인 중 오류가 발생했습니다.</p>
+        <p class="text-gray-500 text-xs mb-6">결제가 완료된 경우 관리자에게 문의해주세요.</p>
+        <div class="flex gap-3 justify-center">
+            <a href="/pricing.html" class="bg-blue-600 hover:bg-blue-500 px-6 py-3 rounded-xl font-bold transition">
+                다시 시도
+            </a>
+            <a href="/contact.html" class="border border-white/20 px-6 py-3 rounded-xl font-bold text-gray-300 hover:bg-white/5 transition">
+                문의하기
+            </a>
+        </div>
+    </div>
+</div>
+
+<script>
+const TOKEN   = localStorage.getItem('admin_token');
+const HEADERS = { Authorization: `Bearer ${TOKEN}`, 'Content-Type': 'application/json' };
+
+const planNames = { starter: '스타터 플랜', pro: '프로 플랜' };
+
+(async () => {
+    const params = new URLSearchParams(location.search);
+
+    // 토스 결제 성공 리다이렉트 파라미터
+    const paymentKey = params.get('paymentKey');
+    const orderId    = params.get('orderId');
+    const amount     = params.get('amount');
+
+    if (!paymentKey || !orderId || !amount) {
+        showError('결제 정보가 올바르지 않습니다. URL 파라미터를 확인해주세요.');
+        return;
+    }
+
+    if (!TOKEN) {
+        showError('로그인이 필요합니다.');
+        return;
+    }
+
+    try {
+        // 서버사이드 결제 승인
+        const res  = await fetch('/api/payment/confirm', {
+            method: 'POST',
+            headers: HEADERS,
+            body: JSON.stringify({
+                payment_key: paymentKey,
+                order_id:    orderId,
+                amount:      parseInt(amount),
+            }),
+        });
+        const text = await res.text();
+        let data;
+        try { data = JSON.parse(text); } catch { throw new Error('서버 응답 오류'); }
+
+        if (!res.ok) throw new Error(data.error || '결제 승인 실패');
+
+        // 성공 화면
+        document.getElementById('state-loading').classList.add('hidden');
+        document.getElementById('state-success').classList.remove('hidden');
+
+        document.getElementById('success-msg').textContent =
+            `${planNames[data.plan] || data.plan}이 활성화되었습니다!`;
+
+        const expDate = data.expires_at ? new Date(data.expires_at) : null;
+        document.getElementById('success-expire').textContent = expDate
+            ? `유효 기간: ${expDate.toLocaleDateString('ko-KR')}까지`
+            : '';
+
+        document.getElementById('info-plan').textContent   = planNames[data.plan] || data.plan;
+        document.getElementById('info-amount').textContent = `₩${parseInt(amount).toLocaleString()}`;
+        document.getElementById('info-expire').textContent = expDate
+            ? expDate.toLocaleDateString('ko-KR') : '-';
+
+        if (data.receipt_url) {
+            const rLink = document.getElementById('link-receipt');
+            rLink.href = data.receipt_url;
+            rLink.classList.remove('hidden');
+        }
+
+    } catch (e) {
+        showError(e.message);
+    }
+})();
+
+function showError(msg) {
+    document.getElementById('state-loading').classList.add('hidden');
+    document.getElementById('state-error').classList.remove('hidden');
+    document.getElementById('error-msg').textContent = msg;
+}
+</script>
+</body>
+</html>

@@ -9,8 +9,12 @@
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
 </head>
 <body class="bg-[#050505] text-white md:flex md:h-screen">
-<script>const token=localStorage.getItem('admin_token');if(!token)window.location.href='/login.html';</script>
+<script>
+    const _at = localStorage.getItem('admin_token');
+    if (!_at) window.location.href = '/login.html';
+</script>
 
+<!-- 모바일 헤더 -->
 <header class="md:hidden sticky top-0 z-50 bg-[#050505]/95 backdrop-blur-lg border-b border-white/10">
     <div class="flex justify-between items-center px-4 py-3">
         <span class="text-xl font-black text-blue-500">CP <span class="text-white">ADMIN</span></span>
@@ -28,6 +32,7 @@
 </header>
 <script>document.getElementById('mobileMenuBtn').addEventListener('click',()=>document.getElementById('mobileMenu').classList.toggle('hidden'));</script>
 
+<!-- 사이드바 -->
 <aside class="w-64 border-r border-white/10 p-6 flex flex-col hidden md:flex flex-shrink-0">
     <div class="text-2xl font-black text-blue-500 mb-10">CP <span class="text-white">ADMIN</span></div>
     <nav class="flex-1 space-y-1">
@@ -41,101 +46,304 @@
     </button>
 </aside>
 
-<main class="flex-1 w-full overflow-y-auto p-6 md:p-10 space-y-6">
-    <h1 class="text-2xl font-bold mb-6">시스템 설정</h1>
+<main class="flex-1 w-full overflow-y-auto p-6 md:p-10 space-y-8">
+    <h1 class="text-2xl font-bold mb-2">시스템 설정</h1>
+    <p class="text-sm text-gray-400 mb-6">CloudPress 플랫폼 전역 설정을 관리합니다.</p>
 
-    <!-- 서버 IP 설정 -->
-    <div class="p-6 bg-[#111] rounded-2xl border border-white/5 space-y-4">
-        <h2 class="font-bold flex items-center gap-2"><i class="fas fa-server text-blue-400"></i> 서버 IP 설정</h2>
-        <p class="text-sm text-gray-400">
-            호스팅 도메인의 A레코드가 가리킬 Cloudflare Anycast IP입니다.<br>
-            <code class="text-xs bg-white/10 px-2 py-1 rounded">wrangler secret put SERVER_IP</code> 명령으로 환경변수를 설정하세요.
-        </p>
-        <div class="p-4 bg-black/30 rounded-xl">
-            <p class="text-xs text-gray-500 mb-1">현재 설정된 서버 IP</p>
-            <p id="current-ip" class="font-mono text-white text-lg"><i class="fas fa-spinner fa-spin text-gray-600"></i></p>
+    <!-- ── GitHub Storage 설정 ── -->
+    <div class="p-6 bg-[#111] rounded-2xl border border-white/5 space-y-5">
+        <div class="flex items-center justify-between">
+            <h2 class="font-bold flex items-center gap-2">
+                <i class="fab fa-github text-white text-lg"></i>
+                GitHub 스토리지 토큰 관리
+            </h2>
+            <span id="token-count-badge" class="text-xs bg-white/10 text-gray-300 px-3 py-1 rounded-full">로딩 중...</span>
         </div>
-        <div class="text-xs text-gray-500 space-y-1">
-            <p><i class="fas fa-info-circle text-blue-400 mr-1"></i> Cloudflare Workers에서는 환경변수 <code>SERVER_IP</code>로 관리됩니다.</p>
-            <p><i class="fas fa-info-circle text-blue-400 mr-1"></i> 변경 후 Workers를 재배포해야 적용됩니다.</p>
+        <p class="text-sm text-gray-400">
+            WordPress 코어 파일, 미디어, 테마, 플러그인을 GitHub Private Repository에 저장합니다.<br>
+            여러 개의 토큰을 추가하면 API rate limit을 자동으로 분산합니다. <span class="text-blue-400">토큰은 무제한으로 추가 가능합니다.</span>
+        </p>
+
+        <!-- 토큰 추가 폼 -->
+        <div class="p-4 bg-black/30 rounded-xl space-y-3">
+            <div class="text-xs text-gray-500 font-bold uppercase tracking-wider mb-2">새 토큰 추가</div>
+            <div class="flex flex-col md:flex-row gap-3">
+                <div class="flex-1">
+                    <label class="text-xs text-gray-500 mb-1 block">Personal Access Token</label>
+                    <input id="gh-token-input" type="password"
+                        placeholder="ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+                        class="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-sm font-mono focus:outline-none focus:border-blue-500 transition"
+                        autocomplete="off" />
+                    <p class="text-xs text-gray-600 mt-1">
+                        <a href="https://github.com/settings/tokens/new" target="_blank" class="text-blue-400 hover:underline">
+                            <i class="fas fa-external-link-alt mr-1"></i>GitHub → Settings → Developer settings → Personal access tokens
+                        </a>
+                        에서 발급. 권한: <code class="bg-white/10 px-1 rounded">repo</code> (private repos 접근)
+                    </p>
+                </div>
+                <div class="md:w-40">
+                    <label class="text-xs text-gray-500 mb-1 block">레이블 (선택)</label>
+                    <input id="gh-token-label" type="text"
+                        placeholder="내 토큰 1"
+                        class="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-blue-500 transition" />
+                </div>
+            </div>
+            <div id="gh-add-alert" class="hidden p-3 rounded-xl text-sm"></div>
+            <button onclick="addGithubToken()"
+                class="bg-blue-600 hover:bg-blue-500 text-white font-bold px-6 py-2.5 rounded-xl transition flex items-center gap-2">
+                <i class="fas fa-plus"></i>
+                API 추가
+            </button>
+        </div>
+
+        <!-- 등록된 토큰 목록 -->
+        <div>
+            <div class="text-xs text-gray-500 font-bold uppercase tracking-wider mb-3">등록된 토큰</div>
+            <div id="github-token-list" class="space-y-2">
+                <div class="text-sm text-gray-500 text-center py-6">
+                    <i class="fas fa-spinner fa-spin mr-2"></i>로딩 중...
+                </div>
+            </div>
         </div>
     </div>
 
-    <!-- Wrangler 환경변수 가이드 -->
+    <!-- ── Cloudflare 환경변수 가이드 ── -->
     <div class="p-6 bg-[#111] rounded-2xl border border-white/5 space-y-4">
         <h2 class="font-bold flex items-center gap-2"><i class="fas fa-key text-yellow-400"></i> 필수 환경변수 (Wrangler Secrets)</h2>
+        <p class="text-sm text-gray-400">아래 환경변수를 <code class="bg-white/10 px-1 rounded text-xs">wrangler secret put</code> 명령으로 설정하세요.</p>
         <div class="space-y-2 text-sm">
             <div class="flex flex-col md:flex-row md:items-center gap-2 p-3 bg-white/5 rounded-xl">
-                <code class="text-yellow-300 w-40 flex-shrink-0">JWT_SECRET</code>
+                <code class="text-yellow-300 w-48 flex-shrink-0">JWT_SECRET</code>
                 <span class="text-gray-400">JWT 토큰 서명 비밀키 (필수)</span>
                 <span id="jwt-status" class="ml-auto text-xs text-gray-500">-</span>
             </div>
             <div class="flex flex-col md:flex-row md:items-center gap-2 p-3 bg-white/5 rounded-xl">
-                <code class="text-yellow-300 w-40 flex-shrink-0">SERVER_IP</code>
-                <span class="text-gray-400">서버 공개 IP (도메인 A레코드 대상)</span>
-                <span id="ip-status" class="ml-auto text-xs text-gray-500">-</span>
+                <code class="text-yellow-300 w-48 flex-shrink-0">CF_ACCOUNT_ID</code>
+                <span class="text-gray-400">Cloudflare 계정 ID (Worker/D1/KV 생성용)</span>
             </div>
             <div class="flex flex-col md:flex-row md:items-center gap-2 p-3 bg-white/5 rounded-xl">
-                <code class="text-yellow-300 w-40 flex-shrink-0">SUPABASE_URL</code>
-                <span class="text-gray-400">Supabase 프로젝트 URL (스토리지)</span>
+                <code class="text-yellow-300 w-48 flex-shrink-0">GITHUB_TOKEN</code>
+                <span class="text-gray-400">기본 GitHub 토큰 (위 UI에서 추가하는 것 권장)</span>
             </div>
             <div class="flex flex-col md:flex-row md:items-center gap-2 p-3 bg-white/5 rounded-xl">
-                <code class="text-yellow-300 w-40 flex-shrink-0">SUPABASE_KEY</code>
-                <span class="text-gray-400">Supabase Service Role Key</span>
-            </div>
-            <div class="flex flex-col md:flex-row md:items-center gap-2 p-3 bg-white/5 rounded-xl">
-                <code class="text-yellow-300 w-40 flex-shrink-0">DEFAULT_DB_HOST</code>
+                <code class="text-yellow-300 w-48 flex-shrink-0">DEFAULT_DB_HOST</code>
                 <span class="text-gray-400">WordPress DB 호스트 (기본: 127.0.0.1)</span>
             </div>
         </div>
         <div class="p-4 bg-black/30 rounded-xl font-mono text-xs text-green-400 space-y-1">
             <p class="text-gray-500"># Wrangler CLI로 비밀 값 설정 예시</p>
             <p>wrangler secret put JWT_SECRET</p>
-            <p>wrangler secret put SERVER_IP</p>
-            <p>wrangler secret put SUPABASE_URL</p>
-            <p>wrangler secret put SUPABASE_KEY</p>
+            <p>wrangler secret put CF_ACCOUNT_ID</p>
+            <p>wrangler secret put GITHUB_TOKEN</p>
         </div>
     </div>
 
-    <!-- DB 상태 -->
+    <!-- ── DB 상태 ── -->
     <div class="p-6 bg-[#111] rounded-2xl border border-white/5 space-y-4">
         <h2 class="font-bold flex items-center gap-2"><i class="fas fa-database text-green-400"></i> D1 데이터베이스 상태</h2>
         <div id="db-stats" class="grid grid-cols-2 md:grid-cols-4 gap-4">
-            <div class="p-4 bg-white/5 rounded-xl text-center"><div class="text-xs text-gray-500 mb-1">사용자</div><div class="text-2xl font-bold" id="db-users">-</div></div>
-            <div class="p-4 bg-white/5 rounded-xl text-center"><div class="text-xs text-gray-500 mb-1">사이트</div><div class="text-2xl font-bold" id="db-sites">-</div></div>
-            <div class="p-4 bg-white/5 rounded-xl text-center"><div class="text-xs text-gray-500 mb-1">도메인</div><div class="text-2xl font-bold" id="db-domains">-</div></div>
-            <div class="p-4 bg-white/5 rounded-xl text-center"><div class="text-xs text-gray-500 mb-1">SSH 키</div><div class="text-2xl font-bold" id="db-ssh">-</div></div>
+            <div class="p-4 bg-white/5 rounded-xl text-center">
+                <div class="text-xs text-gray-500 mb-1">사용자</div>
+                <div class="text-2xl font-bold" id="db-users"><i class="fas fa-spinner fa-spin text-gray-600 text-lg"></i></div>
+            </div>
+            <div class="p-4 bg-white/5 rounded-xl text-center">
+                <div class="text-xs text-gray-500 mb-1">사이트</div>
+                <div class="text-2xl font-bold" id="db-sites">-</div>
+            </div>
+            <div class="p-4 bg-white/5 rounded-xl text-center">
+                <div class="text-xs text-gray-500 mb-1">도메인</div>
+                <div class="text-2xl font-bold" id="db-domains">-</div>
+            </div>
+            <div class="p-4 bg-white/5 rounded-xl text-center">
+                <div class="text-xs text-gray-500 mb-1">GitHub 토큰</div>
+                <div class="text-2xl font-bold" id="db-gh-tokens">-</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ── GitHub 사용 가이드 ── -->
+    <div class="p-6 bg-[#111] rounded-2xl border border-white/5 space-y-4">
+        <h2 class="font-bold flex items-center gap-2"><i class="fab fa-github text-white"></i> GitHub 스토리지 구조</h2>
+        <div class="grid md:grid-cols-2 gap-4 text-sm">
+            <div class="p-4 bg-white/5 rounded-xl space-y-2">
+                <p class="font-bold text-blue-300"><i class="fas fa-folder mr-2"></i>저장소 구조</p>
+                <div class="font-mono text-xs text-gray-400 space-y-1">
+                    <p>cloudpress-site-{8자ID}/</p>
+                    <p>&nbsp;&nbsp;├── uploads/&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;← 미디어 파일</p>
+                    <p>&nbsp;&nbsp;├── wp-content/themes/&nbsp;← 테마</p>
+                    <p>&nbsp;&nbsp;├── wp-content/plugins/ ← 플러그인</p>
+                    <p>&nbsp;&nbsp;├── wp-core/&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;← WP 코어 파일</p>
+                    <p>&nbsp;&nbsp;└── README.md</p>
+                </div>
+            </div>
+            <div class="p-4 bg-white/5 rounded-xl space-y-2">
+                <p class="font-bold text-green-300"><i class="fas fa-shield-alt mr-2"></i>보안 & 성능</p>
+                <ul class="text-xs text-gray-400 space-y-1.5">
+                    <li>• Private repository로 자동 생성</li>
+                    <li>• 여러 토큰으로 API rate limit 자동 분산</li>
+                    <li>• 대용량 파일은 청크 분할 업로드</li>
+                    <li>• Cloudflare Worker에서 GitHub Raw로 직접 서빙</li>
+                    <li>• 호스팅 삭제 시 repo는 보존 (데이터 보호)</li>
+                </ul>
+            </div>
+        </div>
+        <div class="p-3 bg-blue-900/20 border border-blue-500/20 rounded-xl text-xs text-blue-300">
+            <i class="fas fa-info-circle mr-2"></i>
+            GitHub Free 계획은 Private repo 용량 제한 없음. Actions 분당 500MB 전송 제한.
+            대용량 사이트는 여러 토큰을 추가하여 분산하세요.
         </div>
     </div>
 </main>
 
 <script src="/src/auth-frontend.js"></script>
 <script>
-    const HEADERS = { Authorization: `Bearer ${localStorage.getItem('admin_token')}` };
+const HEADERS = { Authorization: `Bearer ${localStorage.getItem('admin_token')}`, 'Content-Type': 'application/json' };
 
-    async function loadSettings() {
-        // 서버 IP 조회 (domains API에서 반환)
-        try {
-            const res  = await fetch('/api/admin/stats', { headers: HEADERS });
-            const data = await res.json();
-            if (data.stats) {
-                document.getElementById('db-users').textContent = data.stats.total_users;
-                document.getElementById('db-sites').textContent = data.stats.total_sites;
-            }
-        } catch {}
+// ── GitHub 토큰 목록 로드 ─────────────────────────────────────────────────
+async function loadGithubTokens() {
+    try {
+        const res  = await fetch('/api/github-storage?action=tokens', { headers: HEADERS });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || '오류');
 
-        // IP 확인
-        try {
-            const res = await fetch('/api/domains?site_id=test', { headers: HEADERS });
-            const data = await res.json();
-            const ip = data.server_ip || '환경변수 SERVER_IP 미설정';
-            document.getElementById('current-ip').textContent = ip;
-            document.getElementById('ip-status').textContent  = data.server_ip ? '✅ 설정됨' : '⚠️ 미설정';
-            document.getElementById('ip-status').className    = 'ml-auto text-xs ' + (data.server_ip ? 'text-green-400' : 'text-yellow-400');
-        } catch {}
+        const tokens  = data.tokens || [];
+        const el      = document.getElementById('github-token-list');
+        const badge   = document.getElementById('token-count-badge');
+        const dbBadge = document.getElementById('db-gh-tokens');
+
+        badge.textContent   = `${tokens.length}개 등록됨`;
+        dbBadge.textContent = tokens.length;
+
+        if (!tokens.length) {
+            el.innerHTML = `
+                <div class="p-4 bg-yellow-900/20 border border-yellow-500/20 rounded-xl text-sm text-yellow-300 flex items-start gap-3">
+                    <i class="fas fa-exclamation-triangle mt-0.5"></i>
+                    <div>
+                        <p class="font-bold">GitHub 토큰이 없습니다</p>
+                        <p class="text-xs mt-1 text-yellow-400">토큰을 추가하지 않으면 사이트 생성 시 GitHub 저장소를 자동으로 생성할 수 없습니다.</p>
+                    </div>
+                </div>`;
+            return;
+        }
+
+        el.innerHTML = tokens.map(t => `
+            <div class="flex items-center gap-3 p-3 bg-white/5 rounded-xl hover:bg-white/8 transition group">
+                <div class="w-8 h-8 rounded-full bg-white/10 flex items-center justify-center flex-shrink-0">
+                    <i class="fab fa-github text-sm"></i>
+                </div>
+                <div class="flex-1 min-w-0">
+                    <div class="flex items-center gap-2">
+                        <span class="font-medium text-sm">${escHtml(t.label || '토큰')}</span>
+                        ${t.active ? '<span class="text-xs bg-green-900/40 text-green-400 px-2 py-0.5 rounded-full">활성</span>' : '<span class="text-xs bg-gray-700 text-gray-400 px-2 py-0.5 rounded-full">비활성</span>'}
+                    </div>
+                    <div class="font-mono text-xs text-gray-500 mt-0.5">${escHtml(t.masked_token || '****')}</div>
+                    <div class="text-xs text-gray-600 mt-0.5">
+                        추가: ${t.created_at ? new Date(t.created_at).toLocaleDateString('ko-KR') : '-'}
+                        ${t.last_used_at ? ` · 마지막 사용: ${new Date(t.last_used_at).toLocaleDateString('ko-KR')}` : ''}
+                    </div>
+                </div>
+                <button onclick="removeGithubToken(${t.id}, '${escHtml(t.label || '이 토큰')}')"
+                    class="text-red-400 hover:text-red-300 p-2 rounded-lg hover:bg-red-900/20 transition opacity-0 group-hover:opacity-100">
+                    <i class="fas fa-trash text-xs"></i>
+                </button>
+            </div>
+        `).join('');
+    } catch (e) {
+        document.getElementById('github-token-list').innerHTML =
+            `<div class="text-sm text-red-400 p-3"><i class="fas fa-exclamation-circle mr-2"></i>${escHtml(e.message)}</div>`;
+    }
+}
+
+// ── GitHub 토큰 추가 ────────────────────────────────────────────────────────
+async function addGithubToken() {
+    const token  = document.getElementById('gh-token-input').value.trim();
+    const label  = document.getElementById('gh-token-label').value.trim();
+    const alertEl = document.getElementById('gh-add-alert');
+    const btn    = document.querySelector('button[onclick="addGithubToken()"]');
+
+    alertEl.className = 'hidden p-3 rounded-xl text-sm';
+
+    if (!token) {
+        showAlert(alertEl, 'GitHub Personal Access Token을 입력해주세요.', 'error');
+        return;
+    }
+    if (!token.startsWith('ghp_') && !token.startsWith('github_pat_') && !token.startsWith('gho_')) {
+        showAlert(alertEl, '올바른 GitHub 토큰 형식이 아닙니다. (ghp_ 또는 github_pat_ 로 시작해야 합니다)', 'warning');
     }
 
-    loadSettings();
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>검증 중...';
+
+    try {
+        const res  = await fetch('/api/github-storage', {
+            method:  'POST',
+            headers: HEADERS,
+            body:    JSON.stringify({ token, label }),
+        });
+        const data = await res.json();
+
+        if (!res.ok) throw new Error(data.error || '오류');
+
+        showAlert(alertEl, data.message, 'success');
+        document.getElementById('gh-token-input').value = '';
+        document.getElementById('gh-token-label').value = '';
+        await loadGithubTokens();
+    } catch (e) {
+        showAlert(alertEl, e.message, 'error');
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="fas fa-plus mr-2"></i>API 추가';
+    }
+}
+
+// ── GitHub 토큰 삭제 ────────────────────────────────────────────────────────
+async function removeGithubToken(id, label) {
+    if (!confirm(`"${label}" 토큰을 삭제하시겠습니까?\n이 토큰을 사용하는 기존 사이트에는 영향이 없습니다.`)) return;
+    try {
+        const res  = await fetch(`/api/github-storage?id=${id}`, { method: 'DELETE', headers: HEADERS });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || '오류');
+        await loadGithubTokens();
+    } catch (e) {
+        alert('삭제 오류: ' + e.message);
+    }
+}
+
+// ── DB 통계 로드 ─────────────────────────────────────────────────────────────
+async function loadStats() {
+    try {
+        const res  = await fetch('/api/admin/stats', { headers: HEADERS });
+        const data = await res.json();
+        if (data.stats) {
+            document.getElementById('db-users').textContent = data.stats.total_users ?? '-';
+            document.getElementById('db-sites').textContent = data.stats.total_sites ?? '-';
+        }
+    } catch {}
+}
+
+// ── 유틸 ────────────────────────────────────────────────────────────────────
+function showAlert(el, msg, type) {
+    const colors = {
+        success: 'bg-green-900/30 border border-green-500/30 text-green-300',
+        error:   'bg-red-900/30 border border-red-500/30 text-red-300',
+        warning: 'bg-yellow-900/30 border border-yellow-500/30 text-yellow-300',
+    };
+    el.className = `p-3 rounded-xl text-sm ${colors[type] || colors.error}`;
+    el.textContent = msg;
+}
+
+function escHtml(s) {
+    return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+// ── 엔터키 지원 ────────────────────────────────────────────────────────────
+document.getElementById('gh-token-input').addEventListener('keydown', e => {
+    if (e.key === 'Enter') addGithubToken();
+});
+
+// ── 초기화 ──────────────────────────────────────────────────────────────────
+loadStats();
+loadGithubTokens();
 </script>
 </body>
 </html>

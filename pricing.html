@@ -11,174 +11,750 @@
         body { background-color: #050505; color: white; }
         .plan-card { transition: transform 0.2s ease; }
         .plan-card:hover { transform: translateY(-6px); }
-        .plan-popular { box-shadow: 0 0 0 2px #3b82f6, 0 0 60px rgba(59, 130, 246, 0.15); }
+        .plan-popular { box-shadow: 0 0 0 2px #3b82f6, 0 0 60px rgba(59,130,246,0.15); }
         .check { color: #4ade80; }
         .cross { color: #374151; }
+
+        /* 프로필 드롭다운 */
+        #profile-dropdown { display: none; }
+        #profile-dropdown.open { display: block; }
+
+        /* 결제 모달 */
+        #payment-modal {
+            display: none;
+            position: fixed; inset: 0; z-index: 9999;
+            background: rgba(0,0,0,0.85);
+            backdrop-filter: blur(6px);
+            align-items: center; justify-content: center;
+        }
+        #payment-modal.open { display: flex; }
+
+        /* 호스팅 선택 카드 */
+        .site-card { transition: all .2s; cursor: pointer; }
+        .site-card:hover { border-color: #3b82f6; background: rgba(59,130,246,0.05); }
+        .site-card.selected { border-color: #3b82f6; background: rgba(59,130,246,0.1); }
+
+        @keyframes fadeIn { from { opacity:0; transform:scale(.96); } to { opacity:1; transform:scale(1); } }
+        #payment-modal .modal-box { animation: fadeIn .2s ease; }
     </style>
 </head>
 <body class="bg-[#050505] text-white">
 
-    <header class="p-5 border-b border-white/10 sticky top-0 bg-[#050505]/90 backdrop-blur-lg z-50">
-        <div class="max-w-7xl mx-auto flex justify-between items-center">
-            <a href="/" class="text-2xl font-black tracking-tighter text-blue-500">CLOUD<span class="text-white">PRESS</span></a>
-            <nav class="hidden md:flex gap-8 items-center text-sm font-medium text-gray-400">
-                <a href="/features.html" class="hover:text-white transition">기능</a>
-                <a href="/pricing.html" class="text-white">요금제</a>
-                <a href="/about.html" class="hover:text-white transition">소개</a>
-                <a href="/faq.html" class="hover:text-white transition">FAQ</a>
-                <a href="/contact.html" class="hover:text-white transition">문의하기</a>
+<!-- ── 헤더 ── -->
+<header class="p-5 border-b border-white/10 sticky top-0 bg-[#050505]/90 backdrop-blur-lg z-50">
+    <div class="max-w-7xl mx-auto flex justify-between items-center">
+        <a href="/" class="text-2xl font-black tracking-tighter text-blue-500">CLOUD<span class="text-white">PRESS</span></a>
+
+        <!-- 데스크톱 네비 -->
+        <nav class="hidden md:flex gap-8 items-center text-sm font-medium text-gray-400">
+            <a href="/features.html" class="hover:text-white transition">기능</a>
+            <a href="/pricing.html" class="text-white">요금제</a>
+            <a href="/about.html" class="hover:text-white transition">소개</a>
+            <a href="/faq.html" class="hover:text-white transition">FAQ</a>
+            <a href="/contact.html" class="hover:text-white transition">문의하기</a>
+
+            <!-- 비로그인 상태 -->
+            <div id="nav-guest" class="flex items-center gap-3">
                 <a href="/login.html" class="hover:text-white transition">로그인</a>
                 <a href="/signup.html" class="bg-blue-600 px-5 py-2 rounded-full text-white font-bold hover:bg-blue-500 transition">무료 시작</a>
-            </nav>
-        </div>
-    </header>
-
-    <!-- 히어로 -->
-    <section class="py-24 px-6 text-center">
-        <div class="max-w-3xl mx-auto">
-            <div class="text-blue-500 text-sm font-bold uppercase tracking-widest mb-4">요금제</div>
-            <h1 class="text-5xl md:text-6xl font-black mb-6">투명한 가격</h1>
-            <p class="text-gray-400 text-xl mb-8">숨겨진 비용 없음. 언제든 취소 가능. 무료로 시작하세요.</p>
-            <!-- 월간/연간 토글 -->
-            <div class="inline-flex items-center bg-[#111] border border-white/10 rounded-full p-1 gap-1">
-                <button id="monthlyBtn" onclick="setbilling('monthly')" class="px-5 py-2 rounded-full text-sm font-bold bg-white text-black transition">월간 결제</button>
-                <button id="yearlyBtn" onclick="setbilling('yearly')" class="px-5 py-2 rounded-full text-sm font-bold text-gray-400 transition">연간 결제 <span class="text-green-400">20% 할인</span></button>
             </div>
-        </div>
-    </section>
 
-    <!-- 요금제 카드 -->
-    <section class="pb-24 px-6 max-w-6xl mx-auto">
-        <div class="grid grid-cols-1 md:grid-cols-3 gap-8 mb-20">
-            <!-- 무료 -->
-            <div class="plan-card p-8 bg-[#0f0f0f] border border-white/10 rounded-3xl">
-                <div class="text-gray-400 text-xs font-bold uppercase tracking-widest mb-4">무료</div>
-                <div class="mb-8">
-                    <span class="text-5xl font-black">₩0</span>
-                    <span class="text-gray-600 text-sm ml-2">영구 무료</span>
+            <!-- 로그인 상태: 프로필 드롭다운 -->
+            <div id="nav-user" class="hidden relative">
+                <button id="profile-btn" onclick="toggleProfileMenu()"
+                    class="flex items-center gap-2 bg-white/5 hover:bg-white/10 border border-white/10 rounded-full pl-3 pr-4 py-2 transition">
+                    <div id="avatar-circle"
+                        class="w-7 h-7 rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center text-xs font-bold text-white flex-shrink-0">
+                    </div>
+                    <span id="nav-email" class="text-sm text-white max-w-[120px] truncate"></span>
+                    <i class="fas fa-chevron-down text-xs text-gray-400 ml-1"></i>
+                </button>
+
+                <div id="profile-dropdown"
+                    class="absolute right-0 top-full mt-2 w-52 bg-[#111] border border-white/10 rounded-2xl shadow-2xl overflow-hidden">
+                    <div class="px-4 py-3 border-b border-white/5">
+                        <div class="text-xs text-gray-500">로그인됨</div>
+                        <div id="dropdown-email" class="text-sm font-medium text-white mt-0.5 truncate"></div>
+                    </div>
+                    <div class="py-1">
+                        <a href="/dashboard.html"
+                            class="flex items-center gap-3 px-4 py-2.5 text-sm text-gray-300 hover:bg-white/5 hover:text-white transition">
+                            <i class="fas fa-tachometer-alt w-4 text-blue-400"></i> 콘솔 이동하기
+                        </a>
+                        <a href="/account.html"
+                            class="flex items-center gap-3 px-4 py-2.5 text-sm text-gray-300 hover:bg-white/5 hover:text-white transition">
+                            <i class="fas fa-user-circle w-4 text-gray-400"></i> 내 정보 관리
+                        </a>
+                    </div>
+                    <div class="border-t border-white/5 py-1">
+                        <button onclick="doLogout()"
+                            class="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-red-400 hover:bg-red-900/20 transition">
+                            <i class="fas fa-sign-out-alt w-4"></i> 로그아웃
+                        </button>
+                    </div>
                 </div>
-                <ul class="space-y-3 text-sm text-gray-400 mb-10">
-                    <li class="flex items-center gap-3"><i class="fas fa-check check w-4"></i> 워드프레스 사이트 <strong class="text-white">1개</strong></li>
-                    <li class="flex items-center gap-3"><i class="fas fa-check check w-4"></i> 트래픽 <strong class="text-white">100GB</strong>/월</li>
-                    <li class="flex items-center gap-3"><i class="fas fa-check check w-4"></i> 스토리지 <strong class="text-white">5GB</strong></li>
-                    <li class="flex items-center gap-3"><i class="fas fa-check check w-4"></i> 무료 SSL</li>
-                    <li class="flex items-center gap-3"><i class="fas fa-check check w-4"></i> 기본 대시보드</li>
-                    <li class="flex items-center gap-3"><i class="fas fa-times cross w-4"></i> <span class="text-gray-600">커스텀 도메인</span></li>
-                    <li class="flex items-center gap-3"><i class="fas fa-times cross w-4"></i> <span class="text-gray-600">자동 백업</span></li>
-                    <li class="flex items-center gap-3"><i class="fas fa-times cross w-4"></i> <span class="text-gray-600">실시간 모니터링</span></li>
-                </ul>
-                <a href="/signup.html" class="block text-center border border-white/20 py-3.5 rounded-xl font-bold hover:bg-white/5 transition">무료로 시작</a>
             </div>
-            <!-- 스타터 -->
-            <div class="plan-card plan-popular p-8 bg-[#0d1829] border border-blue-500/50 rounded-3xl relative">
-                <div class="absolute -top-4 left-1/2 -translate-x-1/2 bg-blue-600 px-5 py-1.5 rounded-full text-xs font-bold">가장 인기</div>
-                <div class="text-blue-400 text-xs font-bold uppercase tracking-widest mb-4">스타터</div>
-                <div class="mb-8">
-                    <span id="starterPrice" class="text-5xl font-black">₩9,900</span>
-                    <span class="text-gray-500 text-sm ml-2">/월</span>
-                    <div id="starterOriginal" class="hidden text-gray-600 text-sm mt-1 line-through">₩9,900/월</div>
+        </nav>
+
+        <!-- 모바일 햄버거 -->
+        <button id="mobileMenuBtn" class="md:hidden text-gray-400 hover:text-white p-2">
+            <i class="fas fa-bars text-xl"></i>
+        </button>
+    </div>
+
+    <!-- 모바일 메뉴 -->
+    <div id="mobileMenu" class="hidden md:hidden border-t border-white/10 mt-3 pt-3 pb-2 px-4 space-y-1">
+        <a href="/features.html" class="block px-3 py-2 rounded-lg text-gray-400 hover:text-white hover:bg-white/5 transition text-sm">기능</a>
+        <a href="/pricing.html"  class="block px-3 py-2 rounded-lg text-white bg-white/5 text-sm font-bold">요금제</a>
+        <a href="/about.html"    class="block px-3 py-2 rounded-lg text-gray-400 hover:text-white hover:bg-white/5 transition text-sm">소개</a>
+        <a href="/faq.html"      class="block px-3 py-2 rounded-lg text-gray-400 hover:text-white hover:bg-white/5 transition text-sm">FAQ</a>
+        <a href="/contact.html"  class="block px-3 py-2 rounded-lg text-gray-400 hover:text-white hover:bg-white/5 transition text-sm">문의하기</a>
+        <div class="border-t border-white/10 pt-2 mt-2 space-y-1" id="mobile-guest">
+            <a href="/login.html"  class="block px-3 py-2 text-gray-400 hover:text-white text-sm">로그인</a>
+            <a href="/signup.html" class="block px-3 py-2 bg-blue-600 text-white rounded-xl font-bold text-center text-sm hover:bg-blue-500 transition">무료 시작</a>
+        </div>
+        <div class="border-t border-white/10 pt-2 mt-2 space-y-1 hidden" id="mobile-user">
+            <a href="/dashboard.html" class="block px-3 py-2 text-gray-300 hover:text-white text-sm"><i class="fas fa-tachometer-alt mr-2 text-blue-400"></i>콘솔 이동하기</a>
+            <a href="/account.html"   class="block px-3 py-2 text-gray-300 hover:text-white text-sm"><i class="fas fa-user-circle mr-2 text-gray-400"></i>내 정보 관리</a>
+            <button onclick="doLogout()" class="w-full text-left px-3 py-2 text-red-400 hover:bg-red-900/20 rounded-lg text-sm transition"><i class="fas fa-sign-out-alt mr-2"></i>로그아웃</button>
+        </div>
+    </div>
+</header>
+
+<!-- ── 히어로 ── -->
+<section class="py-24 px-6 text-center">
+    <div class="max-w-3xl mx-auto">
+        <div class="text-blue-500 text-sm font-bold uppercase tracking-widest mb-4">요금제</div>
+        <h1 class="text-5xl md:text-6xl font-black mb-6">투명한 가격</h1>
+        <p class="text-gray-400 text-xl mb-8">숨겨진 비용 없음. 언제든 취소 가능. 무료로 시작하세요.</p>
+        <div class="inline-flex items-center bg-[#111] border border-white/10 rounded-full p-1 gap-1">
+            <button id="monthlyBtn" onclick="setBilling('monthly')"
+                class="px-5 py-2 rounded-full text-sm font-bold bg-white text-black transition">월간 결제</button>
+            <button id="yearlyBtn" onclick="setBilling('yearly')"
+                class="px-5 py-2 rounded-full text-sm font-bold text-gray-400 transition">연간 결제 <span class="text-green-400">20% 할인</span></button>
+        </div>
+    </div>
+</section>
+
+<!-- ── 요금제 카드 ── -->
+<section class="pb-24 px-6 max-w-6xl mx-auto">
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-8 mb-20">
+
+        <!-- 무료 -->
+        <div class="plan-card p-8 bg-[#0f0f0f] border border-white/10 rounded-3xl">
+            <div class="text-gray-400 text-xs font-bold uppercase tracking-widest mb-4">무료</div>
+            <div class="mb-8">
+                <span class="text-5xl font-black">₩0</span>
+                <span class="text-gray-600 text-sm ml-2">영구 무료</span>
+            </div>
+            <ul class="space-y-3 text-sm text-gray-400 mb-10">
+                <li class="flex items-center gap-3"><i class="fas fa-check check w-4"></i> 워드프레스 사이트 <strong class="text-white">1개</strong></li>
+                <li class="flex items-center gap-3"><i class="fas fa-check check w-4"></i> 트래픽 <strong class="text-white">100GB</strong>/월</li>
+                <li class="flex items-center gap-3"><i class="fas fa-check check w-4"></i> 스토리지 <strong class="text-white">5GB</strong></li>
+                <li class="flex items-center gap-3"><i class="fas fa-check check w-4"></i> 무료 SSL</li>
+                <li class="flex items-center gap-3"><i class="fas fa-check check w-4"></i> 기본 대시보드</li>
+                <li class="flex items-center gap-3"><i class="fas fa-times cross w-4"></i> <span class="text-gray-600">커스텀 도메인</span></li>
+                <li class="flex items-center gap-3"><i class="fas fa-times cross w-4"></i> <span class="text-gray-600">자동 백업</span></li>
+                <li class="flex items-center gap-3"><i class="fas fa-times cross w-4"></i> <span class="text-gray-600">실시간 모니터링</span></li>
+            </ul>
+            <button onclick="handleFreePlan()"
+                class="block w-full text-center border border-white/20 py-3.5 rounded-xl font-bold hover:bg-white/5 transition">
+                무료로 시작
+            </button>
+        </div>
+
+        <!-- 스타터 -->
+        <div class="plan-card plan-popular p-8 bg-[#0d1829] border border-blue-500/50 rounded-3xl relative">
+            <div class="absolute -top-4 left-1/2 -translate-x-1/2 bg-blue-600 px-5 py-1.5 rounded-full text-xs font-bold">가장 인기</div>
+            <div class="text-blue-400 text-xs font-bold uppercase tracking-widest mb-4">스타터</div>
+            <div class="mb-8">
+                <span id="starterPrice" class="text-5xl font-black">₩9,900</span>
+                <span class="text-gray-500 text-sm ml-2">/월 <span class="text-xs text-gray-600">(호스팅당)</span></span>
+                <div id="starterOriginal" class="hidden text-gray-600 text-sm mt-1 line-through">₩9,900/월</div>
+            </div>
+            <ul class="space-y-3 text-sm text-gray-300 mb-10">
+                <li class="flex items-center gap-3"><i class="fas fa-check check w-4"></i> 워드프레스 사이트 <strong class="text-white">5개</strong></li>
+                <li class="flex items-center gap-3"><i class="fas fa-check check w-4"></i> 트래픽 <strong class="text-white">1TB</strong>/월</li>
+                <li class="flex items-center gap-3"><i class="fas fa-check check w-4"></i> 스토리지 <strong class="text-white">50GB</strong></li>
+                <li class="flex items-center gap-3"><i class="fas fa-check check w-4"></i> 무료 SSL</li>
+                <li class="flex items-center gap-3"><i class="fas fa-check check w-4"></i> 커스텀 도메인</li>
+                <li class="flex items-center gap-3"><i class="fas fa-check check w-4"></i> 일일 자동 백업</li>
+                <li class="flex items-center gap-3"><i class="fas fa-check check w-4"></i> 실시간 모니터링</li>
+                <li class="flex items-center gap-3"><i class="fas fa-times cross w-4"></i> <span class="text-gray-500">팀 계정</span></li>
+            </ul>
+            <button onclick="openPaymentModal('starter')"
+                class="block w-full text-center bg-blue-600 py-3.5 rounded-xl font-bold hover:bg-blue-500 transition shadow-lg shadow-blue-600/30">
+                시작하기
+            </button>
+        </div>
+
+        <!-- 프로 -->
+        <div class="plan-card p-8 bg-[#0f0f0f] border border-white/10 rounded-3xl">
+            <div class="text-gray-400 text-xs font-bold uppercase tracking-widest mb-4">프로</div>
+            <div class="mb-8">
+                <span id="proPrice" class="text-5xl font-black">₩29,900</span>
+                <span class="text-gray-600 text-sm ml-2">/월 <span class="text-xs">(호스팅당)</span></span>
+                <div id="proOriginal" class="hidden text-gray-600 text-sm mt-1 line-through">₩29,900/월</div>
+            </div>
+            <ul class="space-y-3 text-sm text-gray-400 mb-10">
+                <li class="flex items-center gap-3"><i class="fas fa-check check w-4"></i> 사이트 <strong class="text-white">무제한</strong></li>
+                <li class="flex items-center gap-3"><i class="fas fa-check check w-4"></i> 트래픽 <strong class="text-white">무제한</strong></li>
+                <li class="flex items-center gap-3"><i class="fas fa-check check w-4"></i> 스토리지 <strong class="text-white">500GB</strong></li>
+                <li class="flex items-center gap-3"><i class="fas fa-check check w-4"></i> 무료 SSL</li>
+                <li class="flex items-center gap-3"><i class="fas fa-check check w-4"></i> 커스텀 도메인 무제한</li>
+                <li class="flex items-center gap-3"><i class="fas fa-check check w-4"></i> 시간별 자동 백업</li>
+                <li class="flex items-center gap-3"><i class="fas fa-check check w-4"></i> 실시간 모니터링 + 알림</li>
+                <li class="flex items-center gap-3"><i class="fas fa-check check w-4"></i> 팀 계정 (최대 5명)</li>
+            </ul>
+            <button onclick="openPaymentModal('pro')"
+                class="block w-full text-center border border-white/20 py-3.5 rounded-xl font-bold hover:bg-white/5 transition">
+                시작하기
+            </button>
+        </div>
+    </div>
+
+    <!-- 호스팅 단위 안내 배너 -->
+    <div class="mb-12 p-4 bg-blue-900/20 border border-blue-500/20 rounded-2xl flex items-start gap-3">
+        <i class="fas fa-info-circle text-blue-400 mt-0.5 flex-shrink-0"></i>
+        <div class="text-sm text-blue-200">
+            <strong>호스팅 단위 요금제</strong> — 스타터·프로 플랜은 <strong>계정 단위가 아닌 호스팅(사이트) 단위</strong>로 구매합니다.
+            각 사이트마다 원하는 플랜을 선택하여 업그레이드하세요.
+        </div>
+    </div>
+
+    <!-- 기능 비교 표 -->
+    <div class="overflow-x-auto mb-20">
+        <table class="w-full text-sm">
+            <thead>
+                <tr class="border-b border-white/10">
+                    <th class="text-left py-4 px-4 text-gray-500 font-medium">기능 비교</th>
+                    <th class="py-4 px-4 font-bold text-center">무료</th>
+                    <th class="py-4 px-4 font-bold text-center text-blue-400">스타터</th>
+                    <th class="py-4 px-4 font-bold text-center">프로</th>
+                </tr>
+            </thead>
+            <tbody class="divide-y divide-white/5">
+                <tr><td class="py-4 px-4 text-gray-400">워드프레스 사이트 수</td><td class="py-4 px-4 text-center">1</td><td class="py-4 px-4 text-center text-blue-300">5</td><td class="py-4 px-4 text-center">무제한</td></tr>
+                <tr><td class="py-4 px-4 text-gray-400">월간 트래픽</td><td class="py-4 px-4 text-center">100GB</td><td class="py-4 px-4 text-center text-blue-300">1TB</td><td class="py-4 px-4 text-center">무제한</td></tr>
+                <tr><td class="py-4 px-4 text-gray-400">스토리지</td><td class="py-4 px-4 text-center">5GB</td><td class="py-4 px-4 text-center text-blue-300">50GB</td><td class="py-4 px-4 text-center">500GB</td></tr>
+                <tr><td class="py-4 px-4 text-gray-400">무료 SSL</td><td class="py-4 px-4 text-center"><i class="fas fa-check check"></i></td><td class="py-4 px-4 text-center"><i class="fas fa-check check"></i></td><td class="py-4 px-4 text-center"><i class="fas fa-check check"></i></td></tr>
+                <tr><td class="py-4 px-4 text-gray-400">커스텀 도메인</td><td class="py-4 px-4 text-center"><i class="fas fa-times cross"></i></td><td class="py-4 px-4 text-center"><i class="fas fa-check check"></i></td><td class="py-4 px-4 text-center">무제한</td></tr>
+                <tr><td class="py-4 px-4 text-gray-400">자동 백업</td><td class="py-4 px-4 text-center"><i class="fas fa-times cross"></i></td><td class="py-4 px-4 text-center">일 1회</td><td class="py-4 px-4 text-center">시간별</td></tr>
+                <tr><td class="py-4 px-4 text-gray-400">실시간 모니터링</td><td class="py-4 px-4 text-center"><i class="fas fa-times cross"></i></td><td class="py-4 px-4 text-center"><i class="fas fa-check check"></i></td><td class="py-4 px-4 text-center"><i class="fas fa-check check"></i></td></tr>
+                <tr><td class="py-4 px-4 text-gray-400">팀 계정</td><td class="py-4 px-4 text-center"><i class="fas fa-times cross"></i></td><td class="py-4 px-4 text-center"><i class="fas fa-times cross"></i></td><td class="py-4 px-4 text-center">5명</td></tr>
+                <tr><td class="py-4 px-4 text-gray-400">기술 지원</td><td class="py-4 px-4 text-center">이메일</td><td class="py-4 px-4 text-center text-blue-300">이메일 + 채팅</td><td class="py-4 px-4 text-center">우선 지원</td></tr>
+            </tbody>
+        </table>
+    </div>
+
+    <!-- FAQ 미니 -->
+    <div class="text-center">
+        <h2 class="text-2xl font-black mb-4">요금 관련 궁금한 점이 있으신가요?</h2>
+        <p class="text-gray-500 mb-6">언제든지 문의하시면 친절하게 안내드립니다.</p>
+        <div class="flex flex-col sm:flex-row justify-center gap-4">
+            <a href="/faq.html" class="border border-white/20 px-8 py-3 rounded-full font-bold hover:bg-white/5 transition text-gray-300">FAQ 보기</a>
+            <a href="/contact.html" class="bg-blue-600 px-8 py-3 rounded-full font-bold hover:bg-blue-500 transition">문의하기</a>
+        </div>
+    </div>
+</section>
+
+<footer class="border-t border-white/10 py-10 px-6 text-center text-gray-600 text-sm">
+    <a href="/" class="text-blue-500 font-black">CLOUD<span class="text-white">PRESS</span></a>
+    <p class="mt-2">© 2025 CloudPress. All rights reserved.</p>
+</footer>
+
+<!-- ══════════════════════════════════════════════════
+     결제 모달
+══════════════════════════════════════════════════ -->
+<div id="payment-modal">
+    <div class="modal-box w-full max-w-lg mx-4 bg-[#0f0f0f] border border-white/10 rounded-2xl overflow-hidden shadow-2xl">
+
+        <!-- 모달 헤더 -->
+        <div class="flex items-center justify-between p-6 border-b border-white/5">
+            <div>
+                <h2 class="text-lg font-bold" id="modal-title">플랜 업그레이드</h2>
+                <p class="text-sm text-gray-500 mt-0.5" id="modal-subtitle">호스팅을 선택하고 결제를 진행하세요</p>
+            </div>
+            <button onclick="closeModal()" class="text-gray-500 hover:text-white transition p-2">
+                <i class="fas fa-times text-lg"></i>
+            </button>
+        </div>
+
+        <!-- 모달 콘텐츠 -->
+        <div class="p-6 max-h-[70vh] overflow-y-auto">
+
+            <!-- STEP 1: 로그인 필요 -->
+            <div id="modal-step-login" class="hidden text-center py-8">
+                <div class="text-4xl mb-4">🔐</div>
+                <h3 class="text-lg font-bold mb-2">로그인이 필요합니다</h3>
+                <p class="text-sm text-gray-400 mb-6">결제를 진행하려면 먼저 로그인해주세요.</p>
+                <div class="flex gap-3 justify-center">
+                    <a href="/login.html?redirect=/pricing.html"
+                        class="bg-blue-600 hover:bg-blue-500 px-6 py-3 rounded-xl font-bold transition">
+                        로그인
+                    </a>
+                    <a href="/signup.html"
+                        class="border border-white/20 hover:bg-white/5 px-6 py-3 rounded-xl font-bold transition text-gray-300">
+                        회원가입
+                    </a>
                 </div>
-                <ul class="space-y-3 text-sm text-gray-300 mb-10">
-                    <li class="flex items-center gap-3"><i class="fas fa-check check w-4"></i> 워드프레스 사이트 <strong class="text-white">5개</strong></li>
-                    <li class="flex items-center gap-3"><i class="fas fa-check check w-4"></i> 트래픽 <strong class="text-white">1TB</strong>/월</li>
-                    <li class="flex items-center gap-3"><i class="fas fa-check check w-4"></i> 스토리지 <strong class="text-white">50GB</strong></li>
-                    <li class="flex items-center gap-3"><i class="fas fa-check check w-4"></i> 무료 SSL</li>
-                    <li class="flex items-center gap-3"><i class="fas fa-check check w-4"></i> 커스텀 도메인</li>
-                    <li class="flex items-center gap-3"><i class="fas fa-check check w-4"></i> 일일 자동 백업</li>
-                    <li class="flex items-center gap-3"><i class="fas fa-check check w-4"></i> 실시간 모니터링</li>
-                    <li class="flex items-center gap-3"><i class="fas fa-times cross w-4"></i> <span class="text-gray-500">팀 계정</span></li>
-                </ul>
-                <a href="/signup.html" class="block text-center bg-blue-600 py-3.5 rounded-xl font-bold hover:bg-blue-500 transition shadow-lg shadow-blue-600/30">시작하기</a>
             </div>
-            <!-- 프로 -->
-            <div class="plan-card p-8 bg-[#0f0f0f] border border-white/10 rounded-3xl">
-                <div class="text-gray-400 text-xs font-bold uppercase tracking-widest mb-4">프로</div>
-                <div class="mb-8">
-                    <span id="proPrice" class="text-5xl font-black">₩29,900</span>
-                    <span class="text-gray-600 text-sm ml-2">/월</span>
-                    <div id="proOriginal" class="hidden text-gray-600 text-sm mt-1 line-through">₩29,900/월</div>
+
+            <!-- STEP 2: 호스팅 선택 -->
+            <div id="modal-step-site" class="hidden">
+                <div class="mb-4">
+                    <div class="text-xs text-gray-500 font-bold uppercase tracking-wider mb-3">업그레이드할 호스팅 선택</div>
+                    <div id="site-list" class="space-y-2">
+                        <div class="text-center py-6 text-gray-500">
+                            <i class="fas fa-spinner fa-spin mr-2"></i>호스팅 목록 불러오는 중...
+                        </div>
+                    </div>
                 </div>
-                <ul class="space-y-3 text-sm text-gray-400 mb-10">
-                    <li class="flex items-center gap-3"><i class="fas fa-check check w-4"></i> 사이트 <strong class="text-white">무제한</strong></li>
-                    <li class="flex items-center gap-3"><i class="fas fa-check check w-4"></i> 트래픽 <strong class="text-white">무제한</strong></li>
-                    <li class="flex items-center gap-3"><i class="fas fa-check check w-4"></i> 스토리지 <strong class="text-white">500GB</strong></li>
-                    <li class="flex items-center gap-3"><i class="fas fa-check check w-4"></i> 무료 SSL</li>
-                    <li class="flex items-center gap-3"><i class="fas fa-check check w-4"></i> 커스텀 도메인 무제한</li>
-                    <li class="flex items-center gap-3"><i class="fas fa-check check w-4"></i> 시간별 자동 백업</li>
-                    <li class="flex items-center gap-3"><i class="fas fa-check check w-4"></i> 실시간 모니터링 + 알림</li>
-                    <li class="flex items-center gap-3"><i class="fas fa-check check w-4"></i> 팀 계정 (최대 5명)</li>
-                </ul>
-                <a href="/signup.html" class="block text-center border border-white/20 py-3.5 rounded-xl font-bold hover:bg-white/5 transition">시작하기</a>
+                <div id="no-sites-msg" class="hidden p-4 bg-yellow-900/20 border border-yellow-500/20 rounded-xl text-sm text-yellow-300">
+                    <i class="fas fa-exclamation-triangle mr-2"></i>
+                    호스팅이 없습니다. <a href="/hosting-create.html" class="underline">새 호스팅을 생성</a>한 후 업그레이드하세요.
+                </div>
+
+                <!-- 선택된 호스팅 요약 -->
+                <div id="selected-site-summary" class="hidden mt-4 p-4 bg-blue-900/20 border border-blue-500/20 rounded-xl">
+                    <div class="text-xs text-gray-500 mb-1">선택된 호스팅</div>
+                    <div class="font-bold text-white" id="sel-site-name">-</div>
+                    <div class="text-xs text-gray-400 font-mono mt-0.5" id="sel-site-domain">-</div>
+                </div>
             </div>
-        </div>
 
-        <!-- 비교 표 -->
-        <div class="overflow-x-auto">
-            <table class="w-full text-sm">
-                <thead>
-                    <tr class="border-b border-white/10">
-                        <th class="text-left py-4 px-4 text-gray-500 font-medium">기능 비교</th>
-                        <th class="py-4 px-4 font-bold text-center">무료</th>
-                        <th class="py-4 px-4 font-bold text-center text-blue-400">스타터</th>
-                        <th class="py-4 px-4 font-bold text-center">프로</th>
-                    </tr>
-                </thead>
-                <tbody class="divide-y divide-white/5">
-                    <tr><td class="py-4 px-4 text-gray-400">워드프레스 사이트 수</td><td class="py-4 px-4 text-center">1</td><td class="py-4 px-4 text-center text-blue-300">5</td><td class="py-4 px-4 text-center">무제한</td></tr>
-                    <tr><td class="py-4 px-4 text-gray-400">월간 트래픽</td><td class="py-4 px-4 text-center">100GB</td><td class="py-4 px-4 text-center text-blue-300">1TB</td><td class="py-4 px-4 text-center">무제한</td></tr>
-                    <tr><td class="py-4 px-4 text-gray-400">스토리지</td><td class="py-4 px-4 text-center">5GB</td><td class="py-4 px-4 text-center text-blue-300">50GB</td><td class="py-4 px-4 text-center">500GB</td></tr>
-                    <tr><td class="py-4 px-4 text-gray-400">무료 SSL</td><td class="py-4 px-4 text-center"><i class="fas fa-check check"></i></td><td class="py-4 px-4 text-center"><i class="fas fa-check check"></i></td><td class="py-4 px-4 text-center"><i class="fas fa-check check"></i></td></tr>
-                    <tr><td class="py-4 px-4 text-gray-400">커스텀 도메인</td><td class="py-4 px-4 text-center"><i class="fas fa-times cross"></i></td><td class="py-4 px-4 text-center"><i class="fas fa-check check"></i></td><td class="py-4 px-4 text-center">무제한</td></tr>
-                    <tr><td class="py-4 px-4 text-gray-400">자동 백업</td><td class="py-4 px-4 text-center"><i class="fas fa-times cross"></i></td><td class="py-4 px-4 text-center">일 1회</td><td class="py-4 px-4 text-center">시간별</td></tr>
-                    <tr><td class="py-4 px-4 text-gray-400">실시간 모니터링</td><td class="py-4 px-4 text-center"><i class="fas fa-times cross"></i></td><td class="py-4 px-4 text-center"><i class="fas fa-check check"></i></td><td class="py-4 px-4 text-center"><i class="fas fa-check check"></i></td></tr>
-                    <tr><td class="py-4 px-4 text-gray-400">팀 계정</td><td class="py-4 px-4 text-center"><i class="fas fa-times cross"></i></td><td class="py-4 px-4 text-center"><i class="fas fa-times cross"></i></td><td class="py-4 px-4 text-center">5명</td></tr>
-                    <tr><td class="py-4 px-4 text-gray-400">기술 지원</td><td class="py-4 px-4 text-center">이메일</td><td class="py-4 px-4 text-center text-blue-300">이메일 + 채팅</td><td class="py-4 px-4 text-center">우선 지원</td></tr>
-                </tbody>
-            </table>
-        </div>
+            <!-- STEP 3: 결제 정보 확인 + 결제 버튼 -->
+            <div id="modal-step-pay" class="hidden">
+                <!-- 결제 요약 -->
+                <div class="p-5 bg-white/3 border border-white/5 rounded-xl mb-5 space-y-3">
+                    <div class="text-xs text-gray-500 font-bold uppercase tracking-wider mb-2">결제 정보</div>
+                    <div class="flex justify-between text-sm">
+                        <span class="text-gray-400">플랜</span>
+                        <span class="font-bold text-white" id="pay-plan-name">-</span>
+                    </div>
+                    <div class="flex justify-between text-sm">
+                        <span class="text-gray-400">호스팅</span>
+                        <span class="font-mono text-gray-200" id="pay-site-name">-</span>
+                    </div>
+                    <div class="flex justify-between text-sm">
+                        <span class="text-gray-400">결제 주기</span>
+                        <span id="pay-cycle">월간</span>
+                    </div>
+                    <div class="border-t border-white/5 pt-3 flex justify-between">
+                        <span class="font-bold">결제 금액</span>
+                        <span class="text-2xl font-black text-blue-300" id="pay-amount">-</span>
+                    </div>
+                </div>
 
-        <!-- FAQ 미니 -->
-        <div class="mt-20 text-center">
-            <h2 class="text-2xl font-black mb-4">요금 관련 궁금한 점이 있으신가요?</h2>
-            <p class="text-gray-500 mb-6">언제든지 문의하시면 친절하게 안내드립니다.</p>
-            <div class="flex flex-col sm:flex-row justify-center gap-4">
-                <a href="/faq.html" class="border border-white/20 px-8 py-3 rounded-full font-bold hover:bg-white/5 transition text-gray-300">FAQ 보기</a>
-                <a href="/contact.html" class="bg-blue-600 px-8 py-3 rounded-full font-bold hover:bg-blue-500 transition">문의하기</a>
+                <div id="payment-error" class="hidden mb-4 p-3 bg-red-900/30 border border-red-500/30 rounded-xl text-sm text-red-300"></div>
+
+                <!-- 결제 버튼 -->
+                <button id="pay-btn" onclick="startTossPayment()"
+                    class="w-full bg-blue-600 hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed py-4 rounded-xl font-bold text-lg transition flex items-center justify-center gap-2">
+                    <i class="fas fa-credit-card"></i>
+                    <span id="pay-btn-text">토스 페이먼츠로 결제하기</span>
+                </button>
+                <p class="text-xs text-gray-600 text-center mt-3">
+                    <i class="fas fa-shield-alt mr-1"></i>토스 페이먼츠 보안 결제 · SSL 암호화
+                </p>
             </div>
+
+            <!-- STEP 4: 결제 완료 -->
+            <div id="modal-step-done" class="hidden text-center py-6">
+                <div class="text-5xl mb-4">🎉</div>
+                <h3 class="text-xl font-bold mb-2">결제 완료!</h3>
+                <p class="text-gray-400 text-sm mb-2" id="done-plan-msg"></p>
+                <p class="text-gray-500 text-xs mb-6" id="done-expire-msg"></p>
+                <div class="flex gap-3 justify-center">
+                    <a id="done-console-link" href="/hosting.html"
+                        class="bg-blue-600 hover:bg-blue-500 px-5 py-3 rounded-xl font-bold transition">
+                        콘솔에서 확인
+                    </a>
+                    <a id="done-receipt-link" href="#" target="_blank"
+                        class="hidden border border-white/20 hover:bg-white/5 px-5 py-3 rounded-xl font-bold text-gray-300 transition">
+                        영수증 보기
+                    </a>
+                </div>
+            </div>
+
         </div>
-    </section>
 
-    <footer class="border-t border-white/10 py-10 px-6 text-center text-gray-600 text-sm">
-        <a href="/" class="text-blue-500 font-black">CLOUD<span class="text-white">PRESS</span></a>
-        <p class="mt-2">© 2025 CloudPress. All rights reserved.</p>
-    </footer>
+        <!-- 모달 푸터 (스텝 네비게이션) -->
+        <div id="modal-footer" class="hidden p-4 border-t border-white/5 flex justify-between items-center">
+            <button id="modal-back-btn" onclick="modalBack()"
+                class="text-sm text-gray-400 hover:text-white transition flex items-center gap-1">
+                <i class="fas fa-arrow-left text-xs"></i> 이전
+            </button>
+            <div class="flex gap-1">
+                <div id="step-dot-1" class="w-2 h-2 rounded-full bg-blue-500"></div>
+                <div id="step-dot-2" class="w-2 h-2 rounded-full bg-white/20"></div>
+            </div>
+            <button id="modal-next-btn" onclick="modalNext()"
+                class="text-sm bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-lg font-bold transition">
+                다음
+            </button>
+        </div>
+    </div>
+</div>
 
-    <script>
-        let billing = 'monthly';
+<script src="https://js.tosspayments.com/v2/standard"></script>
+<script>
+// ── 상태 ───────────────────────────────────────────────────────────────────
+let billing      = 'monthly';
+let currentPlan  = null;   // 'starter' | 'pro'
+let currentUser  = null;   // { id, email, role }
+let userSites    = [];
+let selectedSite = null;
+let modalStep    = 1;      // 1=사이트선택, 2=결제확인
+let tossPayments = null;
 
-        function setbilling(type) {
-            billing = type;
-            const monthlyBtn = document.getElementById('monthlyBtn');
-            const yearlyBtn = document.getElementById('yearlyBtn');
+const TOKEN   = localStorage.getItem('admin_token');
+const HEADERS = TOKEN
+    ? { Authorization: `Bearer ${TOKEN}`, 'Content-Type': 'application/json' }
+    : { 'Content-Type': 'application/json' };
 
-            if (type === 'monthly') {
-                monthlyBtn.className = 'px-5 py-2 rounded-full text-sm font-bold bg-white text-black transition';
-                yearlyBtn.className = 'px-5 py-2 rounded-full text-sm font-bold text-gray-400 transition';
-                document.getElementById('starterPrice').textContent = '₩9,900';
-                document.getElementById('proPrice').textContent = '₩29,900';
-                document.getElementById('starterOriginal').classList.add('hidden');
-                document.getElementById('proOriginal').classList.add('hidden');
-            } else {
-                yearlyBtn.className = 'px-5 py-2 rounded-full text-sm font-bold bg-white text-black transition';
-                monthlyBtn.className = 'px-5 py-2 rounded-full text-sm font-bold text-gray-400 transition';
-                document.getElementById('starterPrice').textContent = '₩7,920';
-                document.getElementById('proPrice').textContent = '₩23,920';
-                document.getElementById('starterOriginal').textContent = '월 ₩9,900';
-                document.getElementById('proOriginal').textContent = '월 ₩29,900';
-                document.getElementById('starterOriginal').classList.remove('hidden');
-                document.getElementById('proOriginal').classList.remove('hidden');
-            }
+const PRICES = {
+    starter: { monthly: 9900,  yearly: 7920  },
+    pro:     { monthly: 29900, yearly: 23920 },
+};
+
+// ── 초기화 ─────────────────────────────────────────────────────────────────
+(async () => {
+    setupMobileMenu();
+    await checkAuthState();
+    await initToss();
+})();
+
+// ── 모바일 메뉴 ────────────────────────────────────────────────────────────
+function setupMobileMenu() {
+    document.getElementById('mobileMenuBtn').addEventListener('click', () => {
+        document.getElementById('mobileMenu').classList.toggle('hidden');
+    });
+}
+
+// ── 인증 상태 확인 ─────────────────────────────────────────────────────────
+async function checkAuthState() {
+    if (!TOKEN) return;
+    try {
+        const res  = await fetch('/api/me', { headers: HEADERS });
+        if (!res.ok) return;
+        const text = await res.text();
+        let data;
+        try { data = JSON.parse(text); } catch { return; }
+        if (!data.id) return;
+
+        currentUser = data;
+        showLoggedInState(data.email);
+    } catch {}
+}
+
+function showLoggedInState(email) {
+    // 네비 전환
+    document.getElementById('nav-guest').classList.add('hidden');
+    document.getElementById('nav-user').classList.remove('hidden');
+
+    // 이메일 표시
+    document.getElementById('nav-email').textContent    = email;
+    document.getElementById('dropdown-email').textContent = email;
+
+    // 아바타 이니셜
+    const initial = email ? email[0].toUpperCase() : '?';
+    document.getElementById('avatar-circle').textContent = initial;
+
+    // 모바일 메뉴 전환
+    document.getElementById('mobile-guest').classList.add('hidden');
+    document.getElementById('mobile-user').classList.remove('hidden');
+}
+
+function toggleProfileMenu() {
+    document.getElementById('profile-dropdown').classList.toggle('open');
+}
+
+// 드롭다운 외부 클릭 시 닫기
+document.addEventListener('click', e => {
+    const btn  = document.getElementById('profile-btn');
+    const menu = document.getElementById('profile-dropdown');
+    if (menu && btn && !btn.contains(e.target) && !menu.contains(e.target)) {
+        menu.classList.remove('open');
+    }
+});
+
+async function doLogout() {
+    try { await fetch('/api/logout', { method: 'POST', headers: HEADERS }); } catch {}
+    localStorage.removeItem('admin_token');
+    window.location.href = '/login.html';
+}
+
+// ── 토스 SDK 초기화 ────────────────────────────────────────────────────────
+async function initToss() {
+    if (!TOKEN) return;
+    try {
+        const res  = await fetch('/api/payment/client-key', { headers: HEADERS });
+        if (!res.ok) return;
+        const text = await res.text();
+        let data;
+        try { data = JSON.parse(text); } catch { return; }
+        if (data.client_key) {
+            tossPayments = TossPayments(data.client_key);
         }
-    </script>
+    } catch {}
+}
+
+// ── 월/연간 토글 ──────────────────────────────────────────────────────────
+function setBilling(type) {
+    billing = type;
+    const mBtn = document.getElementById('monthlyBtn');
+    const yBtn = document.getElementById('yearlyBtn');
+    if (type === 'monthly') {
+        mBtn.className = 'px-5 py-2 rounded-full text-sm font-bold bg-white text-black transition';
+        yBtn.className = 'px-5 py-2 rounded-full text-sm font-bold text-gray-400 transition';
+        document.getElementById('starterPrice').textContent = '₩9,900';
+        document.getElementById('proPrice').textContent     = '₩29,900';
+        document.getElementById('starterOriginal').classList.add('hidden');
+        document.getElementById('proOriginal').classList.add('hidden');
+    } else {
+        yBtn.className = 'px-5 py-2 rounded-full text-sm font-bold bg-white text-black transition';
+        mBtn.className = 'px-5 py-2 rounded-full text-sm font-bold text-gray-400 transition';
+        document.getElementById('starterPrice').textContent = '₩7,920';
+        document.getElementById('proPrice').textContent     = '₩23,920';
+        document.getElementById('starterOriginal').textContent = '월 ₩9,900';
+        document.getElementById('proOriginal').textContent     = '월 ₩29,900';
+        document.getElementById('starterOriginal').classList.remove('hidden');
+        document.getElementById('proOriginal').classList.remove('hidden');
+    }
+}
+
+// ── 무료 플랜 처리 ─────────────────────────────────────────────────────────
+function handleFreePlan() {
+    if (currentUser) {
+        window.location.href = '/hosting-create.html';
+    } else {
+        window.location.href = '/signup.html';
+    }
+}
+
+// ── 결제 모달 열기 ─────────────────────────────────────────────────────────
+async function openPaymentModal(plan) {
+    currentPlan = plan;
+    selectedSite = null;
+    modalStep = 1;
+
+    const planNames = { starter: '스타터', pro: '프로' };
+    document.getElementById('modal-title').textContent    = `${planNames[plan]} 플랜 업그레이드`;
+    document.getElementById('modal-subtitle').textContent = '업그레이드할 호스팅을 선택하세요';
+
+    // 비로그인 시
+    if (!currentUser) {
+        showModalStep('login');
+        document.getElementById('payment-modal').classList.add('open');
+        document.getElementById('modal-footer').classList.add('hidden');
+        return;
+    }
+
+    // 로그인 상태 - 호스팅 목록 로드
+    showModalStep('site');
+    document.getElementById('payment-modal').classList.add('open');
+    document.getElementById('modal-footer').classList.remove('hidden');
+    updateModalFooter();
+
+    await loadUserSites();
+}
+
+function closeModal() {
+    document.getElementById('payment-modal').classList.remove('open');
+    document.getElementById('payment-error').classList.add('hidden');
+}
+
+// 모달 외부 클릭 시 닫기
+document.getElementById('payment-modal').addEventListener('click', e => {
+    if (e.target === document.getElementById('payment-modal')) closeModal();
+});
+
+// ── 모달 스텝 표시 ─────────────────────────────────────────────────────────
+function showModalStep(step) {
+    ['login','site','pay','done'].forEach(s => {
+        document.getElementById(`modal-step-${s}`).classList.add('hidden');
+    });
+    document.getElementById(`modal-step-${step}`).classList.remove('hidden');
+}
+
+function updateModalFooter() {
+    const backBtn = document.getElementById('modal-back-btn');
+    const nextBtn = document.getElementById('modal-next-btn');
+    const dot1    = document.getElementById('step-dot-1');
+    const dot2    = document.getElementById('step-dot-2');
+
+    if (modalStep === 1) {
+        backBtn.classList.add('invisible');
+        nextBtn.textContent = '다음';
+        dot1.className = 'w-2 h-2 rounded-full bg-blue-500';
+        dot2.className = 'w-2 h-2 rounded-full bg-white/20';
+    } else {
+        backBtn.classList.remove('invisible');
+        nextBtn.textContent = '결제하기';
+        dot1.className = 'w-2 h-2 rounded-full bg-white/20';
+        dot2.className = 'w-2 h-2 rounded-full bg-blue-500';
+    }
+}
+
+function modalBack() {
+    if (modalStep === 2) {
+        modalStep = 1;
+        showModalStep('site');
+        updateModalFooter();
+    }
+}
+
+async function modalNext() {
+    if (modalStep === 1) {
+        if (!selectedSite) {
+            alert('업그레이드할 호스팅을 선택해주세요.'); return;
+        }
+        modalStep = 2;
+        showModalStep('pay');
+        fillPaymentSummary();
+        updateModalFooter();
+    } else if (modalStep === 2) {
+        await startTossPayment();
+    }
+}
+
+// ── 호스팅 목록 로드 ──────────────────────────────────────────────────────
+async function loadUserSites() {
+    const listEl = document.getElementById('site-list');
+    listEl.innerHTML = '<div class="text-center py-6 text-gray-500"><i class="fas fa-spinner fa-spin mr-2"></i>로딩 중...</div>';
+
+    try {
+        const res  = await fetch('/api/sites', { headers: HEADERS });
+        const text = await res.text();
+        let data;
+        try { data = JSON.parse(text); } catch { throw new Error('응답 파싱 오류'); }
+        if (!res.ok) throw new Error(data.error || '불러오기 실패');
+
+        userSites = data.sites || [];
+
+        if (!userSites.length) {
+            listEl.innerHTML = '';
+            document.getElementById('no-sites-msg').classList.remove('hidden');
+            return;
+        }
+        document.getElementById('no-sites-msg').classList.add('hidden');
+
+        listEl.innerHTML = userSites.map(s => `
+            <div class="site-card border border-white/10 rounded-xl p-4"
+                 id="site-card-${s.id}"
+                 onclick="selectSite('${s.id}', '${escHtml(s.site_name)}', '${escHtml(s.primary_domain || '')}')">
+                <div class="flex items-center gap-3">
+                    <div class="w-8 h-8 rounded-lg bg-blue-900/40 flex items-center justify-center flex-shrink-0">
+                        <i class="fas fa-globe text-blue-400 text-sm"></i>
+                    </div>
+                    <div class="flex-1 min-w-0">
+                        <div class="font-medium text-sm">${escHtml(s.site_name)}</div>
+                        <div class="text-xs text-gray-500 font-mono truncate">${escHtml(s.primary_domain || '도메인 없음')}</div>
+                    </div>
+                    <div>
+                        ${s.site_plan && s.site_plan !== 'free'
+                            ? `<span class="text-xs bg-blue-900/40 text-blue-300 px-2 py-0.5 rounded-full">${s.site_plan}</span>`
+                            : `<span class="text-xs bg-white/5 text-gray-500 px-2 py-0.5 rounded-full">무료</span>`}
+                    </div>
+                </div>
+            </div>
+        `).join('');
+
+    } catch (e) {
+        listEl.innerHTML = `<div class="text-sm text-red-400 p-3"><i class="fas fa-exclamation-circle mr-2"></i>${escHtml(e.message)}</div>`;
+    }
+}
+
+function selectSite(id, name, domain) {
+    selectedSite = { id, name, domain };
+
+    document.querySelectorAll('.site-card').forEach(el => el.classList.remove('selected'));
+    document.getElementById(`site-card-${id}`)?.classList.add('selected');
+
+    document.getElementById('selected-site-summary').classList.remove('hidden');
+    document.getElementById('sel-site-name').textContent   = name;
+    document.getElementById('sel-site-domain').textContent = domain || '도메인 없음';
+}
+
+// ── 결제 요약 채우기 ──────────────────────────────────────────────────────
+function fillPaymentSummary() {
+    const planNames = { starter: '스타터 플랜', pro: '프로 플랜' };
+    const amount    = PRICES[currentPlan][billing];
+
+    document.getElementById('pay-plan-name').textContent = planNames[currentPlan];
+    document.getElementById('pay-site-name').textContent = selectedSite?.name || '-';
+    document.getElementById('pay-cycle').textContent     = billing === 'monthly' ? '월간 결제' : '연간 결제 (20% 할인)';
+    document.getElementById('pay-amount').textContent    = `₩${amount.toLocaleString()}`;
+}
+
+// ── 토스 결제 시작 ─────────────────────────────────────────────────────────
+async function startTossPayment() {
+    const btn     = document.getElementById('pay-btn');
+    const errEl   = document.getElementById('payment-error');
+    errEl.classList.add('hidden');
+    btn.disabled  = true;
+    document.getElementById('pay-btn-text').textContent = '결제 요청 중...';
+
+    try {
+        // 1) 결제 요청 데이터 생성 (서버)
+        const reqRes  = await fetch('/api/payment/request', {
+            method: 'POST',
+            headers: HEADERS,
+            body: JSON.stringify({
+                site_id:       selectedSite.id,
+                plan:          currentPlan,
+                billing_cycle: billing,
+            }),
+        });
+        const reqText = await reqRes.text();
+        let reqData;
+        try { reqData = JSON.parse(reqText); } catch { throw new Error('서버 응답 오류'); }
+        if (!reqRes.ok) throw new Error(reqData.error || '결제 요청 실패');
+
+        if (!tossPayments) throw new Error('결제 모듈을 초기화하지 못했습니다. 관리자 설정을 확인해주세요.');
+
+        // 2) 토스 결제창 열기
+        const checkout = tossPayments.payment({ customerKey: currentUser.id });
+        await checkout.requestPayment({
+            method:        "CARD",
+            amount:        { currency: "KRW", value: reqData.amount },
+            orderId:       reqData.order_id,
+            orderName:     reqData.order_name,
+            customerEmail: reqData.customer_email,
+            customerName:  reqData.customer_name,
+            successUrl:    `${location.origin}/payment-success.html`,
+            failUrl:       `${location.origin}/pricing.html?payment=fail`,
+        });
+
+    } catch (e) {
+        if (e.code === 'USER_CANCEL') {
+            // 사용자 취소 - 조용히 처리
+        } else {
+            errEl.textContent = e.message || '결제 중 오류가 발생했습니다.';
+            errEl.classList.remove('hidden');
+        }
+        btn.disabled = false;
+        document.getElementById('pay-btn-text').textContent = '토스 페이먼츠로 결제하기';
+    }
+}
+
+// ── 유틸 ────────────────────────────────────────────────────────────────────
+function escHtml(s) {
+    return String(s).replace(/[&<>"']/g, c =>
+        ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+}
+
+// ── URL 파라미터 처리 (결제 실패 등) ─────────────────────────────────────
+const urlParams = new URLSearchParams(location.search);
+if (urlParams.get('payment') === 'fail') {
+    // 실패 토스트
+    const t = document.createElement('div');
+    t.className = 'fixed bottom-6 right-6 bg-red-900/90 border border-red-500/50 text-red-200 px-5 py-3 rounded-xl text-sm z-[9999] shadow-xl';
+    t.innerHTML = '<i class="fas fa-exclamation-circle mr-2"></i>결제가 취소되었거나 실패했습니다.';
+    document.body.appendChild(t);
+    setTimeout(() => t.remove(), 4000);
+}
+</script>
 </body>
 </html>

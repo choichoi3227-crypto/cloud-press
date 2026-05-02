@@ -161,6 +161,123 @@
         </div>
     </div>
 
+    <!-- ── 이메일 발송 설정 ── -->
+    <div class="p-6 bg-[#111] rounded-2xl border border-white/5 space-y-5">
+        <div class="flex items-center justify-between">
+            <h2 class="font-bold flex items-center gap-2">
+                <i class="fas fa-envelope text-blue-400 text-lg"></i>
+                이메일 발송 설정
+            </h2>
+            <span class="text-xs text-gray-500">호스팅 생성 완료 알림에 사용됩니다</span>
+        </div>
+        <p class="text-sm text-gray-400">
+            Supabase Edge Function을 통해 이메일을 발송합니다. Supabase 프로젝트에
+            <code class="bg-white/10 px-1 rounded text-xs">send-email</code> Edge Function을 배포해주세요.
+        </p>
+
+        <div class="grid md:grid-cols-2 gap-4">
+            <div class="space-y-2">
+                <label class="text-xs text-gray-500 block font-bold">Supabase Project URL</label>
+                <input id="set-supabase-url" type="url" placeholder="https://xxxx.supabase.co"
+                    class="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-blue-500 transition font-mono" />
+            </div>
+            <div class="space-y-2">
+                <label class="text-xs text-gray-500 block font-bold">Supabase Service Role Key</label>
+                <input id="set-supabase-key" type="password" placeholder="eyJhbGciOi..."
+                    class="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-blue-500 transition font-mono" />
+                <p class="text-xs text-gray-600">Supabase → Settings → API → service_role 키</p>
+            </div>
+            <div class="space-y-2">
+                <label class="text-xs text-gray-500 block font-bold">발송자 이메일</label>
+                <input id="set-smtp-from" type="email" placeholder="noreply@cloudpress.app"
+                    class="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-blue-500 transition" />
+            </div>
+            <div class="space-y-2">
+                <label class="text-xs text-gray-500 block font-bold">플랫폼 도메인</label>
+                <input id="set-platform-domain" type="text" placeholder="cloudpress.app"
+                    class="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-blue-500 transition font-mono" />
+                <p class="text-xs text-gray-600">이메일 내 콘솔 링크 생성에 사용</p>
+            </div>
+        </div>
+
+        <div id="email-save-alert" class="hidden p-3 rounded-xl text-sm"></div>
+        <button onclick="saveEmailSettings()"
+            class="bg-blue-600 hover:bg-blue-500 text-white font-bold px-6 py-2.5 rounded-xl transition flex items-center gap-2">
+            <i class="fas fa-save"></i> 이메일 설정 저장
+        </button>
+    </div>
+
+    <!-- ── 토스 페이먼츠 설정 ── -->
+    <div class="p-6 bg-[#111] rounded-2xl border border-white/5 space-y-5">
+        <div class="flex items-center justify-between">
+            <h2 class="font-bold flex items-center gap-2">
+                <i class="fas fa-credit-card text-green-400 text-lg"></i>
+                토스 페이먼츠 결제 설정
+            </h2>
+            <span class="text-xs text-gray-500">요금제 페이지에서 스타터·프로 플랜 결제에 사용</span>
+        </div>
+        <p class="text-sm text-gray-400">
+            호스팅 단위 요금제 결제에 사용됩니다. 무료 플랜은 결제가 필요 없으며,
+            스타터·프로 플랜만 실제 결제가 진행됩니다.
+        </p>
+
+        <div class="p-3 bg-yellow-900/20 border border-yellow-500/20 rounded-xl text-xs text-yellow-300 flex items-start gap-2">
+            <i class="fas fa-exclamation-triangle mt-0.5 flex-shrink-0"></i>
+            <div>
+                <strong>보안 주의:</strong> Secret Key는 절대 클라이언트(브라우저)에 노출되어서는 안 됩니다.
+                Client Key만 프론트엔드에서 사용하고, Secret Key는 서버사이드에서만 사용합니다.
+            </div>
+        </div>
+
+        <div class="grid md:grid-cols-2 gap-4">
+            <div class="space-y-2">
+                <label class="text-xs text-gray-500 block font-bold">
+                    Client Key <span class="text-blue-400">(프론트엔드 공개키)</span>
+                </label>
+                <input id="set-toss-client" type="text" placeholder="test_ck_... 또는 live_ck_..."
+                    class="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-blue-500 transition font-mono" />
+                <p class="text-xs text-gray-600">토스페이먼츠 → 내 상점 → API 키 → Client Key</p>
+            </div>
+            <div class="space-y-2">
+                <label class="text-xs text-gray-500 block font-bold">
+                    Secret Key <span class="text-red-400">(서버사이드 비밀키)</span>
+                </label>
+                <input id="set-toss-secret" type="password" placeholder="test_sk_... 또는 live_sk_..."
+                    class="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-blue-500 transition font-mono" />
+                <p class="text-xs text-gray-600">토스페이먼츠 → 내 상점 → API 키 → Secret Key</p>
+            </div>
+        </div>
+
+        <div class="p-4 bg-white/3 rounded-xl text-sm space-y-2 text-gray-400">
+            <p class="font-bold text-gray-300 text-xs uppercase tracking-wider mb-2">결제 흐름</p>
+            <div class="grid md:grid-cols-3 gap-3 text-xs">
+                <div class="p-3 bg-white/5 rounded-lg">
+                    <div class="text-green-400 font-bold mb-1">무료 플랜</div>
+                    <div>별도 결제 없음<br>즉시 활성화</div>
+                </div>
+                <div class="p-3 bg-white/5 rounded-lg">
+                    <div class="text-blue-400 font-bold mb-1">스타터 플랜</div>
+                    <div>토스 페이먼츠 결제<br>호스팅 단위 적용</div>
+                </div>
+                <div class="p-3 bg-white/5 rounded-lg">
+                    <div class="text-purple-400 font-bold mb-1">프로 플랜</div>
+                    <div>토스 페이먼츠 결제<br>호스팅 단위 적용</div>
+                </div>
+            </div>
+            <p class="text-xs text-gray-600 mt-2">
+                <i class="fas fa-info-circle mr-1"></i>
+                요금제는 계정 단위가 아닌 <strong class="text-gray-400">호스팅 단위</strong>로 적용됩니다.
+                사용자는 <a href="/pricing.html" class="text-blue-400 hover:underline">요금제 페이지</a>에서 결제를 진행합니다.
+            </p>
+        </div>
+
+        <div id="toss-save-alert" class="hidden p-3 rounded-xl text-sm"></div>
+        <button onclick="saveTossSettings()"
+            class="bg-green-700 hover:bg-green-600 text-white font-bold px-6 py-2.5 rounded-xl transition flex items-center gap-2">
+            <i class="fas fa-save"></i> 결제 설정 저장
+        </button>
+    </div>
+
     <!-- ── GitHub 사용 가이드 ── -->
     <div class="p-6 bg-[#111] rounded-2xl border border-white/5 space-y-4">
         <h2 class="font-bold flex items-center gap-2"><i class="fab fa-github text-white"></i> GitHub 스토리지 구조</h2>
@@ -341,9 +458,69 @@ document.getElementById('gh-token-input').addEventListener('keydown', e => {
     if (e.key === 'Enter') addGithubToken();
 });
 
+// ── 관리자 설정 로드 ─────────────────────────────────────────────────────────
+async function loadAdminSettings() {
+    try {
+        const res  = await fetch('/api/admin/settings', { headers: HEADERS });
+        const data = await res.json();
+        if (!res.ok || !data.success) return;
+        const s = data.settings || {};
+        if (s.supabase_url)         document.getElementById('set-supabase-url').value    = s.supabase_url;
+        if (s.supabase_service_key) document.getElementById('set-supabase-key').value    = s.supabase_service_key;
+        if (s.smtp_from)            document.getElementById('set-smtp-from').value       = s.smtp_from;
+        if (s.platform_domain)      document.getElementById('set-platform-domain').value = s.platform_domain;
+        if (s.toss_client_key)      document.getElementById('set-toss-client').value     = s.toss_client_key;
+        if (s.toss_secret_key)      document.getElementById('set-toss-secret').value     = s.toss_secret_key;
+    } catch {}
+}
+
+// ── 이메일 설정 저장 ─────────────────────────────────────────────────────────
+async function saveEmailSettings() {
+    const alertEl = document.getElementById('email-save-alert');
+    const payload = {
+        supabase_url:         document.getElementById('set-supabase-url').value.trim(),
+        supabase_service_key: document.getElementById('set-supabase-key').value.trim(),
+        smtp_from:            document.getElementById('set-smtp-from').value.trim(),
+        platform_domain:      document.getElementById('set-platform-domain').value.trim(),
+    };
+    try {
+        const res  = await fetch('/api/admin/settings', {
+            method: 'PUT', headers: HEADERS, body: JSON.stringify(payload),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || '오류');
+        showAlert(alertEl, data.message, 'success');
+    } catch (e) {
+        showAlert(alertEl, e.message, 'error');
+    }
+}
+
+// ── 토스 페이먼츠 설정 저장 ─────────────────────────────────────────────────
+async function saveTossSettings() {
+    const alertEl = document.getElementById('toss-save-alert');
+    const payload = {
+        toss_client_key: document.getElementById('set-toss-client').value.trim(),
+        toss_secret_key: document.getElementById('set-toss-secret').value.trim(),
+    };
+    if (!payload.toss_client_key && !payload.toss_secret_key) {
+        showAlert(alertEl, '저장할 값을 입력해주세요.', 'warning'); return;
+    }
+    try {
+        const res  = await fetch('/api/admin/settings', {
+            method: 'PUT', headers: HEADERS, body: JSON.stringify(payload),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || '오류');
+        showAlert(alertEl, data.message, 'success');
+    } catch (e) {
+        showAlert(alertEl, e.message, 'error');
+    }
+}
+
 // ── 초기화 ──────────────────────────────────────────────────────────────────
 loadStats();
 loadGithubTokens();
+loadAdminSettings();
 </script>
 </body>
 </html>

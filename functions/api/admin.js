@@ -1,13 +1,32 @@
 // functions/api/admin.js
-// GET /api/admin/stats     → 전체 통계
-// GET /api/admin/users     → 사용자 목록
-// PUT /api/admin/users?id= → 사용자 플랜/역할 변경
-// DEL /api/admin/users?id= → 사용자 삭제
-// GET /api/admin/sites     → 전체 사이트 목록
-// PUT /api/admin/sites?id= → 사이트 상태 변경
-// DEL /api/admin/sites?id= → 사이트 강제 삭제
+// GET  /api/admin/stats        → 전체 통계
+// GET  /api/admin/users        → 사용자 목록
+// PUT  /api/admin/users?id=    → 사용자 플랜/역할 변경
+// DEL  /api/admin/users?id=    → 사용자 삭제
+// GET  /api/admin/sites        → 전체 사이트 목록
+// PUT  /api/admin/sites?id=    → 사이트 상태 변경
+// DEL  /api/admin/sites?id=    → 사이트 강제 삭제
+// GET  /api/admin/settings     → 관리자 설정 조회
+// PUT  /api/admin/settings     → 관리자 설정 저장
 
 import { jsonOk, jsonErr, requireAuth } from "../_shared.js";
+
+// ── path 추출 헬퍼 ─────────────────────────────────────────────────────────
+// /api/admin/stats → "stats"
+// [[path]] catch-all 파라미터 우선 사용
+function extractAdminPath(context) {
+  if (context.params?.path) {
+    const p = Array.isArray(context.params.path)
+      ? context.params.path.join("/")
+      : context.params.path;
+    return p.replace(/^\/+|\/+$/g, "");
+  }
+  const url = new URL(context.request.url);
+  return url.pathname
+    .replace(/^.*\/api\/admin\/?/, "")
+    .replace(/\?.*$/, "")
+    .replace(/^\/+|\/+$/g, "");
+}
 
 async function requireAdmin(request, env) {
   const payload = await requireAuth(request, env);
@@ -16,16 +35,17 @@ async function requireAdmin(request, env) {
   return payload;
 }
 
+// ── GET ────────────────────────────────────────────────────────────────────
 export async function onRequestGet(context) {
   const { request, env } = context;
   const admin = await requireAdmin(request, env);
   if (!admin) return jsonErr("관리자 권한이 필요합니다.", 403);
 
   const url  = new URL(request.url);
-  const path = url.pathname.replace(/.*\/api\/admin\/?/, "");
+  const path = extractAdminPath(context);
 
   try {
-    // ── 통계 ──────────────────────────────────────────────────────────────────
+    // ── 통계 ──────────────────────────────────────────────────────────────
     if (path === "stats" || path === "") {
       const [usersRow, sitesRow, activeRow] = await Promise.all([
         env.DB.prepare("SELECT COUNT(*) as cnt FROM users").first(),
@@ -38,21 +58,20 @@ export async function onRequestGet(context) {
       return jsonOk({
         success: true,
         stats: {
-          total_users:   usersRow?.cnt   || 0,
-          total_sites:   sitesRow?.cnt   || 0,
-          active_sites:  activeRow?.cnt  || 0,
+          total_users:  usersRow?.cnt  || 0,
+          total_sites:  sitesRow?.cnt  || 0,
+          active_sites: activeRow?.cnt || 0,
           plans: planRows.results || [],
         },
       });
     }
 
-    // ── 사용자 목록 ──────────────────────────────────────────────────────────
+    // ── 사용자 목록 ──────────────────────────────────────────────────────
     if (path === "users") {
-      const page  = parseInt(url.searchParams.get("page") || "1");
-      const limit = 50;
+      const page   = parseInt(url.searchParams.get("page") || "1");
+      const limit  = 50;
       const offset = (page - 1) * limit;
       const search = url.searchParams.get("q") || "";
-
       let query, args;
       if (search) {
         query = `SELECT id, email, role, plan, created_at FROM users WHERE email LIKE ? ORDER BY rowid DESC LIMIT ? OFFSET ?`;
@@ -63,15 +82,12 @@ export async function onRequestGet(context) {
       }
       const { results } = await env.DB.prepare(query).bind(...args).all();
       const total = (await env.DB.prepare(
-        search
-          ? "SELECT COUNT(*) as cnt FROM users WHERE email LIKE ?"
-          : "SELECT COUNT(*) as cnt FROM users"
+        search ? "SELECT COUNT(*) as cnt FROM users WHERE email LIKE ?" : "SELECT COUNT(*) as cnt FROM users"
       ).bind(...(search ? [`%${search}%`] : [])).first())?.cnt || 0;
-
       return jsonOk({ success: true, users: results, total, page, limit });
     }
 
-    // ── 전체 사이트 목록 ─────────────────────────────────────────────────────
+    // ── 전체 사이트 목록 ─────────────────────────────────────────────────
     if (path === "sites") {
       const page   = parseInt(url.searchParams.get("page") || "1");
       const limit  = 50;
@@ -86,19 +102,42 @@ export async function onRequestGet(context) {
       return jsonOk({ success: true, sites: results, total, page, limit });
     }
 
+    // ── 관리자 설정 조회 ─────────────────────────────────────────────────
+    if (path === "settings") {
+      await env.DB.prepare(`
+        CREATE TABLE IF NOT EXISTS admin_settings (
+          key   TEXT PRIMARY KEY,
+          value TEXT NOT NULL DEFAULT ''
+        )
+      `).run().catch(() => {});
+
+      const rows = await env.DB.prepare("SELECT key, value FROM admin_settings").all()
+        .catch(() => ({ results: [] }));
+
+      const settings = {};
+      const sensitive = ["toss_secret_key", "smtp_password", "supabase_service_key"];
+      for (const row of (rows.results || [])) {
+        settings[row.key] = sensitive.includes(row.key) && row.value
+          ? row.value.slice(0, 6) + "••••••••"
+          : row.value;
+      }
+      return jsonOk({ success: true, settings });
+    }
+
     return jsonErr("알 수 없는 경로입니다.", 404);
   } catch (e) {
     return jsonErr("서버 오류: " + e.message, 500);
   }
 }
 
+// ── PUT ────────────────────────────────────────────────────────────────────
 export async function onRequestPut(context) {
   const { request, env } = context;
   const admin = await requireAdmin(request, env);
   if (!admin) return jsonErr("관리자 권한이 필요합니다.", 403);
 
   const url  = new URL(request.url);
-  const path = url.pathname.replace(/.*\/api\/admin\/?/, "");
+  const path = extractAdminPath(context);
   const id   = url.searchParams.get("id");
 
   let body;
@@ -129,25 +168,57 @@ export async function onRequestPut(context) {
       return jsonOk({ success: true, message: "사이트 정보가 변경되었습니다." });
     }
 
+    // ── 관리자 설정 저장 ─────────────────────────────────────────────────
+    if (path === "settings") {
+      await env.DB.prepare(`
+        CREATE TABLE IF NOT EXISTS admin_settings (
+          key   TEXT PRIMARY KEY,
+          value TEXT NOT NULL DEFAULT ''
+        )
+      `).run().catch(() => {});
+
+      const allowedSettings = [
+        "smtp_host", "smtp_port", "smtp_user", "smtp_password", "smtp_from",
+        "supabase_url", "supabase_service_key",
+        "toss_client_key", "toss_secret_key",
+        "site_name", "support_email", "platform_domain",
+      ];
+
+      const saved = [];
+      for (const key of allowedSettings) {
+        if (body[key] !== undefined && body[key] !== null) {
+          // 마스킹된 값(••)은 저장 안 함 (변경 없음)
+          if (String(body[key]).includes("••")) continue;
+          await env.DB.prepare(
+            "INSERT INTO admin_settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value"
+          ).bind(key, body[key]).run();
+          saved.push(key);
+        }
+      }
+
+      if (!saved.length) return jsonErr("저장할 설정이 없습니다.", 400);
+      return jsonOk({ success: true, message: `${saved.length}개 설정이 저장되었습니다.`, saved });
+    }
+
     return jsonErr("알 수 없는 경로입니다.", 404);
   } catch (e) {
     return jsonErr("서버 오류: " + e.message, 500);
   }
 }
 
+// ── DELETE ────────────────────────────────────────────────────────────────
 export async function onRequestDelete(context) {
   const { request, env } = context;
   const admin = await requireAdmin(request, env);
   if (!admin) return jsonErr("관리자 권한이 필요합니다.", 403);
 
   const url  = new URL(request.url);
-  const path = url.pathname.replace(/.*\/api\/admin\/?/, "");
+  const path = extractAdminPath(context);
   const id   = url.searchParams.get("id");
   if (!id) return jsonErr("ID가 필요합니다.", 400);
 
   try {
     if (path === "users") {
-      // 관리자 자신은 삭제 불가
       if (id === admin.id) return jsonErr("자기 자신은 삭제할 수 없습니다.", 400);
       await env.DB.prepare("DELETE FROM domain_aliases WHERE site_id IN (SELECT id FROM sites WHERE user_id = ?)").bind(id).run();
       await env.DB.prepare("DELETE FROM sites WHERE user_id = ?").bind(id).run();
@@ -157,6 +228,7 @@ export async function onRequestDelete(context) {
     if (path === "sites") {
       await env.DB.prepare("DELETE FROM domain_aliases WHERE site_id = ?").bind(id).run();
       await env.DB.prepare("DELETE FROM site_ssh_keys WHERE site_id = ?").bind(id).run();
+      await env.DB.prepare("DELETE FROM php_logs WHERE site_id = ?").bind(id).run();
       await env.DB.prepare("DELETE FROM sites WHERE id = ?").bind(id).run();
       return jsonOk({ success: true, message: "사이트가 삭제되었습니다." });
     }

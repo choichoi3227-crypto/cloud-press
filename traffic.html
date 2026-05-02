@@ -16,18 +16,7 @@
             window.location.href = '/login.html';
         }
     </script>
-    <!-- Sidebar (dashboard.html과 동일) -->
-    <aside class="w-64 border-r border-white/10 p-6 flex flex-col hidden md:flex">
-        <div class="text-2xl font-black text-blue-500 mb-10">CLOUD<span class="text-white">PRESS</span></div>
-        <nav class="flex-1 space-y-2">
-            <a href="/dashboard.html" class="block p-3 rounded-xl hover:bg-white/5 transition"><i class="fas fa-tachometer-alt mr-3"></i> 대시보드</a>
-            <a href="/hosting.html" class="block p-3 rounded-xl hover:bg-white/5 transition"><i class="fas fa-globe mr-3"></i> 내 호스팅</a>
-            <a href="/traffic.html" class="block p-3 rounded-xl bg-white/10 font-bold"><i class="fas fa-chart-line mr-3"></i> 트래픽</a>
-            <a href="/storage.html" class="block p-3 rounded-xl hover:bg-white/5 transition"><i class="fas fa-hdd mr-3"></i> 스토리지</a>
-            <a href="/account.html" class="block p-3 rounded-xl hover:bg-white/5 transition"><i class="fas fa-user-circle mr-3"></i> 내 계정</a>
-        </nav>
-        <button onclick="logout()" class="mt-auto w-full bg-red-600 py-3 rounded-xl font-bold hover:bg-red-500 transition"><i class="fas fa-sign-out-alt mr-2"></i> 로그아웃</button>
-    </aside>
+    
     <main class="flex-1 w-full p-10 overflow-y-auto">
         <h1 class="text-3xl font-bold mb-10">트래픽 분석</h1>
         <section class="p-8 bg-[#111] rounded-3xl border border-white/10 mb-10">
@@ -39,6 +28,7 @@
         <!-- 추가 트래픽 지표 -->
     </main>
     <script src="/src/auth-frontend.js"></script>
+    <script src="/src/sidebar.js"></script>
     <script>
         // Chart.js를 이용한 트래픽 데이터 로드 및 렌더링 로직
         // (src/dashboard-logic.js에서 분리하여 src/traffic-logic.js로 만들 수 있음)

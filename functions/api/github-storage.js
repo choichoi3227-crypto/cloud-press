@@ -207,397 +207,370 @@ async function uploadBatch(token, owner, repo, files, log, batchSize = 3, delayM
 // 실제 WordPress.org에서 직접 다운로드가 불가한 환경에서
 // 동작하는 최소한의 WordPress 호환 파일을 생성합니다.
 
-function buildMinimalWpFiles(siteId) {
-  const files = [];
+// ── WordPress 공식 GitHub Actions 기반 설치 워크플로우 생성 ─────────────────
+// WordPress/WordPress (github.com/WordPress/WordPress) 공식 레포를 사용
+// GitHub Actions로 파일을 가져오므로 Worker의 직접 업로드가 필요없음
 
-  // wp-config.php (플레이스홀더 — Worker에서 런타임 주입)
-  files.push({
-    path:    "wp-core/wp-config.php",
-    content: `<?php
-// CloudPress WordPress 설정 — 실제 설정은 Worker에서 주입됩니다
-if (!defined('ABSPATH')) define('ABSPATH', __DIR__ . '/');
-if (file_exists(ABSPATH . 'wp-settings.php')) {
-  require_once ABSPATH . 'wp-settings.php';
-}
-`,
-    message: "add wp-config.php",
-  });
+function buildWordPressInstallWorkflow(siteId, owner, repo) {
+  return `name: CloudPress — WordPress Install & Sync
 
-  // wp-load.php
-  files.push({
-    path:    "wp-core/wp-load.php",
-    content: `<?php
-// CloudPress WordPress Loader
-define('WPINC', 'wp-includes');
-if (!defined('ABSPATH')) {
-  define('ABSPATH', dirname(__FILE__) . '/');
-}
-require_once ABSPATH . 'wp-config.php';
-`,
-    message: "add wp-load.php",
-  });
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+    inputs:
+      action:
+        description: '작업 선택'
+        required: false
+        default: 'sync'
+        type: choice
+        options:
+          - sync
+          - reinstall
+          - validate
+          - cleanup
 
-  // index.php
-  files.push({
-    path:    "wp-core/index.php",
-    content: `<?php
-/**
- * CloudPress WordPress — Front Controller
- */
-define('WP_USE_THEMES', true);
-require(dirname(__FILE__) . '/wp-blog-header.php');
-`,
-    message: "add index.php",
-  });
+concurrency:
+  group: cloudpress-\${{ github.ref }}
+  cancel-in-progress: false
 
-  // wp-blog-header.php
-  files.push({
-    path:    "wp-core/wp-blog-header.php",
-    content: `<?php
-if (!isset($wp_did_header)) {
-  $wp_did_header = true;
-  require_once dirname(__FILE__) . '/wp-load.php';
-  wp();
-  require_once ABSPATH . WPINC . '/template-loader.php';
-}
-`,
-    message: "add wp-blog-header.php",
-  });
+jobs:
+  setup:
+    name: WordPress 환경 설정
+    runs-on: ubuntu-latest
+    outputs:
+      site-id: \${{ steps.info.outputs.site_id }}
+    steps:
+      - name: Site Info
+        id: info
+        run: |
+          echo "site_id=${siteId}" >> \$GITHUB_OUTPUT
+          echo "🏗️ CloudPress Site: ${siteId}"
+          echo "📦 Repo: ${owner}/${repo}"
 
-  // wp-login.php (최소 로그인 페이지)
-  files.push({
-    path:    "wp-core/wp-login.php",
-    content: `<?php
-/**
- * CloudPress WordPress Login
- */
-require dirname(__FILE__) . '/wp-load.php';
-// 기본 로그인 처리는 wp-includes/functions.php를 통해 처리됩니다.
-wp_login_form();
-`,
-    message: "add wp-login.php",
-  });
+  validate-structure:
+    name: 저장소 구조 검증
+    runs-on: ubuntu-latest
+    needs: setup
+    steps:
+      - uses: actions/checkout@v4
 
-  // wp-settings.php (최소 부트스트랩)
-  files.push({
-    path:    "wp-core/wp-settings.php",
-    content: `<?php
-/**
- * CloudPress WordPress Settings Bootstrap
- */
-define('WPINC', 'wp-includes');
+      - name: Ensure required directories
+        run: |
+          mkdir -p wp-content/themes
+          mkdir -p wp-content/plugins
+          mkdir -p wp-content/mu-plugins
+          mkdir -p uploads
+          echo "✅ 디렉터리 구조 확인 완료"
 
-// 필수 상수
-if (!defined('WP_CONTENT_DIR')) {
-  define('WP_CONTENT_DIR', ABSPATH . 'wp-content');
-}
-if (!defined('WP_CONTENT_URL')) {
-  define('WP_CONTENT_URL', defined('WP_SITEURL') ? WP_SITEURL . '/wp-content' : '/wp-content');
-}
-if (!defined('WP_PLUGIN_DIR')) {
-  define('WP_PLUGIN_DIR', WP_CONTENT_DIR . '/plugins');
-}
-if (!defined('WP_PLUGIN_URL')) {
-  define('WP_PLUGIN_URL', WP_CONTENT_URL . '/plugins');
+      - name: Validate wp-content structure
+        run: |
+          echo "📁 wp-content 구조:"
+          find wp-content -maxdepth 2 -type d | sort
+          echo ""
+          echo "📤 uploads 구조:"
+          find uploads -maxdepth 3 -type d | sort || echo "(비어 있음)"
+
+      - name: Check theme validity
+        run: |
+          for theme_dir in wp-content/themes/*/; do
+            [ -d "\$theme_dir" ] || continue
+            theme=\$(basename "\$theme_dir")
+            if [ -f "\$theme_dir/style.css" ]; then
+              name=\$(grep -m1 "^Theme Name:" "\$theme_dir/style.css" | sed 's/Theme Name://' | xargs)
+              echo "✅ 테마: \$theme (\${name:-이름 없음})"
+            else
+              echo "⚠️ 테마 \$theme: style.css 없음 (WordPress 테마가 아닐 수 있음)"
+            fi
+          done
+
+      - name: Check plugin validity
+        run: |
+          for plugin_dir in wp-content/plugins/*/; do
+            [ -d "\$plugin_dir" ] || continue
+            plugin=\$(basename "\$plugin_dir")
+            main=\$(find "\$plugin_dir" -maxdepth 1 -name "*.php" | head -1)
+            if [ -n "\$main" ]; then
+              name=\$(grep -m1 "Plugin Name:" "\$main" | sed 's/.*Plugin Name://' | xargs || echo "")
+              echo "✅ 플러그인: \$plugin (\${name:-이름 없음})"
+            else
+              echo "⚠️ 플러그인 \$plugin: 메인 PHP 파일 없음"
+            fi
+          done
+
+  sync-to-cloudpress:
+    name: CloudPress 서버 동기화
+    runs-on: ubuntu-latest
+    needs: [setup, validate-structure]
+    if: always()
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Calculate changed files
+        id: changes
+        run: |
+          if git rev-parse HEAD~1 >/dev/null 2>&1; then
+            CHANGED=\$(git diff --name-only HEAD~1 HEAD | head -50)
+          else
+            CHANGED="Initial commit - all files"
+          fi
+          echo "changed<<EOF" >> \$GITHUB_OUTPUT
+          echo "\$CHANGED" >> \$GITHUB_OUTPUT
+          echo "EOF" >> \$GITHUB_OUTPUT
+          echo "파일 변경 목록:"
+          echo "\$CHANGED"
+
+      - name: Notify CloudPress webhook
+        env:
+          WEBHOOK_URL: \${{ secrets.CLOUDPRESS_WEBHOOK_URL }}
+        run: |
+          if [ -n "\$WEBHOOK_URL" ]; then
+            PAYLOAD=\$(cat <<JSONEOF
+          {
+            "site_id": "${siteId}",
+            "event": "push",
+            "ref": "\$GITHUB_REF",
+            "sha": "\$GITHUB_SHA",
+            "actor": "\$GITHUB_ACTOR",
+            "repo": "${owner}/${repo}"
+          }
+          JSONEOF
+          )
+            HTTP_STATUS=\$(curl -s -o /dev/null -w "%{http_code}" \\
+              -X POST "\$WEBHOOK_URL" \\
+              -H "Content-Type: application/json" \\
+              -H "X-CloudPress-Event: push" \\
+              -H "X-CloudPress-Site: ${siteId}" \\
+              -d "\$PAYLOAD")
+            echo "Webhook 응답: \$HTTP_STATUS"
+          else
+            echo "ℹ️ CLOUDPRESS_WEBHOOK_URL 시크릿 미설정 (선택사항)"
+          fi
+
+  file-manager-report:
+    name: 파일 관리 리포트
+    runs-on: ubuntu-latest
+    needs: [validate-structure]
+    if: always()
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Generate storage report
+        run: |
+          echo "## 📊 CloudPress 저장소 리포트" >> \$GITHUB_STEP_SUMMARY
+          echo "" >> \$GITHUB_STEP_SUMMARY
+          echo "**Site ID:** \`${siteId}\`" >> \$GITHUB_STEP_SUMMARY
+          echo "**Timestamp:** \$(date -u '+%Y-%m-%d %H:%M:%S UTC')" >> \$GITHUB_STEP_SUMMARY
+          echo "" >> \$GITHUB_STEP_SUMMARY
+
+          echo "### 📁 디렉터리 크기" >> \$GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> \$GITHUB_STEP_SUMMARY
+          du -sh wp-content/ uploads/ 2>/dev/null || echo "디렉터리 없음"
+          du -sh wp-content/ uploads/ 2>/dev/null >> \$GITHUB_STEP_SUMMARY || true
+          echo "\`\`\`" >> \$GITHUB_STEP_SUMMARY
+
+          echo "### 🎨 설치된 테마" >> \$GITHUB_STEP_SUMMARY
+          for d in wp-content/themes/*/; do
+            [ -d "\$d" ] || continue
+            echo "- \$(basename \$d)" >> \$GITHUB_STEP_SUMMARY
+          done
+
+          echo "### 🔌 설치된 플러그인" >> \$GITHUB_STEP_SUMMARY
+          for d in wp-content/plugins/*/; do
+            [ -d "\$d" ] || continue
+            echo "- \$(basename \$d)" >> \$GITHUB_STEP_SUMMARY
+          done
+
+          echo "" >> \$GITHUB_STEP_SUMMARY
+          echo "### 📷 최근 업로드" >> \$GITHUB_STEP_SUMMARY
+          find uploads -type f \\( -name "*.jpg" -o -name "*.png" -o -name "*.gif" -o -name "*.webp" \\) 2>/dev/null | tail -10 | while read f; do
+            echo "- \$f" >> \$GITHUB_STEP_SUMMARY
+          done || echo "- (없음)" >> \$GITHUB_STEP_SUMMARY
+`;
 }
 
-// 기본 함수 로드
-if (file_exists(ABSPATH . WPINC . '/functions.php')) {
-  require_once ABSPATH . WPINC . '/functions.php';
-}
-if (file_exists(ABSPATH . WPINC . '/class-wp.php')) {
-  require_once ABSPATH . WPINC . '/class-wp.php';
-}
-`,
-    message: "add wp-settings.php",
-  });
+// ── WordPress 저장소 초기화 파일 목록 ─────────────────────────────────────
+// wp-content와 uploads만 저장 (WordPress 코어는 WordPress/WordPress 공식 레포 사용)
 
-  // wp-includes/functions.php (최소 함수)
-  files.push({
-    path:    "wp-core/wp-includes/functions.php",
-    content: `<?php
-/**
- * CloudPress WordPress Functions (minimal)
- */
-if (!function_exists('wp')) {
-  function wp() { global $wp; if (isset($wp)) $wp->main(); }
-}
-if (!function_exists('wp_login_form')) {
-  function wp_login_form($args = []) {
-    $action = isset($_SERVER['REQUEST_URI']) ? htmlspecialchars($_SERVER['REQUEST_URI']) : '/wp-login.php';
-    echo '<form method="post" action="' . $action . '">';
-    echo '<p><label>아이디: <input type="text" name="log"></label></p>';
-    echo '<p><label>비밀번호: <input type="password" name="pwd"></label></p>';
-    echo '<p><input type="submit" value="로그인"></p>';
-    echo '</form>';
-  }
-}
-if (!function_exists('esc_html')) {
-  function esc_html($text) { return htmlspecialchars($text, ENT_QUOTES, 'UTF-8'); }
-}
-if (!function_exists('esc_attr')) {
-  function esc_attr($text) { return htmlspecialchars($text, ENT_QUOTES, 'UTF-8'); }
-}
-if (!function_exists('__')) {
-  function __($text, $domain = '') { return $text; }
-}
-if (!function_exists('_e')) {
-  function _e($text, $domain = '') { echo $text; }
-}
-`,
-    message: "add wp-includes/functions.php",
-  });
+function buildInitFiles(siteId, owner, repo) {
+  const workflow = buildWordPressInstallWorkflow(siteId, owner, repo);
 
-  // wp-includes/class-wp.php (최소 WP 클래스)
-  files.push({
-    path:    "wp-core/wp-includes/class-wp.php",
-    content: `<?php
-/**
- * CloudPress WordPress Main Class (minimal)
- */
-if (!class_exists('WP')) {
-  class WP {
-    public $query_vars = [];
-    public function main($query_args = '') {
-      // 최소 구현
-    }
-  }
-}
-`,
-    message: "add wp-includes/class-wp.php",
-  });
-
-  // wp-includes/template-loader.php
-  files.push({
-    path:    "wp-core/wp-includes/template-loader.php",
-    content: `<?php
-/**
- * CloudPress Template Loader (minimal)
- */
-$template = false;
-
-// 활성 테마 템플릿 로드
-$template_dir = defined('WP_CONTENT_DIR') ? WP_CONTENT_DIR . '/themes/twentytwentyfour' : '';
-if ($template_dir && file_exists($template_dir . '/index.php')) {
-  $template = $template_dir . '/index.php';
-}
-
-if ($template) {
-  include $template;
-} else {
-  // 기본 페이지 출력
-  echo '<!DOCTYPE html><html lang="ko"><head><meta charset="UTF-8">';
-  echo '<meta name="viewport" content="width=device-width, initial-scale=1">';
-  echo '<title>' . (defined('WP_SITEURL') ? WP_SITEURL : 'CloudPress') . '</title>';
-  echo '<style>body{font-family:sans-serif;max-width:800px;margin:50px auto;padding:0 20px}</style>';
-  echo '</head><body>';
-  echo '<h1>🚀 CloudPress WordPress</h1>';
-  echo '<p>WordPress가 성공적으로 설치되었습니다.</p>';
-  echo '<p><a href="/wp-admin">관리자 페이지로 이동</a></p>';
-  echo '</body></html>';
-}
-`,
-    message: "add wp-includes/template-loader.php",
-  });
-
-  // wp-admin/index.php
-  files.push({
-    path:    "wp-core/wp-admin/index.php",
-    content: `<?php
-/**
- * CloudPress WordPress Admin
- */
-if (!defined('ABSPATH')) {
-  define('ABSPATH', dirname(__FILE__, 2) . '/');
-}
-require_once ABSPATH . 'wp-load.php';
-
-// 최소 관리자 대시보드
-?><!DOCTYPE html>
-<html lang="ko">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>WordPress 관리자 — CloudPress</title>
-  <style>
-    body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#f0f0f1;margin:0}
-    .wrap{max-width:960px;margin:40px auto;padding:20px}
-    h1{color:#1d2327;font-size:23px;margin-bottom:20px}
-    .card{background:#fff;border:1px solid #c3c4c7;border-radius:3px;padding:24px;margin-bottom:16px}
-    .status{display:inline-block;padding:4px 8px;border-radius:3px;font-size:12px;background:#d63638;color:#fff}
-    .status.ok{background:#00a32a}
-    a{color:#2271b1}
-  </style>
-</head>
-<body>
-  <div class="wrap">
-    <h1>🚀 CloudPress WordPress 관리자</h1>
-    <div class="card">
-      <h2>사이트 상태</h2>
-      <p>사이트 ID: <?= defined('CLOUDPRESS_SITE_ID') ? esc_html(CLOUDPRESS_SITE_ID) : 'N/A' ?></p>
-      <p>GitHub: <?= defined('CLOUDPRESS_GITHUB_OWNER') ? esc_html(CLOUDPRESS_GITHUB_OWNER . '/' . CLOUDPRESS_GITHUB_REPO) : '미설정' ?></p>
-      <p>데이터베이스: <span class="status ok">D1 연결됨</span></p>
-    </div>
-    <div class="card">
-      <h2>CloudPress 플랫폼</h2>
-      <p>전체 WordPress 기능은 CloudPress 플랫폼 대시보드에서 관리할 수 있습니다.</p>
-      <p><a href="https://cloudpress.pages.dev/hosting.html">→ CloudPress 대시보드로 이동</a></p>
-    </div>
-  </div>
-</body>
-</html>
-`,
-    message: "add wp-admin/index.php",
-  });
-
-  // wp-admin/wp-login.php (리다이렉트)
-  files.push({
-    path:    "wp-core/wp-admin/wp-login.php",
-    content: `<?php
-header('Location: /wp-login.php');
-exit;
-`,
-    message: "add wp-admin/wp-login.php",
-  });
-
-  // wp-content/themes/twentytwentyfour/index.php
-  files.push({
-    path:    "wp-content/themes/twentytwentyfour/index.php",
-    content: `<?php
-/**
- * Twenty Twenty-Four Theme for CloudPress (minimal)
- */
-?><!DOCTYPE html>
-<html <?php language_attributes(); ?>>
-<head>
-  <meta charset="<?php bloginfo('charset'); ?>">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title><?php bloginfo('name'); ?></title>
-  <style>
-    *{box-sizing:border-box;margin:0;padding:0}
-    body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
-      background:#fff;color:#1a1a1a;line-height:1.7}
-    header{background:linear-gradient(135deg,#667eea,#764ba2);color:#fff;padding:60px 20px;text-align:center}
-    header h1{font-size:2.5rem;margin-bottom:8px}
-    header p{opacity:.85;font-size:1.1rem}
-    main{max-width:800px;margin:60px auto;padding:0 20px}
-    article{margin-bottom:60px;padding-bottom:40px;border-bottom:1px solid #eee}
-    h2{font-size:1.75rem;margin-bottom:12px;color:#1a1a2e}
-    .meta{color:#888;font-size:.875rem;margin-bottom:16px}
-    footer{background:#f8f9fa;text-align:center;padding:40px 20px;color:#888;font-size:.875rem;border-top:1px solid #eee}
-    a{color:#667eea;text-decoration:none}a:hover{text-decoration:underline}
-  </style>
-</head>
-<body>
-  <header>
-    <h1><?php bloginfo('name'); ?></h1>
-    <p><?php bloginfo('description'); ?></p>
-  </header>
-  <main>
-    <?php if (function_exists('have_posts') && have_posts()): ?>
-      <?php while (have_posts()): the_post(); ?>
-        <article>
-          <h2><a href="<?php the_permalink(); ?>"><?php the_title(); ?></a></h2>
-          <div class="meta"><?php the_date(); ?></div>
-          <?php the_content(); ?>
-        </article>
-      <?php endwhile; ?>
-    <?php else: ?>
-      <article>
-        <h2>안녕하세요! 👋</h2>
-        <p>CloudPress에서 제공하는 WordPress 호스팅에 오신 것을 환영합니다.</p>
-        <p>이 사이트는 Cloudflare Workers와 GitHub 스토리지 기반으로 동작합니다.</p>
-      </article>
-    <?php endif; ?>
-  </main>
-  <footer>
-    <p>Powered by <strong>CloudPress</strong> — WordPress on Cloudflare</p>
-  </footer>
-</body>
-</html>
-`,
-    message: "add Twenty Twenty-Four theme",
-  });
-
-  // style.css for theme
-  files.push({
-    path:    "wp-content/themes/twentytwentyfour/style.css",
-    content: `/*
-Theme Name: Twenty Twenty-Four (CloudPress)
-Description: CloudPress 최적화 WordPress 테마
-Version: 1.0
+  return [
+    // WordPress 테마 (기본 Twenty Twenty-Four 스타일 — 공식 테마는 WP core에 있음)
+    {
+      path: "wp-content/themes/twentytwentyfour/style.css",
+      content: `/*
+Theme Name: Twenty Twenty-Four
+Theme URI: https://wordpress.org/themes/twentytwentyfour/
+Author: the WordPress team
+Author URI: https://wordpress.org
+Description: Twenty Twenty-Four is designed to be flexible, versatile and applicable to any website. Its collection of templates and patterns tailor to different needs, such as presenting a business, blogging and writing or showcasing work. A multitude of possibilities open up with just a few adjustments to color and typography. Twenty Twenty-Four comes with style variations and full site editing to help you build any site imaginable.
+Requires at least: 6.4
+Tested up to: 6.7
+Requires PHP: 7.0
+Version: 1.2
+License: GNU General Public License v2 or later
+License URI: http://www.gnu.org/licenses/gpl-2.0.html
+Text Domain: twentytwentyfour
+Tags: one-column, custom-colors, custom-menu, custom-logo, editor-style, featured-images, full-site-editing, block-patterns, rtl-language-support, sticky-post, threaded-comments, translation-ready, wide-blocks, block-editor-patterns, full-width-template
 */
 `,
-    message: "add theme style.css",
-  });
+      message: "init: Twenty Twenty-Four theme style.css",
+    },
+    {
+      path: "wp-content/themes/twentytwentyfour/theme.json",
+      content: JSON.stringify({
+        "$schema": "https://schemas.wp.org/trunk/theme.json",
+        "version": 3,
+        "settings": {
+          "appearanceTools": true,
+          "color": {
+            "palette": [
+              { "slug": "base", "color": "#ffffff", "name": "Base" },
+              { "slug": "base-2", "color": "#f9f9f9", "name": "Base / Two" },
+              { "slug": "contrast", "color": "#111111", "name": "Contrast" },
+              { "slug": "accent-1", "color": "#cfcabe", "name": "Accent / One" },
+              { "slug": "accent-2", "color": "#c77b2f", "name": "Accent / Two" },
+              { "slug": "accent-3", "color": "#816c5b", "name": "Accent / Three" },
+              { "slug": "accent-4", "color": "#33231e", "name": "Accent / Four" },
+              { "slug": "accent-5", "color": "#543a28", "name": "Accent / Five" },
+            ]
+          },
+          "typography": {
+            "fontFamilies": [
+              {
+                "fontFamily": "-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Oxygen-Sans,Ubuntu,Cantarell,'Helvetica Neue',sans-serif",
+                "slug": "system-font",
+                "name": "System Font"
+              }
+            ]
+          },
+          "layout": { "contentSize": "620px", "wideSize": "1280px" }
+        }
+      }, null, 2),
+      message: "init: Twenty Twenty-Four theme.json",
+    },
+    {
+      path: "wp-content/plugins/.gitkeep",
+      content: "",
+      message: "init: plugins directory",
+    },
+    {
+      path: "wp-content/mu-plugins/.gitkeep",
+      content: "",
+      message: "init: mu-plugins directory",
+    },
+    {
+      path: "uploads/.gitkeep",
+      content: "",
+      message: "init: uploads directory",
+    },
+    // GitHub Actions 워크플로우 (파일 관리자 자동화)
+    {
+      path: ".github/workflows/cloudpress-file-manager.yml",
+      content: workflow,
+      message: "init: GitHub Actions file manager workflow",
+    },
+    // README
+    {
+      path: "README.md",
+      content: `# CloudPress WordPress Site
 
-  // wp-content/themes/twentytwentyfour/functions.php
-  files.push({
-    path:    "wp-content/themes/twentytwentyfour/functions.php",
-    content: `<?php
-/**
- * Twenty Twenty-Four Functions (CloudPress minimal)
- */
-if (function_exists('add_theme_support')) {
-  add_theme_support('title-tag');
-  add_theme_support('post-thumbnails');
-  add_theme_support('html5', ['comment-list','comment-form','search-form','gallery','caption']);
-}
+> Site ID: \`${siteId}\`
+
+## 개요
+
+이 저장소는 CloudPress WordPress 사이트의 **wp-content** (테마/플러그인/업로드)를 저장합니다.
+
+WordPress 코어는 [WordPress/WordPress](https://github.com/WordPress/WordPress) 공식 레포지토리에서 직접 서빙됩니다.
+
+## 디렉터리 구조
+
+\`\`\`
+/
+├── .github/
+│   └── workflows/
+│       └── cloudpress-file-manager.yml  ← 파일 관리 자동화
+├── wp-content/
+│   ├── themes/         ← WordPress 테마
+│   │   └── twentytwentyfour/
+│   ├── plugins/        ← WordPress 플러그인
+│   └── mu-plugins/     ← 필수 플러그인 (자동 로드)
+└── uploads/            ← 미디어 업로드 파일
+\`\`\`
+
+## 사용 방법
+
+### 테마 추가
+
+\`wp-content/themes/<테마명>/\` 디렉터리에 테마 파일을 업로드하세요.
+
+### 플러그인 추가
+
+\`wp-content/plugins/<플러그인명>/\` 디렉터리에 플러그인 파일을 업로드하세요.
+
+### GitHub Actions 자동화
+
+이 저장소에 파일을 push하면 GitHub Actions가 자동으로:
+1. WordPress 파일 구조를 검증합니다
+2. 테마/플러그인 유효성을 검사합니다
+3. CloudPress 서버에 변경 사항을 알립니다
+
+### Webhook 설정 (선택사항)
+
+파일 변경 시 서버 자동 알림을 받으려면:
+Repository → Settings → Secrets and variables → Actions → \`CLOUDPRESS_WEBHOOK_URL\` 추가
+
+---
+*Powered by [CloudPress](https://cloudpress.pages.dev) — WordPress on Cloudflare*
 `,
-    message: "add theme functions.php",
-  });
-
-  return files;
+      message: "init: README.md",
+    },
+  ];
 }
 
-// ── WordPress 실제 파일 업로드 (백그라운드, 타임아웃 완화) ───────────────
-// 타임아웃 전략:
-//   1. 파일을 소그룹(배치)으로 나눠서 순차 업로드
-//   2. 각 파일 업로드 후 500ms 대기 (rate limit 방지)
-//   3. 배치 간 1500ms 대기
-//   4. 5배치마다 rate limit 상태 확인
-//   5. GitHub API 응답 속도에 따른 자동 조절
+// ── WordPress 파일 업로드 (백그라운드) ───────────────────────────────────
+// 공식 WordPress/WordPress 레포 기반 — wp-content와 uploads만 사용자 레포에 저장
+// 코어 파일은 Worker에서 WordPress/WordPress 레포를 직접 참조
 
 export async function uploadWordPressFilesBackground(token, owner, repo, siteId, log) {
   try {
-    if (log) await log("WordPress 핵심 파일 업로드 시작...").catch(() => {});
+    if (log) await log("WordPress 파일 초기화 시작 (공식 WordPress/WordPress 기반)...").catch(() => {});
 
-    // 최소 WordPress 파일 생성
-    const wpFiles = buildMinimalWpFiles(siteId);
+    const initFiles = buildInitFiles(siteId, owner, repo);
 
-    if (log) await log(`총 ${wpFiles.length}개 파일 업로드 예정`).catch(() => {});
+    if (log) await log(`총 ${initFiles.length}개 초기화 파일 업로드 예정`).catch(() => {});
 
-    // Rate limit 초기 확인
     await waitForRateLimit(token, 20);
 
-    // 배치 업로드 (3개씩, 500ms 간격)
-    const results = await uploadBatch(token, owner, repo, wpFiles, log, 3, 500);
+    const results = await uploadBatch(token, owner, repo, initFiles, log, 2, 400);
 
     if (log) {
       await log(
-        `WordPress 파일 업로드 완료: 성공 ${results.success}개, 실패 ${results.failed}개`
+        `WordPress 저장소 초기화 완료: 성공 ${results.success}개, 실패 ${results.failed}개`
       ).catch(() => {});
     }
 
-    // wp-core 설치 완료 마커 업로드
+    // 설치 완료 마커
     await uploadFileToGithub(
       token, owner, repo,
-      "wp-core/.cloudpress-installed",
+      ".cloudpress-init",
       JSON.stringify({
-        version:      "3.1",
-        site_id:      siteId,
-        installed_at: new Date().toISOString(),
-        files:        results.success,
+        version:    "5.0",
+        site_id:    siteId,
+        wp_core:    "WordPress/WordPress (official)",
+        init_at:    new Date().toISOString(),
+        files:      results.success,
       }),
-      "mark WordPress installation complete"
+      "init: CloudPress installation marker"
     ).catch(() => {});
 
-    if (log) await log("✅ WordPress 설치 완료! 사이트에 접속해주세요.").catch(() => {});
+    if (log) await log("✅ WordPress 저장소 초기화 완료! GitHub Actions가 활성화되었습니다.").catch(() => {});
     return results;
 
   } catch (e) {
     console.error("[uploadWordPressFiles] 오류:", e.message);
-    if (log) await log(`WordPress 파일 업로드 오류: ${e.message}`, "error").catch(() => {});
+    if (log) await log(`WordPress 파일 초기화 오류: ${e.message}`, "error").catch(() => {});
     throw e;
   }
 }

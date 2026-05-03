@@ -3,136 +3,134 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>호스팅 관리 | CloudPress</title>
+    <title>호스팅 상세 | CloudPress</title>
     <link rel="stylesheet" href="/style.css">
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <style>
-        .tab-btn         { transition: all 0.2s; }
-        .tab-btn.active  { background: rgba(59,130,246,0.15); border-color: rgba(59,130,246,0.5); color: #60a5fa; }
-        .section-card    { background: #0f0f0f; border: 1px solid rgba(255,255,255,0.08); border-radius: 1rem; padding: 1.5rem; }
-        .status-active   { color:#4ade80; }
-        .status-suspended{ color:#f87171; }
-        .php-opt         { cursor:pointer; transition: all 0.15s; }
-        .php-opt:hover   { border-color:#6366f1; }
-        .php-opt.selected{ border-color:#6366f1; background:#1e1b4b44; }
+        .tab-btn        { transition: all 0.2s; }
+        .tab-btn.active { background: rgba(59,130,246,0.15); border-color: rgba(59,130,246,0.5); color: #60a5fa; }
+        .section-card   { background: #0f0f0f; border: 1px solid rgba(255,255,255,0.08); border-radius: 1rem; padding: 1.5rem; }
+        .php-opt        { cursor:pointer; transition: all 0.15s; }
+        .php-opt:hover  { border-color:#6366f1; }
+        .php-opt.selected { border-color:#6366f1; background:#1e1b4b44; }
+        code { font-family: 'Courier New', monospace; }
         .copy-btn:active { transform: scale(0.95); }
-        code             { font-family: 'Courier New', monospace; }
+        /* 파일 관리자 */
+        .file-item:hover { background: rgba(255,255,255,0.05); }
+        .file-item.selected { background: rgba(59,130,246,0.1); border-color: rgba(59,130,246,0.3); }
     </style>
 </head>
 <body class="bg-[#050505] text-white md:flex md:h-screen">
     <script>
         if (!localStorage.getItem('admin_token')) window.location.href = '/login.html';
+    </script>
 
     <!-- Main -->
     <main class="flex-1 w-full overflow-y-auto">
-        <div class="p-8 max-w-5xl mx-auto">
+        <div class="p-4 md:p-8 max-w-5xl mx-auto">
 
             <!-- 헤더 -->
             <div class="flex items-center justify-between mb-6">
-                <div class="flex items-center gap-4">
-                    <a href="/hosting.html" class="text-gray-500 hover:text-white transition">
+                <div class="flex items-center gap-3 min-w-0">
+                    <a href="/hosting.html" class="text-gray-500 hover:text-white transition flex-shrink-0">
                         <i class="fas fa-arrow-left text-lg"></i>
                     </a>
-                    <div>
-                        <h1 id="site-title" class="text-2xl font-bold">로딩 중...</h1>
-                        <div class="flex items-center gap-3 mt-1">
-                            <a id="site-domain" href="#" target="_blank"
+                    <div class="min-w-0">
+                        <h1 id="site-title" class="text-xl md:text-2xl font-bold truncate">로딩 중...</h1>
+                        <div class="flex flex-wrap items-center gap-2 mt-1">
+                            <a id="site-domain-link" href="#" target="_blank"
                                class="text-blue-400 text-sm hover:underline flex items-center gap-1">
                                 <i class="fas fa-external-link-alt text-xs"></i>
-                                <span>-</span>
+                                <span id="site-domain-text">-</span>
                             </a>
                             <span id="site-status-badge" class="text-xs px-3 py-1 rounded-full border"></span>
                             <span id="site-php-badge" class="text-xs bg-indigo-900/40 border border-indigo-500/30 text-indigo-300 px-2 py-1 rounded-lg font-mono"></span>
                         </div>
                     </div>
                 </div>
-                <div class="flex gap-2">
-                    <button onclick="visitSite()" class="border border-white/20 px-4 py-2 rounded-xl text-sm hover:bg-white/5 transition">
-                        <i class="fas fa-globe mr-1"></i> 방문
+                <div class="flex gap-2 flex-shrink-0">
+                    <button onclick="visitSite()" class="hidden sm:flex border border-white/20 px-3 py-2 rounded-xl text-sm hover:bg-white/5 transition items-center gap-1">
+                        <i class="fas fa-globe"></i><span class="hidden md:inline ml-1">방문</span>
                     </button>
-                    <button onclick="openWpAdmin()" class="bg-blue-700 px-4 py-2 rounded-xl text-sm hover:bg-blue-600 transition font-bold">
-                        <i class="fab fa-wordpress mr-1"></i> WP 관리자
+                    <button onclick="openWpAdmin()" class="bg-blue-700 px-3 py-2 rounded-xl text-sm hover:bg-blue-600 transition font-bold flex items-center gap-1">
+                        <i class="fab fa-wordpress"></i><span class="hidden md:inline ml-1">WP 관리자</span>
                     </button>
                 </div>
             </div>
 
             <!-- 알림 -->
-            <div id="alertMsg" class="hidden mb-6 p-3 rounded-xl text-sm text-center"></div>
+            <div id="alertMsg" class="hidden mb-4 p-3 rounded-xl text-sm text-center"></div>
 
             <!-- 탭 메뉴 -->
-            <div class="flex gap-2 mb-6 overflow-x-auto pb-2">
-                <button class="tab-btn active border border-white/10 px-4 py-2 rounded-xl text-sm font-bold whitespace-nowrap" onclick="switchTab('overview', this)">
+            <div class="flex gap-2 mb-6 overflow-x-auto pb-2 scrollbar-hide">
+                <button class="tab-btn active border border-white/10 px-3 py-2 rounded-xl text-sm font-bold whitespace-nowrap" onclick="switchTab('overview',this)">
                     <i class="fas fa-tachometer-alt mr-1"></i> 개요
                 </button>
-                <button class="tab-btn border border-white/10 px-4 py-2 rounded-xl text-sm font-bold whitespace-nowrap" onclick="switchTab('php', this)">
-                    <i class="fas fa-code mr-1"></i> PHP 버전
+                <button class="tab-btn border border-white/10 px-3 py-2 rounded-xl text-sm font-bold whitespace-nowrap" onclick="switchTab('files',this)">
+                    <i class="fas fa-folder-open mr-1"></i> 파일 관리자
                 </button>
-                <button class="tab-btn border border-white/10 px-4 py-2 rounded-xl text-sm font-bold whitespace-nowrap" onclick="switchTab('cache', this)">
+                <button class="tab-btn border border-white/10 px-3 py-2 rounded-xl text-sm font-bold whitespace-nowrap" onclick="switchTab('php',this)">
+                    <i class="fas fa-code mr-1"></i> PHP
+                </button>
+                <button class="tab-btn border border-white/10 px-3 py-2 rounded-xl text-sm font-bold whitespace-nowrap" onclick="switchTab('cache',this)">
                     <i class="fas fa-bolt mr-1"></i> 캐싱
                 </button>
-                <button class="tab-btn border border-white/10 px-4 py-2 rounded-xl text-sm font-bold whitespace-nowrap" onclick="switchTab('backup', this)">
+                <button class="tab-btn border border-white/10 px-3 py-2 rounded-xl text-sm font-bold whitespace-nowrap" onclick="switchTab('backup',this)">
                     <i class="fas fa-archive mr-1"></i> 백업
                 </button>
-                <button class="tab-btn border border-white/10 px-4 py-2 rounded-xl text-sm font-bold whitespace-nowrap" onclick="switchTab('ssh', this)">
-                    <i class="fas fa-terminal mr-1"></i> SSH / SFTP
+                <button class="tab-btn border border-white/10 px-3 py-2 rounded-xl text-sm font-bold whitespace-nowrap" onclick="switchTab('ssh',this)">
+                    <i class="fas fa-terminal mr-1"></i> SSH/SFTP
                 </button>
-                <button class="tab-btn border border-white/10 px-4 py-2 rounded-xl text-sm font-bold whitespace-nowrap" onclick="switchTab('domain', this)">
+                <button class="tab-btn border border-white/10 px-3 py-2 rounded-xl text-sm font-bold whitespace-nowrap" onclick="switchTab('domain',this)">
                     <i class="fas fa-globe mr-1"></i> 도메인
                 </button>
-                <button class="tab-btn border border-white/10 px-4 py-2 rounded-xl text-sm font-bold whitespace-nowrap" onclick="switchTab('logs', this)">
+                <button class="tab-btn border border-white/10 px-3 py-2 rounded-xl text-sm font-bold whitespace-nowrap" onclick="switchTab('security',this)">
+                    <i class="fas fa-shield-alt mr-1"></i> 보안
+                </button>
+                <button class="tab-btn border border-white/10 px-3 py-2 rounded-xl text-sm font-bold whitespace-nowrap" onclick="switchTab('logs',this)">
                     <i class="fas fa-scroll mr-1"></i> 로그
                 </button>
-                <button class="tab-btn border border-white/10 px-4 py-2 rounded-xl text-sm font-bold whitespace-nowrap" onclick="switchTab('danger', this)">
+                <button class="tab-btn border border-white/10 px-3 py-2 rounded-xl text-sm font-bold whitespace-nowrap" onclick="switchTab('danger',this)">
                     <i class="fas fa-exclamation-triangle mr-1 text-red-400"></i> 위험 구역
                 </button>
             </div>
 
-            <!-- ── 탭 콘텐츠 ── -->
-
-            <!-- 개요 -->
+            <!-- ── 개요 탭 ── -->
             <div id="tab-overview" class="tab-content space-y-4">
                 <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
                     <div class="section-card text-center">
-                        <div class="text-2xl font-black text-blue-400" id="ov-status">-</div>
+                        <div class="text-xl font-black text-blue-400" id="ov-status">-</div>
                         <div class="text-xs text-gray-500 mt-1">상태</div>
                     </div>
                     <div class="section-card text-center">
-                        <div class="text-2xl font-black text-indigo-400" id="ov-php">-</div>
+                        <div class="text-xl font-black text-indigo-400" id="ov-php">-</div>
                         <div class="text-xs text-gray-500 mt-1">PHP 버전</div>
                     </div>
                     <div class="section-card text-center">
-                        <div class="text-2xl font-black text-green-400" id="ov-cache">-</div>
+                        <div class="text-xl font-black text-green-400" id="ov-cache">-</div>
                         <div class="text-xs text-gray-500 mt-1">캐시</div>
                     </div>
                     <div class="section-card text-center">
-                        <div class="text-2xl font-black text-yellow-400" id="ov-created">-</div>
+                        <div class="text-sm font-black text-yellow-400" id="ov-created">-</div>
                         <div class="text-xs text-gray-500 mt-1">생성일</div>
                     </div>
                 </div>
 
                 <div class="section-card space-y-3">
-                    <h3 class="font-bold mb-4 flex items-center gap-2"><i class="fas fa-info-circle text-blue-400"></i> 사이트 정보</h3>
-                    <div class="grid grid-cols-2 gap-3 text-sm">
+                    <h3 class="font-bold flex items-center gap-2"><i class="fas fa-info-circle text-blue-400"></i> 사이트 정보</h3>
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
                         <div class="bg-white/5 rounded-xl p-3">
                             <div class="text-gray-500 text-xs mb-1">사이트 ID</div>
                             <div id="info-id" class="font-mono text-xs truncate">-</div>
                         </div>
                         <div class="bg-white/5 rounded-xl p-3">
                             <div class="text-gray-500 text-xs mb-1">주 도메인</div>
-                            <div id="info-domain" class="font-mono text-xs text-blue-300">-</div>
-                        </div>
-                        <div class="bg-white/5 rounded-xl p-3">
-                            <div class="text-gray-500 text-xs mb-1">SSH 포트</div>
-                            <div id="info-ssh" class="font-mono text-xs">-</div>
-                        </div>
-                        <div class="bg-white/5 rounded-xl p-3">
-                            <div class="text-gray-500 text-xs mb-1">SFTP 포트</div>
-                            <div id="info-sftp" class="font-mono text-xs">-</div>
+                            <div id="info-domain" class="font-mono text-xs text-blue-300 truncate">-</div>
                         </div>
                         <div class="bg-white/5 rounded-xl p-3">
                             <div class="text-gray-500 text-xs mb-1">GitHub 저장소</div>
-                            <div id="info-bucket" class="font-mono text-xs">-</div>
+                            <div id="info-bucket" class="font-mono text-xs truncate">-</div>
                         </div>
                         <div class="bg-white/5 rounded-xl p-3">
                             <div class="text-gray-500 text-xs mb-1">WP 관리자</div>
@@ -140,9 +138,95 @@
                         </div>
                     </div>
                 </div>
+
+                <!-- 빠른 액션 -->
+                <div class="section-card">
+                    <h3 class="font-bold flex items-center gap-2 mb-4"><i class="fas fa-bolt text-yellow-400"></i> 빠른 액션</h3>
+                    <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                        <button onclick="switchTab('files', document.querySelector('[onclick*=files]'))"
+                            class="flex flex-col items-center gap-2 p-3 bg-white/5 rounded-xl hover:bg-white/10 transition text-sm">
+                            <i class="fas fa-folder-open text-yellow-400 text-xl"></i>
+                            <span>파일 관리자</span>
+                        </button>
+                        <button onclick="switchTab('backup', document.querySelector('[onclick*=backup]'))"
+                            class="flex flex-col items-center gap-2 p-3 bg-white/5 rounded-xl hover:bg-white/10 transition text-sm">
+                            <i class="fas fa-archive text-green-400 text-xl"></i>
+                            <span>백업 생성</span>
+                        </button>
+                        <button onclick="purgeCache()"
+                            class="flex flex-col items-center gap-2 p-3 bg-white/5 rounded-xl hover:bg-white/10 transition text-sm">
+                            <i class="fas fa-broom text-orange-400 text-xl"></i>
+                            <span>캐시 퍼지</span>
+                        </button>
+                        <button onclick="openWpAdmin()"
+                            class="flex flex-col items-center gap-2 p-3 bg-white/5 rounded-xl hover:bg-white/10 transition text-sm">
+                            <i class="fab fa-wordpress text-blue-400 text-xl"></i>
+                            <span>WP 관리자</span>
+                        </button>
+                    </div>
+                </div>
             </div>
 
-            <!-- PHP 버전 -->
+            <!-- ── 파일 관리자 탭 ── -->
+            <div id="tab-files" class="tab-content hidden space-y-4">
+                <div class="section-card">
+                    <div class="flex justify-between items-center mb-4">
+                        <h3 class="font-bold flex items-center gap-2"><i class="fas fa-folder-open text-yellow-400"></i> 파일 관리자</h3>
+                        <div class="flex gap-2">
+                            <button onclick="uploadFile()" class="text-xs bg-blue-700/50 border border-blue-500/30 px-3 py-1.5 rounded-lg hover:bg-blue-700 transition">
+                                <i class="fas fa-upload mr-1"></i> 업로드
+                            </button>
+                            <button onclick="createNewFile()" class="text-xs bg-green-700/50 border border-green-500/30 px-3 py-1.5 rounded-lg hover:bg-green-700 transition">
+                                <i class="fas fa-plus mr-1"></i> 새 파일
+                            </button>
+                            <button onclick="createNewFolder()" class="text-xs bg-white/10 border border-white/20 px-3 py-1.5 rounded-lg hover:bg-white/20 transition">
+                                <i class="fas fa-folder-plus mr-1"></i> 폴더
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- 경로 표시 -->
+                    <div class="flex items-center gap-2 mb-4 p-2 bg-white/5 rounded-xl text-sm font-mono overflow-x-auto">
+                        <i class="fas fa-home text-gray-500 flex-shrink-0"></i>
+                        <span id="file-path" class="text-gray-400 whitespace-nowrap">/</span>
+                    </div>
+
+                    <!-- 파일 목록 -->
+                    <div id="file-list" class="space-y-1 min-h-[200px]">
+                        <div class="text-center py-12 text-gray-500">
+                            <i class="fas fa-folder text-4xl mb-3 block opacity-30"></i>
+                            <p class="text-sm">GitHub 기반 파일 관리자</p>
+                            <p class="text-xs text-gray-600 mt-1">호스팅 생성 후 파일을 관리할 수 있습니다</p>
+                            <button onclick="loadFiles('/')" class="mt-4 text-xs bg-blue-700/50 px-4 py-2 rounded-lg hover:bg-blue-700 transition border border-blue-500/30">
+                                <i class="fas fa-refresh mr-1"></i> 파일 로드
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 파일 편집기 -->
+                <div id="file-editor-panel" class="section-card hidden">
+                    <div class="flex justify-between items-center mb-3">
+                        <h4 class="font-bold text-sm flex items-center gap-2">
+                            <i class="fas fa-code text-blue-400"></i>
+                            <span id="editing-filename">파일 편집</span>
+                        </h4>
+                        <div class="flex gap-2">
+                            <button onclick="saveFile()" class="text-xs bg-green-700 px-3 py-1.5 rounded-lg hover:bg-green-600 transition font-bold">
+                                <i class="fas fa-save mr-1"></i> 저장
+                            </button>
+                            <button onclick="closeEditor()" class="text-xs border border-white/20 px-3 py-1.5 rounded-lg hover:bg-white/5 transition">
+                                <i class="fas fa-times"></i>
+                            </button>
+                        </div>
+                    </div>
+                    <textarea id="file-editor" rows="20"
+                        class="w-full p-4 bg-black/40 border border-white/10 rounded-xl outline-none focus:border-blue-500 transition text-sm font-mono resize-y"
+                        placeholder="파일 내용이 여기에 표시됩니다..."></textarea>
+                </div>
+            </div>
+
+            <!-- ── PHP 탭 ── -->
             <div id="tab-php" class="tab-content hidden space-y-4">
                 <div class="section-card">
                     <div class="flex justify-between items-center mb-2">
@@ -152,15 +236,11 @@
                     <p class="text-sm text-gray-500 mb-5">
                         <i class="fas fa-shield-check text-green-400 mr-1"></i>
                         버전을 변경해도 <strong class="text-white">사이트는 다운되지 않습니다.</strong>
-                        php.net에서 실시간으로 버전을 가져옵니다.
                     </p>
-                    <div id="php-source-badge" class="text-xs text-gray-600 mb-4"></div>
-
                     <div id="php-list-loading" class="text-center py-6 text-gray-500 text-sm">
-                        <i class="fas fa-spinner fa-spin mr-2"></i> php.net에서 버전 목록 불러오는 중...
+                        <i class="fas fa-spinner fa-spin mr-2"></i> PHP 버전 목록 로딩 중...
                     </div>
                     <div id="php-list" class="hidden space-y-2 mb-5"></div>
-
                     <button onclick="applyPhpVersion()" id="php-apply-btn"
                         class="w-full bg-indigo-700 py-3 rounded-xl font-bold hover:bg-indigo-600 transition flex items-center justify-center gap-2">
                         <i class="fas fa-check"></i> 선택한 버전 적용
@@ -168,11 +248,10 @@
                 </div>
             </div>
 
-            <!-- 캐싱 -->
+            <!-- ── 캐싱 탭 ── -->
             <div id="tab-cache" class="tab-content hidden space-y-4">
                 <div class="section-card space-y-5">
                     <h3 class="font-bold flex items-center gap-2"><i class="fas fa-bolt text-yellow-400"></i> 캐시 설정</h3>
-
                     <div class="flex items-center justify-between p-4 bg-white/5 rounded-xl">
                         <div>
                             <p class="font-bold">페이지 캐싱</p>
@@ -180,61 +259,48 @@
                         </div>
                         <label class="relative inline-flex items-center cursor-pointer">
                             <input type="checkbox" id="cache-toggle" class="sr-only peer">
-                            <div class="w-12 h-6 bg-gray-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-6 peer-checked:after:border-white after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+                            <div class="w-12 h-6 bg-gray-700 rounded-full peer peer-checked:after:translate-x-6 peer-checked:after:border-white after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
                         </label>
                     </div>
-
                     <div class="space-y-2">
                         <label class="text-sm text-gray-400">캐시 유지 시간 (TTL)</label>
                         <div class="flex gap-3">
-                            <select id="cache-ttl"
-                                class="flex-1 p-3 bg-white/5 border border-white/10 rounded-xl outline-none focus:border-blue-500 text-sm">
+                            <select id="cache-ttl" class="flex-1 p-3 bg-white/5 border border-white/10 rounded-xl outline-none focus:border-blue-500 text-sm">
                                 <option value="300">5분</option>
                                 <option value="900">15분</option>
                                 <option value="1800">30분</option>
                                 <option value="3600" selected>1시간</option>
                                 <option value="7200">2시간</option>
-                                <option value="21600">6시간</option>
                                 <option value="86400">24시간</option>
                             </select>
-                            <button onclick="saveCacheSettings()"
-                                class="bg-yellow-700 px-6 py-3 rounded-xl font-bold hover:bg-yellow-600 transition text-sm">
-                                저장
-                            </button>
+                            <button onclick="saveCacheSettings()" class="bg-yellow-700 px-6 py-3 rounded-xl font-bold hover:bg-yellow-600 transition text-sm">저장</button>
                         </div>
                     </div>
-
-                    <div class="border-t border-white/10 pt-4">
-                        <div class="flex justify-between items-center">
-                            <div>
-                                <p class="font-bold text-sm">캐시 전체 퍼지</p>
-                                <p class="text-xs text-gray-500">저장된 모든 캐시를 즉시 삭제합니다</p>
-                            </div>
-                            <button onclick="purgeCache()"
-                                class="bg-orange-700 px-5 py-2 rounded-xl font-bold hover:bg-orange-600 transition text-sm">
-                                <i class="fas fa-trash-alt mr-1"></i> 퍼지
-                            </button>
+                    <div class="border-t border-white/10 pt-4 flex justify-between items-center">
+                        <div>
+                            <p class="font-bold text-sm">캐시 전체 퍼지</p>
+                            <p class="text-xs text-gray-500">저장된 모든 캐시를 즉시 삭제합니다</p>
                         </div>
+                        <button onclick="purgeCache()" class="bg-orange-700 px-5 py-2 rounded-xl font-bold hover:bg-orange-600 transition text-sm">
+                            <i class="fas fa-trash-alt mr-1"></i> 퍼지
+                        </button>
                     </div>
                 </div>
             </div>
 
-            <!-- 백업 -->
+            <!-- ── 백업 탭 ── -->
             <div id="tab-backup" class="tab-content hidden space-y-4">
                 <div class="section-card">
                     <div class="flex justify-between items-center mb-5">
                         <h3 class="font-bold flex items-center gap-2"><i class="fas fa-archive text-green-400"></i> 백업 관리</h3>
-                        <button onclick="createBackup()"
-                            class="bg-green-700 px-5 py-2 rounded-xl font-bold hover:bg-green-600 transition text-sm">
+                        <button onclick="createBackup()" class="bg-green-700 px-5 py-2 rounded-xl font-bold hover:bg-green-600 transition text-sm">
                             <i class="fas fa-plus mr-1"></i> 수동 백업
                         </button>
                     </div>
-
                     <div class="mb-4 p-3 bg-blue-900/20 border border-blue-500/20 rounded-xl text-sm text-blue-300">
                         <i class="fas fa-info-circle mr-2"></i>
                         백업 파일은 GitHub Repository에 안전하게 저장됩니다.
                     </div>
-
                     <div id="backup-list">
                         <div class="text-center py-8 text-gray-500 text-sm">
                             <i class="fas fa-spinner fa-spin mr-2"></i> 백업 목록 로딩 중...
@@ -243,26 +309,26 @@
                 </div>
             </div>
 
-            <!-- SSH / SFTP -->
+            <!-- ── SSH/SFTP 탭 ── -->
             <div id="tab-ssh" class="tab-content hidden space-y-4">
-                <!-- SSH 접속 정보 -->
-                <div id="ssh-info-card" class="section-card space-y-4">
-                    <h3 class="font-bold flex items-center gap-2"><i class="fas fa-terminal text-cyan-400"></i> SSH / SFTP 접속</h3>
-                    <div id="ssh-info-content">
+                <div class="section-card space-y-4">
+                    <h3 class="font-bold flex items-center gap-2"><i class="fas fa-terminal text-cyan-400"></i> SSH / SFTP 접속 정보</h3>
+                    <div class="p-3 bg-blue-900/20 border border-blue-500/20 rounded-xl text-sm text-blue-300">
+                        <i class="fas fa-info-circle mr-2"></i>
+                        아래 정보를 사용하여 SSH 클라이언트(Terminal, PuTTY 등)로 접속하세요.
+                    </div>
+                    <div id="ssh-info-content" class="space-y-3">
                         <div class="text-center py-6 text-gray-500 text-sm">
                             <i class="fas fa-spinner fa-spin mr-2"></i> 접속 정보 로딩 중...
                         </div>
                     </div>
                 </div>
 
-                <!-- SSH 공개키 등록 -->
                 <div class="section-card space-y-4">
                     <h3 class="font-bold flex items-center gap-2"><i class="fas fa-key text-yellow-400"></i> SSH 공개키 관리</h3>
                     <p class="text-xs text-gray-500">등록한 공개키로 비밀번호 없이 SSH/SFTP 접속이 가능합니다.</p>
                     <div id="ssh-keys-list" class="space-y-2 mb-4">
-                        <div class="text-center py-4 text-gray-500 text-sm">
-                            <i class="fas fa-spinner fa-spin mr-2"></i> 키 목록 로딩 중...
-                        </div>
+                        <div class="text-center py-4 text-gray-500 text-sm"><i class="fas fa-spinner fa-spin mr-2"></i> 키 목록 로딩 중...</div>
                     </div>
                     <div class="border-t border-white/10 pt-4 space-y-3">
                         <p class="text-sm font-bold">공개키 등록</p>
@@ -270,25 +336,21 @@
                             class="w-full p-3 bg-white/5 border border-white/10 rounded-xl outline-none focus:border-yellow-500 transition text-sm">
                         <textarea id="public-key" rows="3" placeholder="ssh-rsa AAAA... 또는 ssh-ed25519 AAAA..."
                             class="w-full p-3 bg-white/5 border border-white/10 rounded-xl outline-none focus:border-yellow-500 transition text-sm font-mono resize-none"></textarea>
-                        <button onclick="addSshKey()"
-                            class="bg-yellow-700 px-5 py-2 rounded-xl font-bold hover:bg-yellow-600 transition text-sm">
+                        <button onclick="addSshKey()" class="bg-yellow-700 px-5 py-2 rounded-xl font-bold hover:bg-yellow-600 transition text-sm">
                             <i class="fas fa-plus mr-1"></i> 키 등록
                         </button>
                     </div>
                 </div>
             </div>
 
-            <!-- 도메인 -->
+            <!-- ── 도메인 탭 ── -->
             <div id="tab-domain" class="tab-content hidden space-y-4">
-
-                <!-- Cloudflare 네임서버 방식 안내 -->
-                <div class="section-card bg-blue-900/20 border-blue-500/30 space-y-3">
+                <div class="section-card bg-blue-900/10 border-blue-500/20 space-y-3">
                     <h3 class="font-bold flex items-center gap-2 text-blue-300">
                         <i class="fas fa-server"></i> Cloudflare 네임서버 인증 방식
                     </h3>
                     <p class="text-sm text-gray-400">
-                        도메인을 등록하면 <strong class="text-white">Cloudflare Zone이 자동 생성</strong>되며 네임서버(NS) 정보가 제공됩니다.<br>
-                        도메인 등록기(가비아, 후이즈, GoDaddy 등)에서 네임서버를 Cloudflare NS로 변경하면 자동 활성화됩니다.
+                        도메인을 등록하면 <strong class="text-white">Cloudflare Zone이 자동 생성</strong>되며 네임서버(NS) 정보가 제공됩니다.
                     </p>
                     <div class="flex items-start gap-3 p-3 bg-black/30 border border-blue-500/20 rounded-xl">
                         <i class="fas fa-shield-alt text-blue-400 mt-1 text-lg"></i>
@@ -302,29 +364,22 @@
                     </div>
                 </div>
 
-                <!-- 등록된 도메인 목록 -->
                 <div class="section-card space-y-4">
                     <h3 class="font-bold flex items-center gap-2">
                         <i class="fas fa-globe text-blue-400"></i> 도메인 목록
                     </h3>
                     <div id="domain-list" class="space-y-2">
-                        <div class="text-center py-6 text-gray-500 text-sm">
-                            <i class="fas fa-spinner fa-spin mr-2"></i> 로딩 중...
-                        </div>
+                        <div class="text-center py-6 text-gray-500 text-sm"><i class="fas fa-spinner fa-spin mr-2"></i> 로딩 중...</div>
                     </div>
                 </div>
 
-                <!-- 도메인 추가 -->
                 <div class="section-card space-y-4">
                     <h3 class="font-bold flex items-center gap-2">
                         <i class="fas fa-plus-circle text-green-400"></i> 도메인 추가
                     </h3>
-                    <p class="text-xs text-gray-500">
-                        추가하면 Cloudflare Zone이 자동 생성되고 네임서버 정보가 제공됩니다.
-                    </p>
                     <div id="domain-add-alert" class="hidden p-3 rounded-xl text-sm"></div>
                     <div class="flex gap-3">
-                        <input id="new-domain" type="text" placeholder="예: example.com 또는 www.example.com"
+                        <input id="new-domain" type="text" placeholder="예: example.com"
                             class="flex-1 p-3 bg-white/5 border border-white/10 rounded-xl outline-none focus:border-blue-500 transition text-sm font-mono">
                         <button onclick="addDomain()" id="add-domain-btn"
                             class="bg-blue-700 px-5 py-2 rounded-xl font-bold hover:bg-blue-600 transition text-sm whitespace-nowrap">
@@ -332,29 +387,78 @@
                         </button>
                     </div>
                 </div>
-
             </div>
 
-            <!-- 로그 -->
+            <!-- ── 보안 탭 ── -->
+            <div id="tab-security" class="tab-content hidden space-y-4">
+                <!-- 국가 차단 -->
+                <div class="section-card space-y-4">
+                    <h3 class="font-bold flex items-center gap-2"><i class="fas fa-globe-asia text-red-400"></i> 특정 국가 차단 (Cloudflare 기반)</h3>
+                    <p class="text-sm text-gray-500">선택한 국가에서의 접속을 Cloudflare 방화벽으로 차단합니다.</p>
+
+                    <div class="grid grid-cols-2 sm:grid-cols-3 gap-2" id="country-block-list">
+                        <!-- JS로 렌더링 -->
+                        <div class="text-gray-500 text-sm col-span-full py-4 text-center"><i class="fas fa-spinner fa-spin mr-2"></i> 로딩 중...</div>
+                    </div>
+
+                    <div class="flex gap-3">
+                        <input id="custom-country-code" type="text" maxlength="2" placeholder="국가 코드 (예: CN, RU)"
+                            class="flex-1 p-3 bg-white/5 border border-white/10 rounded-xl outline-none focus:border-red-500 transition text-sm font-mono uppercase"
+                            style="text-transform:uppercase">
+                        <button onclick="blockCountry()" class="bg-red-700 px-5 py-2 rounded-xl font-bold hover:bg-red-600 transition text-sm">
+                            <i class="fas fa-ban mr-1"></i> 차단
+                        </button>
+                    </div>
+                </div>
+
+                <!-- 위험 의심 접근 IP -->
+                <div class="section-card space-y-4">
+                    <div class="flex justify-between items-center">
+                        <h3 class="font-bold flex items-center gap-2"><i class="fas fa-exclamation-circle text-orange-400"></i> 위험 의심 접근 IP</h3>
+                        <button onclick="loadSuspiciousIPs()" class="text-xs border border-white/20 px-3 py-1.5 rounded-xl hover:bg-white/5 transition">
+                            <i class="fas fa-refresh mr-1"></i> 새로고침
+                        </button>
+                    </div>
+                    <p class="text-sm text-gray-500">비정상적인 패턴으로 접근을 시도한 IP 목록입니다.</p>
+                    <div id="suspicious-ip-list" class="space-y-2">
+                        <div class="text-center py-6 text-gray-500 text-sm"><i class="fas fa-spinner fa-spin mr-2"></i> 로딩 중...</div>
+                    </div>
+                </div>
+
+                <!-- IP 직접 차단 -->
+                <div class="section-card space-y-4">
+                    <h3 class="font-bold flex items-center gap-2"><i class="fas fa-shield-alt text-purple-400"></i> IP 직접 차단</h3>
+                    <div class="flex gap-3">
+                        <input id="block-ip-input" type="text" placeholder="차단할 IP 주소 (예: 1.2.3.4)"
+                            class="flex-1 p-3 bg-white/5 border border-white/10 rounded-xl outline-none focus:border-purple-500 transition text-sm font-mono">
+                        <button onclick="blockIP()" class="bg-purple-700 px-5 py-2 rounded-xl font-bold hover:bg-purple-600 transition text-sm">
+                            <i class="fas fa-ban mr-1"></i> 차단
+                        </button>
+                    </div>
+                    <div id="blocked-ip-list" class="space-y-2">
+                        <p class="text-sm text-gray-500 text-center py-4">차단된 IP가 없습니다.</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ── 로그 탭 ── -->
             <div id="tab-logs" class="tab-content hidden space-y-4">
                 <div class="section-card">
                     <div class="flex flex-wrap justify-between items-center gap-3 mb-4">
-                        <div class="flex items-center gap-3">
+                        <div class="flex flex-wrap items-center gap-3">
                             <h3 class="font-bold flex items-center gap-2"><i class="fas fa-scroll text-gray-400"></i> 시스템 로그</h3>
-                            <div class="flex gap-1" id="log-level-btns">
-                                <button onclick="loadLogs()" class="text-xs px-2 py-1 rounded-lg bg-white/10 text-white transition log-filter-btn" data-level="">전체</button>
-                                <button onclick="loadLogs('info')" class="text-xs px-2 py-1 rounded-lg bg-white/5 text-blue-400 hover:bg-white/10 transition log-filter-btn" data-level="info">INFO</button>
-                                <button onclick="loadLogs('warning')" class="text-xs px-2 py-1 rounded-lg bg-white/5 text-yellow-400 hover:bg-white/10 transition log-filter-btn" data-level="warning">WARN</button>
-                                <button onclick="loadLogs('error')" class="text-xs px-2 py-1 rounded-lg bg-white/5 text-red-400 hover:bg-white/10 transition log-filter-btn" data-level="error">ERROR</button>
+                            <div class="flex gap-1">
+                                <button onclick="loadLogs()" class="text-xs px-2 py-1 rounded-lg bg-white/10 text-white log-filter-btn" data-level="">전체</button>
+                                <button onclick="loadLogs('info')" class="text-xs px-2 py-1 rounded-lg bg-white/5 text-blue-400 hover:bg-white/10 log-filter-btn" data-level="info">INFO</button>
+                                <button onclick="loadLogs('warning')" class="text-xs px-2 py-1 rounded-lg bg-white/5 text-yellow-400 hover:bg-white/10 log-filter-btn" data-level="warning">WARN</button>
+                                <button onclick="loadLogs('error')" class="text-xs px-2 py-1 rounded-lg bg-white/5 text-red-400 hover:bg-white/10 log-filter-btn" data-level="error">ERROR</button>
                             </div>
                         </div>
                         <div class="flex gap-2">
-                            <button onclick="loadLogs(currentLogLevel)"
-                                class="text-xs border border-white/20 px-3 py-1.5 rounded-xl hover:bg-white/5 transition">
+                            <button onclick="loadLogs(currentLogLevel)" class="text-xs border border-white/20 px-3 py-1.5 rounded-xl hover:bg-white/5 transition">
                                 <i class="fas fa-refresh mr-1"></i> 새로고침
                             </button>
-                            <button onclick="clearLogs()"
-                                class="text-xs border border-red-500/30 text-red-400 px-3 py-1.5 rounded-xl hover:bg-red-900/20 transition">
+                            <button onclick="clearLogs()" class="text-xs border border-red-500/30 text-red-400 px-3 py-1.5 rounded-xl hover:bg-red-900/20 transition">
                                 <i class="fas fa-trash mr-1"></i> 전체 삭제
                             </button>
                         </div>
@@ -365,52 +469,38 @@
                         <span class="text-red-400"><i class="fas fa-times-circle mr-1"></i><span id="log-cnt-error">0</span> ERROR</span>
                     </div>
                     <div id="log-list" class="space-y-2 max-h-[500px] overflow-y-auto">
-                        <div class="text-center py-6 text-gray-500 text-sm">
-                            <i class="fas fa-spinner fa-spin mr-2"></i> 로그 로딩 중...
-                        </div>
+                        <div class="text-center py-6 text-gray-500 text-sm"><i class="fas fa-spinner fa-spin mr-2"></i> 로그 로딩 중...</div>
                     </div>
                 </div>
             </div>
 
-            <!-- 위험 구역 -->
+            <!-- ── 위험 구역 탭 ── -->
             <div id="tab-danger" class="tab-content hidden space-y-4">
                 <div class="section-card border-red-500/30">
                     <h3 class="font-bold text-red-400 flex items-center gap-2 mb-5">
                         <i class="fas fa-exclamation-triangle"></i> 위험 구역
                     </h3>
-
                     <div class="space-y-4">
                         <div class="p-4 bg-red-900/10 border border-red-500/20 rounded-xl flex justify-between items-center">
                             <div>
                                 <p class="font-bold text-sm">사이트 일시 중단</p>
                                 <p class="text-xs text-gray-500">모든 방문자가 503 오류를 받게 됩니다</p>
                             </div>
-                            <button onclick="suspendSite()"
-                                class="bg-orange-700 px-4 py-2 rounded-xl text-sm font-bold hover:bg-orange-600 transition">
-                                중단
-                            </button>
+                            <button onclick="suspendSite()" class="bg-orange-700 px-4 py-2 rounded-xl text-sm font-bold hover:bg-orange-600 transition">중단</button>
                         </div>
-
                         <div class="p-4 bg-red-900/10 border border-red-500/20 rounded-xl flex justify-between items-center">
                             <div>
                                 <p class="font-bold text-sm">WordPress 재설치</p>
                                 <p class="text-xs text-gray-500">WordPress 핵심 파일을 다시 설치합니다 (데이터 유지)</p>
                             </div>
-                            <button onclick="reinstallWp()"
-                                class="bg-yellow-700 px-4 py-2 rounded-xl text-sm font-bold hover:bg-yellow-600 transition">
-                                재설치
-                            </button>
+                            <button onclick="reinstallWp()" class="bg-yellow-700 px-4 py-2 rounded-xl text-sm font-bold hover:bg-yellow-600 transition">재설치</button>
                         </div>
-
                         <div class="p-4 bg-red-900/20 border border-red-500/40 rounded-xl flex justify-between items-center">
                             <div>
                                 <p class="font-bold text-sm text-red-300">호스팅 완전 삭제</p>
                                 <p class="text-xs text-gray-500">모든 파일, 데이터베이스, 도메인 설정이 삭제됩니다</p>
                             </div>
-                            <button onclick="deleteSite()"
-                                class="bg-red-700 px-4 py-2 rounded-xl text-sm font-bold hover:bg-red-600 transition">
-                                삭제
-                            </button>
+                            <button onclick="deleteSite()" class="bg-red-700 px-4 py-2 rounded-xl text-sm font-bold hover:bg-red-600 transition">삭제</button>
                         </div>
                     </div>
                 </div>
@@ -427,167 +517,263 @@
         const siteId  = new URLSearchParams(location.search).get('id');
         let   siteData = null;
         let   selectedPhpVersion = null;
+        let   currentLogLevel = '';
+        let   currentFilePath = '/';
+        let   editingFilePath = '';
+        let   blockedIPs = [];
 
-        if (!siteId) window.location.href = '/hosting.html';
+        if (!siteId) { alert('사이트 ID가 없습니다.'); window.location.href = '/hosting.html'; }
 
-        // ── 공통 유틸 ──────────────────────────────────────────────────────────
+        // ── 탭 전환 ──────────────────────────────────────────────────────────
+        function switchTab(name, btn) {
+            document.querySelectorAll('.tab-content').forEach(el => el.classList.add('hidden'));
+            document.querySelectorAll('.tab-btn').forEach(el => el.classList.remove('active'));
+            const target = document.getElementById('tab-' + name);
+            if (target) target.classList.remove('hidden');
+            if (btn) btn.classList.add('active');
+
+            // 탭별 데이터 로드
+            if (name === 'php') loadPhpVersions();
+            else if (name === 'backup') loadBackups();
+            else if (name === 'ssh') loadSshInfo();
+            else if (name === 'domain') renderDomains();
+            else if (name === 'logs') loadLogs();
+            else if (name === 'security') { loadCountryBlocks(); loadSuspiciousIPs(); }
+            else if (name === 'cache') loadCacheSettings();
+            else if (name === 'files') loadFiles(currentFilePath);
+        }
+
+        // ── 알림 ─────────────────────────────────────────────────────────────
         function showAlert(msg, type = 'success') {
             const el = document.getElementById('alertMsg');
+            const styles = {
+                success: 'bg-green-900/40 border border-green-500/40 text-green-400',
+                error:   'bg-red-900/40 border border-red-500/40 text-red-400',
+                info:    'bg-blue-900/40 border border-blue-500/40 text-blue-400',
+            };
+            el.className = `mb-4 p-3 rounded-xl text-sm text-center ${styles[type] || styles.info}`;
             el.textContent = msg;
-            el.className = type === 'success'
-                ? 'mb-6 p-3 rounded-xl text-sm text-center bg-green-900/40 border border-green-500/40 text-green-400'
-                : 'mb-6 p-3 rounded-xl text-sm text-center bg-red-900/40 border border-red-500/40 text-red-400';
             el.classList.remove('hidden');
             setTimeout(() => el.classList.add('hidden'), 5000);
         }
 
-        function escHtml(s) {
-            return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+        function escHtml(str) {
+            return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
         }
 
-        async function copyText(elId) {
-            const text = document.getElementById(elId)?.textContent || '';
-            await navigator.clipboard.writeText(text);
-            showAlert('클립보드에 복사되었습니다.');
-        }
-
-        // ── 탭 전환 ────────────────────────────────────────────────────────────
-        function switchTab(name, btn) {
-            document.querySelectorAll('.tab-content').forEach(el => el.classList.add('hidden'));
-            document.querySelectorAll('.tab-btn').forEach(el => el.classList.remove('active'));
-            document.getElementById(`tab-${name}`).classList.remove('hidden');
-            btn.classList.add('active');
-
-            // 탭별 데이터 로드
-            if (name === 'php')    loadPhpVersions();
-            if (name === 'backup') loadBackups();
-            if (name === 'ssh')    loadSshInfo();
-            if (name === 'domain') renderDomains();
-            if (name === 'logs')   loadLogs();
-            if (name === 'cache')  loadCacheSettings();
-        }
-
-        // ── 사이트 정보 로드 ────────────────────────────────────────────────────
+        // ── 사이트 정보 로드 ─────────────────────────────────────────────────
         async function loadSiteInfo() {
             try {
                 const res  = await fetch(`/api/sites?id=${siteId}`, { headers: HEADERS });
                 if (res.status === 401) { localStorage.removeItem('admin_token'); window.location.href = '/login.html'; return; }
                 const data = await res.json();
-                if (!data.success) { showAlert('사이트를 찾을 수 없습니다.', 'error'); return; }
+                siteData   = data.site || data;
 
-                siteData = data.site;
-                siteData._domains = data.domains || [];
-                const site = siteData;
+                document.title = `${siteData.site_name} | CloudPress`;
+                document.getElementById('site-title').textContent = siteData.site_name;
+                document.getElementById('site-domain-text').textContent = siteData.primary_domain;
+                document.getElementById('site-domain-link').href = `https://${siteData.primary_domain}`;
+                document.getElementById('site-php-badge').textContent = `PHP ${siteData.php_version || '8.2'}`;
 
-                // 헤더 업데이트
-                document.getElementById('site-title').textContent    = site.site_name;
-                document.getElementById('site-domain').href          = `https://${site.primary_domain}`;
-                document.getElementById('site-domain').querySelector('span').textContent = site.primary_domain;
-
+                // 상태 배지
                 const statusMap = {
-                    active:       { cls: 'bg-green-900/30 border-green-500/50 text-green-400', label: '운영 중' },
-                    suspended:    { cls: 'bg-red-900/30 border-red-500/50 text-red-400', label: '중단됨' },
-                    creating:     { cls: 'bg-blue-900/30 border-blue-500/50 text-blue-400', label: '생성 중' },
-                    provisioning: { cls: 'bg-yellow-900/30 border-yellow-500/50 text-yellow-400', label: '⏳ 설치 중' },
-                    error:        { cls: 'bg-red-900/30 border-red-500/50 text-red-400', label: '❌ 오류' },
+                    active:    { cls: 'bg-green-500/20 border-green-500/40 text-green-400', label: '운영 중' },
+                    creating:  { cls: 'bg-blue-500/20 border-blue-500/40 text-blue-400',   label: '생성 중' },
+                    suspended: { cls: 'bg-red-500/20 border-red-500/40 text-red-400',      label: '중단됨'  },
                 };
-                const s = statusMap[site.status] || statusMap.creating;
+                const st = statusMap[siteData.status] || statusMap.creating;
                 const badge = document.getElementById('site-status-badge');
-                badge.className = `text-xs px-3 py-1 rounded-full border font-bold ${s.cls}`;
-                badge.textContent = s.label;
+                badge.className = `text-xs px-3 py-1 rounded-full border ${st.cls}`;
+                badge.textContent = st.label;
 
-                const phpBadge = document.getElementById('site-php-badge');
-                phpBadge.textContent = `PHP ${site.php_version || '8.2'}`;
+                // 개요 카드
+                document.getElementById('ov-status').textContent  = st.label;
+                document.getElementById('ov-php').textContent     = siteData.php_version || '8.2';
+                document.getElementById('ov-cache').textContent   = siteData.cache_enabled ? 'ON' : 'OFF';
+                document.getElementById('ov-created').textContent = siteData.created_at
+                    ? new Date(siteData.created_at).toLocaleDateString('ko-KR') : '-';
 
-                // 개요 탭
-                document.getElementById('ov-status').textContent  = s.label;
-                document.getElementById('ov-php').textContent     = site.php_version || '8.2';
-                document.getElementById('ov-cache').textContent   = site.cache_enabled ? 'ON' : 'OFF';
-                document.getElementById('ov-created').textContent = site.created_at
-                    ? new Date(site.created_at).toLocaleDateString('ko-KR') : '-';
+                document.getElementById('info-id').textContent     = siteData.id || '-';
+                document.getElementById('info-domain').textContent = siteData.primary_domain || '-';
+                document.getElementById('info-bucket').textContent = siteData.github_repo || 'GitHub 저장소 생성 중...';
+                document.getElementById('info-wpadmin').textContent = `${siteData.primary_domain}/wp-admin`;
 
-                document.getElementById('info-id').textContent      = site.id;
-                document.getElementById('info-domain').textContent  = site.primary_domain;
-                document.getElementById('info-ssh').textContent     = site.ssh_port || '-';
-                document.getElementById('info-sftp').textContent    = site.sftp_port || '-';
-                document.getElementById('info-bucket').textContent  = site.github_repo_name ? (site.github_repo_owner + '/' + site.github_repo_name) : (site.status === 'provisioning' ? '⏳ GitHub 저장소 생성 중...' : '미연결 (관리자 설정에서 GitHub 토큰 추가 필요)');
-                document.getElementById('info-wpadmin').textContent = site.wp_admin_user || '-';
-
-                // PHP 현재 버전 배지
-                document.getElementById('php-current-badge').textContent = `현재: PHP ${site.php_version || '8.2'}`;
-                selectedPhpVersion = site.php_version || '8.2';
-
-                // 캐시 설정 초기화
-                document.getElementById('cache-toggle').checked = !!site.cache_enabled;
-                document.getElementById('cache-ttl').value = site.cache_ttl || 3600;
-
-                // ── 프로비저닝 중이면 자동 갱신 ──────────────────────────────
-                if (site.status === 'provisioning' || site.status === 'creating') {
-                    if (!window._provisioningPoll) {
-                        window._provisioningPoll = setInterval(async () => {
-                            await loadSiteInfo();
-                            if (siteData && siteData.status === 'active') {
-                                clearInterval(window._provisioningPoll);
-                                window._provisioningPoll = null;
-                                showAlert('✅ 호스팅 생성이 완료되었습니다!', 'success');
-                            }
-                        }, 4000);
-                    }
-                } else {
-                    if (window._provisioningPoll) {
-                        clearInterval(window._provisioningPoll);
-                        window._provisioningPoll = null;
-                    }
-                }
-
+                // PHP 배지
+                document.getElementById('php-current-badge').textContent = `현재: PHP ${siteData.php_version || '8.2'}`;
             } catch (e) {
                 console.error('[detail] 로드 실패:', e);
                 showAlert('사이트 정보를 불러오지 못했습니다.', 'error');
             }
         }
 
-        // ── PHP 버전 ────────────────────────────────────────────────────────────
-        async function loadPhpVersions() {
-            const loading = document.getElementById('php-list-loading');
-            const list    = document.getElementById('php-list');
-            loading.classList.remove('hidden');
-            list.classList.add('hidden');
+        // ── 파일 관리자 ──────────────────────────────────────────────────────
+        async function loadFiles(path) {
+            currentFilePath = path || '/';
+            document.getElementById('file-path').textContent = currentFilePath;
+            const el = document.getElementById('file-list');
+            el.innerHTML = '<div class="text-center py-8 text-gray-500 text-sm"><i class="fas fa-spinner fa-spin mr-2"></i> 로딩 중...</div>';
 
             try {
-                const res  = await fetch('/api/php-versions', { headers: HEADERS });
+                const res  = await fetch(`/api/github-storage?site_id=${siteId}&path=${encodeURIComponent(currentFilePath)}`, { headers: HEADERS });
                 const data = await res.json();
 
-                document.getElementById('php-source-badge').textContent =
-                    data.source === 'php.net' ? '✓ php.net 실시간 데이터' : '⚠ 오프라인 폴백 데이터 사용 중';
+                if (!res.ok) {
+                    el.innerHTML = `<div class="text-center py-8 text-yellow-400 text-sm">
+                        <i class="fas fa-info-circle text-2xl mb-2 block"></i>
+                        <p>${data.error || '파일을 불러올 수 없습니다.'}</p>
+                        <p class="text-gray-600 text-xs mt-1">호스팅 생성 후 GitHub 저장소가 자동으로 연결됩니다.</p>
+                    </div>`;
+                    return;
+                }
 
-                list.innerHTML = data.versions.map(v => {
-                    const isSelected = v.version.startsWith(selectedPhpVersion?.split('.')[0] + '.' + selectedPhpVersion?.split('.')[1]);
-                    const displayVer = v.display_version || ('PHP ' + v.version.split('.').slice(0,2).join('.'));
-                    const supportLabel = v.support_label || (v.supported ? '지원됨' : 'EOL');
-                    return `
-                    <div class="php-opt border border-white/10 rounded-xl p-4 ${isSelected ? 'selected' : ''}"
-                         onclick="selectPhpVersion('${v.version}', this)">
-                        <div class="flex justify-between items-center">
-                            <div class="flex items-center gap-2 flex-wrap">
-                                <span class="font-mono font-bold">${displayVer}</span>
-                                <span class="text-xs text-gray-500">(${v.version})</span>
-                                ${v.is_security_release ? '<span class="text-xs bg-green-900/40 border border-green-500/30 text-green-400 px-2 py-0.5 rounded-full">보안</span>' : ''}
-                                ${!v.supported
-                                    ? '<span class="text-xs bg-red-900/40 border border-red-500/30 text-red-400 px-2 py-0.5 rounded-full">' + supportLabel + '</span>'
-                                    : '<span class="text-xs bg-blue-900/40 border border-blue-500/30 text-blue-400 px-2 py-0.5 rounded-full">' + supportLabel + '</span>'}
-                            </div>
-                            <div class="flex items-center gap-2">
-                                <span class="text-xs text-gray-600">${v.date || ''}</span>
-                                ${isSelected ? '<i class="fas fa-check-circle text-indigo-400"></i>' : ''}
-                            </div>
+                const files = data.files || [];
+                if (!files.length) {
+                    el.innerHTML = '<div class="text-center py-8 text-gray-500 text-sm">폴더가 비어있습니다.</div>';
+                    return;
+                }
+
+                let html = '';
+                // 상위 폴더로 이동
+                if (currentFilePath !== '/') {
+                    const parent = currentFilePath.split('/').slice(0, -1).join('/') || '/';
+                    html += `<div class="file-item flex items-center gap-3 p-2.5 rounded-xl cursor-pointer border border-transparent hover:border-white/10" onclick="loadFiles('${parent}')">
+                        <i class="fas fa-arrow-up text-gray-500 w-5 text-center"></i>
+                        <span class="text-gray-400 text-sm">.. (상위 폴더)</span>
+                    </div>`;
+                }
+
+                files.forEach(f => {
+                    const isDir = f.type === 'dir';
+                    const icon = isDir ? 'fa-folder text-yellow-400' : getFileIcon(f.name);
+                    const onclick = isDir
+                        ? `loadFiles('${currentFilePath === '/' ? '' : currentFilePath}/${f.name}')`
+                        : `openFile('${currentFilePath === '/' ? '' : currentFilePath}/${f.name}', '${escHtml(f.name)}')`;
+
+                    html += `<div class="file-item flex items-center gap-3 p-2.5 rounded-xl cursor-pointer border border-transparent hover:border-white/10 group" onclick="${onclick}">
+                        <i class="fas ${icon} w-5 text-center"></i>
+                        <span class="flex-1 text-sm">${escHtml(f.name)}</span>
+                        <span class="text-xs text-gray-600">${f.size ? formatSize(f.size) : ''}</span>
+                        ${!isDir ? `<button onclick="event.stopPropagation();deleteFile('${currentFilePath === '/' ? '' : currentFilePath}/${f.name}')"
+                            class="hidden group-hover:block text-red-400 hover:text-red-300 text-xs px-2 py-1">
+                            <i class="fas fa-trash"></i>
+                        </button>` : ''}
+                    </div>`;
+                });
+
+                el.innerHTML = html;
+            } catch (e) {
+                el.innerHTML = `<div class="text-center py-8 text-red-400 text-sm">파일을 불러오지 못했습니다.</div>`;
+            }
+        }
+
+        function getFileIcon(name) {
+            const ext = name.split('.').pop().toLowerCase();
+            const map = {
+                php: 'fa-file-code text-indigo-400',
+                js: 'fa-file-code text-yellow-400',
+                css: 'fa-file-code text-blue-400',
+                html: 'fa-file-code text-orange-400',
+                jpg: 'fa-file-image text-pink-400',
+                jpeg: 'fa-file-image text-pink-400',
+                png: 'fa-file-image text-pink-400',
+                gif: 'fa-file-image text-pink-400',
+                zip: 'fa-file-archive text-purple-400',
+                sql: 'fa-database text-cyan-400',
+                txt: 'fa-file-alt text-gray-400',
+                md: 'fa-file-alt text-gray-400',
+            };
+            return map[ext] || 'fa-file text-gray-500';
+        }
+
+        function formatSize(bytes) {
+            if (bytes < 1024) return bytes + 'B';
+            if (bytes < 1024*1024) return (bytes/1024).toFixed(1) + 'KB';
+            return (bytes/1024/1024).toFixed(1) + 'MB';
+        }
+
+        async function openFile(path, name) {
+            editingFilePath = path;
+            document.getElementById('editing-filename').textContent = name;
+            document.getElementById('file-editor-panel').classList.remove('hidden');
+            document.getElementById('file-editor').value = '로딩 중...';
+
+            try {
+                const res  = await fetch(`/api/github-storage?site_id=${siteId}&file_path=${encodeURIComponent(path)}`, { headers: HEADERS });
+                const data = await res.json();
+                document.getElementById('file-editor').value = data.content || '';
+            } catch {
+                document.getElementById('file-editor').value = '파일을 불러오지 못했습니다.';
+            }
+        }
+
+        async function saveFile() {
+            const content = document.getElementById('file-editor').value;
+            try {
+                const res  = await fetch('/api/github-storage', {
+                    method: 'PUT', headers: HEADERS,
+                    body: JSON.stringify({ site_id: siteId, path: editingFilePath, content }),
+                });
+                const data = await res.json();
+                if (res.ok && data.success) showAlert('파일이 저장되었습니다.');
+                else showAlert(data.error || '저장에 실패했습니다.', 'error');
+            } catch { showAlert('오류가 발생했습니다.', 'error'); }
+        }
+
+        function closeEditor() {
+            document.getElementById('file-editor-panel').classList.add('hidden');
+            editingFilePath = '';
+        }
+
+        function uploadFile() { showAlert('파일 업로드 기능은 준비 중입니다.', 'info'); }
+        function createNewFile() {
+            const name = prompt('새 파일 이름을 입력하세요:');
+            if (!name) return;
+            openFile(`${currentFilePath === '/' ? '' : currentFilePath}/${name}`, name);
+            document.getElementById('file-editor').value = '';
+        }
+        function createNewFolder() { showAlert('폴더 생성 기능은 준비 중입니다.', 'info'); }
+        async function deleteFile(path) {
+            if (!confirm('파일을 삭제하시겠습니까?')) return;
+            try {
+                const res  = await fetch(`/api/github-storage?site_id=${siteId}&path=${encodeURIComponent(path)}`, { method: 'DELETE', headers: HEADERS });
+                const data = await res.json();
+                if (res.ok) { showAlert('파일이 삭제되었습니다.'); loadFiles(currentFilePath); }
+                else showAlert(data.error || '삭제에 실패했습니다.', 'error');
+            } catch { showAlert('오류가 발생했습니다.', 'error'); }
+        }
+
+        // ── PHP 버전 ──────────────────────────────────────────────────────────
+        async function loadPhpVersions() {
+            try {
+                const res  = await fetch(`/api/php-versions?id=${siteId}`, { headers: HEADERS });
+                const data = await res.json();
+                const versions = data.available || [];
+                const loading  = document.getElementById('php-list-loading');
+                const list     = document.getElementById('php-list');
+
+                if (!versions.length) {
+                    loading.innerHTML = '<p class="text-yellow-400 text-sm text-center">PHP 버전을 불러오지 못했습니다.</p>';
+                    return;
+                }
+
+                const current = (siteData?.php_version || '8.2').toString();
+                list.innerHTML = versions.map(v => {
+                    const isSelected = v.version === current;
+                    return `<div class="php-opt border border-white/10 rounded-xl p-3 flex items-center justify-between ${isSelected ? 'selected' : ''}"
+                             onclick="selectPhpVersion('${v.version}', this)">
+                        <div class="flex items-center gap-2">
+                            <i class="fas fa-code text-indigo-400 text-xs"></i>
+                            <span class="font-mono font-bold text-sm">PHP ${v.version}</span>
+                            <span class="text-xs text-gray-600">${v.date || ''}</span>
+                            ${isSelected ? '<i class="fas fa-check-circle text-indigo-400 text-xs"></i>' : ''}
                         </div>
                     </div>`;
                 }).join('');
-
                 loading.classList.add('hidden');
                 list.classList.remove('hidden');
+                selectedPhpVersion = current;
             } catch (e) {
-                loading.innerHTML = `<p class="text-red-400 text-sm text-center">PHP 버전을 불러오지 못했습니다.</p>`;
+                document.getElementById('php-list-loading').innerHTML = '<p class="text-red-400 text-sm text-center">PHP 버전을 불러오지 못했습니다.</p>';
             }
         }
 
@@ -599,10 +785,6 @@
                 if (chk) chk.remove();
             });
             el.classList.add('selected');
-            const label = el.querySelector('.flex.items-center.gap-2');
-            if (label && !label.querySelector('.fa-check-circle')) {
-                label.insertAdjacentHTML('beforeend', '<i class="fas fa-check-circle text-indigo-400"></i>');
-            }
         }
 
         async function applyPhpVersion() {
@@ -620,20 +802,17 @@
                     showAlert(`PHP ${selectedPhpVersion} 이 무중단으로 적용되었습니다.`);
                     document.getElementById('site-php-badge').textContent    = `PHP ${selectedPhpVersion}`;
                     document.getElementById('php-current-badge').textContent = `현재: PHP ${selectedPhpVersion}`;
-                    document.getElementById('ov-php').textContent            = selectedPhpVersion;
+                    document.getElementById('ov-php').textContent = selectedPhpVersion;
                     if (siteData) siteData.php_version = selectedPhpVersion;
-                } else {
-                    showAlert(data.error || '적용에 실패했습니다.', 'error');
-                }
-            } catch (e) {
-                showAlert('오류가 발생했습니다.', 'error');
-            } finally {
+                } else showAlert(data.error || '적용에 실패했습니다.', 'error');
+            } catch { showAlert('오류가 발생했습니다.', 'error'); }
+            finally {
                 btn.disabled = false;
                 btn.innerHTML = '<i class="fas fa-check mr-2"></i> 선택한 버전 적용';
             }
         }
 
-        // ── 캐시 ────────────────────────────────────────────────────────────────
+        // ── 캐시 ─────────────────────────────────────────────────────────────
         function loadCacheSettings() {
             if (!siteData) return;
             document.getElementById('cache-toggle').checked = !!siteData.cache_enabled;
@@ -644,7 +823,7 @@
             const enabled = document.getElementById('cache-toggle').checked;
             const ttl     = parseInt(document.getElementById('cache-ttl').value);
             try {
-                const res = await fetch('/api/cache', {
+                const res  = await fetch('/api/cache', {
                     method: 'PUT', headers: HEADERS,
                     body: JSON.stringify({ site_id: siteId, cache_enabled: enabled, cache_ttl: ttl }),
                 });
@@ -653,14 +832,11 @@
                     showAlert('캐시 설정이 저장되었습니다.');
                     if (siteData) { siteData.cache_enabled = enabled; siteData.cache_ttl = ttl; }
                     document.getElementById('ov-cache').textContent = enabled ? 'ON' : 'OFF';
-                } else {
-                    showAlert(data.error || '저장에 실패했습니다.', 'error');
-                }
+                } else showAlert(data.error || '저장에 실패했습니다.', 'error');
             } catch { showAlert('오류가 발생했습니다.', 'error'); }
         }
 
         async function purgeCache() {
-            if (!confirm('모든 캐시를 삭제하시겠습니까?')) return;
             try {
                 const res  = await fetch(`/api/cache?site_id=${siteId}`, { method: 'DELETE', headers: HEADERS });
                 const data = await res.json();
@@ -669,37 +845,34 @@
             } catch { showAlert('오류가 발생했습니다.', 'error'); }
         }
 
-        // ── 백업 ────────────────────────────────────────────────────────────────
+        // ── 백업 ─────────────────────────────────────────────────────────────
         async function loadBackups() {
             const el = document.getElementById('backup-list');
             el.innerHTML = '<div class="text-center py-6 text-gray-500 text-sm"><i class="fas fa-spinner fa-spin mr-2"></i> 로딩 중...</div>';
             try {
                 const res  = await fetch(`/api/backups?site_id=${siteId}`, { headers: HEADERS });
                 const data = await res.json();
-                if (!data.success || !data.backups.length) {
+                if (!data.success || !data.backups?.length) {
                     el.innerHTML = '<div class="text-center py-6 text-gray-500 text-sm">백업이 없습니다.</div>';
                     return;
                 }
                 el.innerHTML = data.backups.map(b => `
-                    <div class="flex items-center justify-between p-3 bg-white/5 border border-white/10 rounded-xl text-sm">
+                    <div class="flex items-center justify-between p-3 bg-white/5 border border-white/10 rounded-xl text-sm mb-2">
                         <div>
                             <p class="font-bold">${escHtml(b.label || '백업')}</p>
                             <p class="text-xs text-gray-500">${new Date(b.created_at).toLocaleString('ko-KR')}
-                                · <span class="${b.snapshot_type === 'manual' ? 'text-yellow-400' : 'text-blue-400'}">${b.snapshot_type === 'manual' ? '수동' : '자동'}</span>
+                                · <span class="${b.snapshot_type==='manual'?'text-yellow-400':'text-blue-400'}">${b.snapshot_type==='manual'?'수동':'자동'}</span>
                             </p>
                         </div>
                         <div class="flex gap-2">
-                            <button onclick="downloadBackup(${b.id})"
-                                class="text-xs bg-blue-700/50 border border-blue-500/30 px-3 py-1.5 rounded-lg hover:bg-blue-700 transition">
+                            <button onclick="downloadBackup(${b.id})" class="text-xs bg-blue-700/50 border border-blue-500/30 px-3 py-1.5 rounded-lg hover:bg-blue-700 transition">
                                 <i class="fas fa-download mr-1"></i> 다운로드
                             </button>
-                            <button onclick="deleteBackup(${b.id})"
-                                class="text-xs bg-red-700/20 border border-red-500/20 px-3 py-1.5 rounded-lg hover:bg-red-700/50 transition text-red-400">
+                            <button onclick="deleteBackup(${b.id})" class="text-xs bg-red-700/20 border border-red-500/20 px-3 py-1.5 rounded-lg hover:bg-red-700/50 transition text-red-400">
                                 <i class="fas fa-trash"></i>
                             </button>
                         </div>
-                    </div>
-                `).join('');
+                    </div>`).join('');
             } catch {
                 el.innerHTML = '<div class="text-center py-6 text-red-400 text-sm">백업 목록을 불러오지 못했습니다.</div>';
             }
@@ -722,11 +895,8 @@
             try {
                 const res  = await fetch(`/api/backups?download_id=${id}`, { headers: HEADERS });
                 const data = await res.json();
-                if (res.ok && data.download_url) {
-                    window.open(data.download_url, '_blank');
-                } else {
-                    showAlert(data.error || '다운로드 링크 생성에 실패했습니다.', 'error');
-                }
+                if (res.ok && data.download_url) window.open(data.download_url, '_blank');
+                else showAlert(data.error || '다운로드 링크 생성에 실패했습니다.', 'error');
             } catch { showAlert('오류가 발생했습니다.', 'error'); }
         }
 
@@ -740,9 +910,9 @@
             } catch { showAlert('오류가 발생했습니다.', 'error'); }
         }
 
-        // ── SSH 정보 ────────────────────────────────────────────────────────────
+        // ── SSH ───────────────────────────────────────────────────────────────
         async function loadSshInfo() {
-            // SSH 키 목록 로드
+            // SSH 키 목록
             try {
                 const res  = await fetch(`/api/ssh-keys?site_id=${siteId}`, { headers: HEADERS });
                 const data = await res.json();
@@ -757,166 +927,135 @@
                                 <p class="font-bold">${escHtml(k.key_name)}</p>
                                 <p class="text-xs text-gray-500">${new Date(k.created_at).toLocaleDateString('ko-KR')}</p>
                             </div>
-                            <button onclick="deleteSshKey(${k.id})" class="text-red-400 hover:text-red-300 transition text-xs">
-                                <i class="fas fa-trash mr-1"></i> 삭제
+                            <button onclick="deleteSshKey(${k.id})" class="text-red-400 hover:text-red-300 transition text-xs px-2 py-1">
+                                <i class="fas fa-trash"></i>
                             </button>
-                        </div>
-                    `).join('');
+                        </div>`).join('');
                 }
             } catch {}
 
-            if (!siteData) return;
-            const site = siteData;
-            const infoEl = document.getElementById('ssh-info-content');
-
-            // 활성 도메인이 있는 경우에만 SSH 정보 표시
-            const activeDomains = (siteData._domains || []).filter(d => d.cf_ssl_status === 'active');
-            const sshHost = activeDomains.length > 0 ? activeDomains[0].domain : null;
-
-            if (!sshHost) {
-                infoEl.innerHTML = `
-                    <div class="p-4 bg-yellow-900/20 border border-yellow-500/30 rounded-xl text-sm text-yellow-300">
-                        <i class="fas fa-exclamation-triangle mr-2"></i>
-                        SSH/SFTP 접속은 <strong>도메인 탭에서 도메인을 추가하고 A레코드를 활성화</strong>한 후 이용할 수 있습니다.
+            // SSH 접속 정보 표시
+            if (siteData) {
+                const host = siteData.primary_domain || 'your-domain.com';
+                document.getElementById('ssh-info-content').innerHTML = `
+                    <div class="space-y-3">
+                        <div class="grid grid-cols-2 gap-3 text-sm">
+                            <div class="bg-white/5 rounded-xl p-3">
+                                <div class="text-gray-500 text-xs mb-1">호스트</div>
+                                <code class="text-xs text-cyan-300">${escHtml(host)}</code>
+                            </div>
+                            <div class="bg-white/5 rounded-xl p-3">
+                                <div class="text-gray-500 text-xs mb-1">포트 (SSH)</div>
+                                <code class="text-xs text-cyan-300">${siteData.ssh_port || 22}</code>
+                            </div>
+                            <div class="bg-white/5 rounded-xl p-3">
+                                <div class="text-gray-500 text-xs mb-1">포트 (SFTP)</div>
+                                <code class="text-xs text-cyan-300">${siteData.sftp_port || 2222}</code>
+                            </div>
+                            <div class="bg-white/5 rounded-xl p-3">
+                                <div class="text-gray-500 text-xs mb-1">사용자</div>
+                                <code class="text-xs text-cyan-300">wp-${siteData.id?.substring(0,8) || 'user'}</code>
+                            </div>
+                        </div>
+                        <div class="p-3 bg-black/40 border border-white/10 rounded-xl">
+                            <p class="text-xs text-gray-500 mb-2">SSH 접속 명령어</p>
+                            <code class="text-xs text-green-400">ssh wp-${siteData.id?.substring(0,8) || 'user'}@${escHtml(host)} -p ${siteData.ssh_port || 22}</code>
+                        </div>
                     </div>`;
-                return;
             }
-
-            const sshUser = `wp-${site.id.slice(0, 8)}`;
-            const sshPort  = site.ssh_port || 22;
-            const sftpPort = site.sftp_port || 2222;
-            const sshCmd   = `ssh -p ${sshPort} ${sshUser}@${sshHost}`;
-            const sftpCmd  = `sftp -P ${sftpPort} ${sshUser}@${sshHost}`;
-
-            infoEl.innerHTML = `
-                <div class="bg-black/40 rounded-xl p-4 font-mono text-sm mb-3">
-                    <div class="text-gray-500 text-xs mb-2"># SSH 접속 명령어</div>
-                    <div id="ssh-cmd" class="text-green-400 break-all">${escHtml(sshCmd)}</div>
-                    <button onclick="copyText('ssh-cmd')" class="mt-2 text-xs text-gray-500 hover:text-white transition">
-                        <i class="fas fa-copy mr-1"></i> 복사
-                    </button>
-                </div>
-                <div class="bg-black/40 rounded-xl p-4 font-mono text-sm mb-3">
-                    <div class="text-gray-500 text-xs mb-2"># SFTP 접속 명령어</div>
-                    <div id="sftp-cmd" class="text-cyan-400 break-all">${escHtml(sftpCmd)}</div>
-                    <button onclick="copyText('sftp-cmd')" class="mt-2 text-xs text-gray-500 hover:text-white transition">
-                        <i class="fas fa-copy mr-1"></i> 복사
-                    </button>
-                </div>
-                <div class="grid grid-cols-2 gap-3 text-sm">
-                    <div class="bg-white/5 rounded-xl p-3"><div class="text-gray-500 text-xs mb-1">호스트</div><div class="font-mono text-xs">${escHtml(sshHost)}</div></div>
-                    <div class="bg-white/5 rounded-xl p-3"><div class="text-gray-500 text-xs mb-1">SSH 포트</div><div class="font-mono text-xs">${sshPort}</div></div>
-                    <div class="bg-white/5 rounded-xl p-3"><div class="text-gray-500 text-xs mb-1">SFTP 포트</div><div class="font-mono text-xs">${sftpPort}</div></div>
-                    <div class="bg-white/5 rounded-xl p-3"><div class="text-gray-500 text-xs mb-1">사용자</div><div class="font-mono text-xs">${escHtml(sshUser)}</div></div>
-                </div>`;
         }
 
         async function addSshKey() {
-            const keyName   = document.getElementById('key-name').value.trim();
-            const publicKey = document.getElementById('public-key').value.trim();
-            if (!keyName || !publicKey) { showAlert('키 이름과 공개키를 입력해주세요.', 'error'); return; }
+            const name = document.getElementById('key-name').value.trim();
+            const key  = document.getElementById('public-key').value.trim();
+            if (!name || !key) { showAlert('키 이름과 공개키를 입력해주세요.', 'error'); return; }
             try {
                 const res  = await fetch('/api/ssh-keys', {
                     method: 'POST', headers: HEADERS,
-                    body: JSON.stringify({ site_id: siteId, key_name: keyName, public_key: publicKey }),
+                    body: JSON.stringify({ site_id: siteId, key_name: name, public_key: key }),
                 });
                 const data = await res.json();
                 if (res.ok && data.success) {
                     showAlert('SSH 키가 등록되었습니다.');
-                    document.getElementById('key-name').value   = '';
+                    document.getElementById('key-name').value = '';
                     document.getElementById('public-key').value = '';
                     loadSshInfo();
-                } else {
-                    showAlert(data.error || '등록에 실패했습니다.', 'error');
-                }
+                } else showAlert(data.error || '등록에 실패했습니다.', 'error');
             } catch { showAlert('오류가 발생했습니다.', 'error'); }
         }
 
         async function deleteSshKey(id) {
             if (!confirm('이 SSH 키를 삭제하시겠습니까?')) return;
             try {
-                const res = await fetch(`/api/ssh-keys?id=${id}`, { method: 'DELETE', headers: HEADERS });
-                const d   = await res.json();
+                const res  = await fetch(`/api/ssh-keys?id=${id}`, { method: 'DELETE', headers: HEADERS });
+                const data = await res.json();
                 if (res.ok) { showAlert('SSH 키가 삭제되었습니다.'); loadSshInfo(); }
-                else showAlert(d.error || '삭제에 실패했습니다.', 'error');
+                else showAlert(data.error || '삭제에 실패했습니다.', 'error');
             } catch { showAlert('오류가 발생했습니다.', 'error'); }
         }
 
-        // ── 도메인 ────────────────────────────────────────────────────────────
-        function renderDomains() {
-            if (!siteData) return;
-            fetch(`/api/sites?id=${siteId}`, { headers: HEADERS })
-                .then(r => r.json())
-                .then(data => {
-                    const domains = data.domains || [];
-                    const el = document.getElementById('domain-list');
-                    if (!domains.length) {
-                        el.innerHTML = '<p class="text-sm text-gray-500 text-center py-3">등록된 도메인이 없습니다.</p>';
-                        return;
-                    }
-                    el.innerHTML = domains.map(d => {
-                        const isActive  = d.cf_ssl_status === 'active';
-                        const nsArr     = d.cf_nameservers ? d.cf_nameservers.split(',').filter(Boolean) : [];
-                        const nsHtml    = nsArr.length
-                            ? `<div class="mt-2 p-2 bg-black/30 border border-yellow-500/20 rounded-lg text-xs text-yellow-300 space-y-0.5">
-                                <p class="font-semibold text-gray-400">네임서버를 아래로 변경하세요:</p>
-                                ${nsArr.map(ns => `<p class="font-mono">• ${escHtml(ns)}</p>`).join('')}
-                               </div>`
-                            : '';
-                        return `
-                        <div class="p-3 bg-white/5 border border-white/10 rounded-xl text-sm space-y-1">
-                            <div class="flex items-center justify-between">
-                                <div class="flex items-center gap-2 flex-wrap">
-                                    <span class="font-mono text-blue-300">${escHtml(d.domain)}</span>
-                                    ${d.is_primary ? '<span class="text-xs bg-blue-900/40 border border-blue-500/30 text-blue-300 px-2 py-0.5 rounded-full">기본</span>' : ''}
-                                    <span class="text-xs ${isActive ? 'text-green-400' : 'text-yellow-400'}">
-                                        <i class="fas fa-${isActive ? 'check-circle' : 'clock'} mr-1"></i>${isActive ? '활성' : '네임서버 변경 대기'}
-                                    </span>
-                                </div>
-                                <div class="flex gap-2">
-                                    ${!isActive ? `<button onclick="verifyDomain('${escHtml(d.domain)}')" class="text-xs bg-blue-900/40 border border-blue-500/30 text-blue-300 px-2 py-1 rounded-lg hover:bg-blue-800/40 transition">
-                                        <i class="fas fa-check mr-1"></i>네임서버 확인
-                                    </button>` : ''}
-                                    ${!d.is_primary ? `<button onclick="removeDomain(${d.id})" class="text-red-400 hover:text-red-300 transition text-xs p-1"><i class="fas fa-trash"></i></button>` : ''}
-                                </div>
+        // ── 도메인 ───────────────────────────────────────────────────────────
+        async function renderDomains() {
+            const el = document.getElementById('domain-list');
+            el.innerHTML = '<div class="text-center py-6 text-gray-500 text-sm"><i class="fas fa-spinner fa-spin mr-2"></i> 로딩 중...</div>';
+            try {
+                const res  = await fetch(`/api/domains?site_id=${siteId}`, { headers: HEADERS });
+                const data = await res.json();
+                const domains = data.domains || [];
+                if (!domains.length) {
+                    el.innerHTML = '<p class="text-sm text-gray-500 text-center py-4">등록된 도메인이 없습니다.</p>';
+                    return;
+                }
+                el.innerHTML = domains.map(d => {
+                    const isActive = d.cloudflare_status === 'active';
+                    return `<div class="p-3 bg-white/5 border border-white/10 rounded-xl">
+                        <div class="flex items-center justify-between">
+                            <div class="flex items-center gap-2">
+                                <i class="fas fa-${isActive ? 'check-circle text-green-400' : 'clock text-yellow-400'} text-xs"></i>
+                                <span class="font-mono text-sm">${escHtml(d.domain)}</span>
+                                ${d.is_primary ? '<span class="text-xs bg-blue-900/40 border border-blue-500/30 text-blue-300 px-2 py-0.5 rounded-lg">주 도메인</span>' : ''}
+                                <span class="text-xs ${isActive ? 'text-green-400' : 'text-yellow-400'}">${isActive ? '활성' : '대기 중'}</span>
                             </div>
-                            ${!isActive ? nsHtml : ''}
-                        </div>`;
-                    }).join('');
-                }).catch(() => {});
+                            <div class="flex gap-2">
+                                ${!isActive ? `<button onclick="verifyDomain('${escHtml(d.domain)}')" class="text-xs bg-blue-900/40 border border-blue-500/30 text-blue-300 px-2 py-1 rounded-lg hover:bg-blue-800/40 transition">
+                                    <i class="fas fa-check mr-1"></i>NS 확인</button>` : ''}
+                                ${!d.is_primary ? `<button onclick="removeDomain(${d.id})" class="text-red-400 hover:text-red-300 transition text-xs p-1"><i class="fas fa-trash"></i></button>` : ''}
+                            </div>
+                        </div>
+                        ${!isActive && d.nameservers?.length ? `
+                        <div class="mt-2 p-2 bg-yellow-900/20 border border-yellow-500/20 rounded-lg text-xs text-yellow-300">
+                            <p class="font-bold mb-1"><i class="fas fa-server mr-1"></i>네임서버를 아래로 변경하세요:</p>
+                            ${d.nameservers.map(ns => `<p class="font-mono">• ${ns}</p>`).join('')}
+                        </div>` : ''}
+                    </div>`;
+                }).join('');
+            } catch { el.innerHTML = '<p class="text-red-400 text-sm text-center py-4">도메인 목록을 불러오지 못했습니다.</p>'; }
         }
 
         async function addDomain() {
-            const domain  = document.getElementById('new-domain').value.trim();
-            const alertEl = document.getElementById('domain-add-alert');
-            const btn     = document.getElementById('add-domain-btn');
-
+            const domain = document.getElementById('new-domain').value.trim();
+            const btn    = document.getElementById('add-domain-btn');
             if (!domain) { showDomainAlert('도메인을 입력해주세요.', 'error'); return; }
-
             btn.disabled = true;
             btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-1"></i> 추가 중...';
-
             try {
                 const res  = await fetch('/api/domains', {
-                    method:  'POST',
-                    headers: { ...HEADERS, 'Content-Type': 'application/json' },
-                    body:    JSON.stringify({ site_id: siteId, domain }),
+                    method: 'POST', headers: HEADERS,
+                    body: JSON.stringify({ site_id: siteId, domain }),
                 });
                 const data = await res.json();
-
                 if (data.error) {
                     showDomainAlert(data.error, 'error');
                 } else {
                     document.getElementById('new-domain').value = '';
-                    const nsText = data.nameservers && data.nameservers.length
-                            ? `<br><br><strong>네임서버를 아래로 변경하세요:</strong><br>${data.nameservers.map(ns => `• <code>${ns}</code>`).join('<br>')}`
-                            : '';
-                    showDomainAlert(`✅ 도메인이 등록되었습니다. Cloudflare Zone이 생성되었습니다.${nsText}`, 'success');
+                    const nsText = data.nameservers?.length
+                        ? `<br><br><strong>네임서버를 아래로 변경하세요:</strong><br>${data.nameservers.map(ns => `• <code>${ns}</code>`).join('<br>')}`
+                        : '';
+                    showDomainAlert(`✅ 도메인이 등록되었습니다.${nsText}`, 'success');
                     await renderDomains();
                 }
-            } catch {
-                showDomainAlert('도메인 추가 중 오류가 발생했습니다.', 'error');
-            } finally {
+            } catch { showDomainAlert('도메인 추가 중 오류가 발생했습니다.', 'error'); }
+            finally {
                 btn.disabled = false;
                 btn.innerHTML = '<i class="fas fa-plus mr-1"></i> 추가';
             }
@@ -924,23 +1063,20 @@
 
         function showDomainAlert(msg, type) {
             const el = document.getElementById('domain-add-alert');
-            el.className = `p-3 rounded-xl text-sm ${type === 'error' ? 'bg-red-900/30 border border-red-500/30 text-red-400' : 'bg-green-900/30 border border-green-500/30 text-green-400'}`;
+            el.className = `p-3 rounded-xl text-sm ${type==='error' ? 'bg-red-900/30 border border-red-500/30 text-red-400' : 'bg-green-900/30 border border-green-500/30 text-green-400'}`;
             el.innerHTML = msg;
             el.classList.remove('hidden');
-            setTimeout(() => el.classList.add('hidden'), 6000);
+            setTimeout(() => el.classList.add('hidden'), 8000);
         }
 
         async function verifyDomain(domain) {
-            showAlert('Cloudflare 네임서버 전환 확인 중...', 'info');
+            showAlert('Cloudflare 네임서버 확인 중...', 'info');
             try {
                 const res  = await fetch(`/api/domains?site_id=${siteId}&domain=${encodeURIComponent(domain)}&verify=1`, { headers: HEADERS });
                 const data = await res.json();
-                const type = data.verified ? 'success' : 'info';
-                showAlert(data.message || '네임서버 확인 완료', type);
+                showAlert(data.message || '네임서버 확인 완료', data.verified ? 'success' : 'info');
                 if (data.verified) await renderDomains();
-            } catch {
-                showAlert('네임서버 확인 중 오류가 발생했습니다.', 'error');
-            }
+            } catch { showAlert('네임서버 확인 중 오류가 발생했습니다.', 'error'); }
         }
 
         async function removeDomain(id) {
@@ -949,32 +1085,157 @@
                 const res  = await fetch(`/api/domains?id=${id}`, { method: 'DELETE', headers: HEADERS });
                 const data = await res.json();
                 if (data.error) { showAlert(data.error, 'error'); return; }
-                showAlert('도메인이 삭제되었습니다.', 'success');
+                showAlert('도메인이 삭제되었습니다.');
                 await renderDomains();
-            } catch {
-                showAlert('도메인 삭제 중 오류가 발생했습니다.', 'error');
-            }
+            } catch { showAlert('도메인 삭제 중 오류가 발생했습니다.', 'error'); }
         }
 
-        // ── 로그 ─────────────────────────────────────────────────────────────────
-        let currentLogLevel = '';
+        // ── 보안 (국가 차단, IP 차단) ─────────────────────────────────────────
+        const COUNTRIES = [
+            { code: 'CN', name: '중국' }, { code: 'RU', name: '러시아' }, { code: 'KP', name: '북한' },
+            { code: 'IR', name: '이란' }, { code: 'VN', name: '베트남' }, { code: 'TR', name: '터키' },
+        ];
 
+        let blockedCountries = [];
+
+        async function loadCountryBlocks() {
+            try {
+                const res  = await fetch(`/api/sites?id=${siteId}&security=country_blocks`, { headers: HEADERS });
+                const data = await res.json();
+                blockedCountries = data.blocked_countries || [];
+            } catch { blockedCountries = []; }
+            renderCountryList();
+        }
+
+        function renderCountryList() {
+            const el = document.getElementById('country-block-list');
+            el.innerHTML = COUNTRIES.map(c => {
+                const isBlocked = blockedCountries.includes(c.code);
+                return `<div class="flex items-center justify-between p-3 bg-white/5 border ${isBlocked ? 'border-red-500/30 bg-red-900/10' : 'border-white/10'} rounded-xl">
+                    <div class="flex items-center gap-2">
+                        <span class="text-sm font-bold font-mono">${c.code}</span>
+                        <span class="text-sm text-gray-400">${c.name}</span>
+                    </div>
+                    <button onclick="${isBlocked ? `unblockCountry('${c.code}')` : `blockCountry('${c.code}')`}"
+                        class="text-xs px-3 py-1.5 rounded-lg font-bold transition ${isBlocked ? 'bg-red-900/50 text-red-400 border border-red-500/30 hover:bg-red-900' : 'bg-white/10 text-gray-300 border border-white/20 hover:bg-white/20'}">
+                        ${isBlocked ? '<i class="fas fa-lock mr-1"></i>차단 중' : '<i class="fas fa-ban mr-1"></i>차단'}
+                    </button>
+                </div>`;
+            }).join('');
+        }
+
+        async function blockCountry(code) {
+            const inputCode = code || document.getElementById('custom-country-code').value.trim().toUpperCase();
+            if (!inputCode || inputCode.length !== 2) { showAlert('올바른 국가 코드를 입력하세요 (2자리).', 'error'); return; }
+            try {
+                const res  = await fetch('/api/sites', {
+                    method: 'PUT', headers: HEADERS,
+                    body: JSON.stringify({ id: siteId, block_country: inputCode }),
+                });
+                const data = await res.json();
+                if (res.ok) {
+                    showAlert(`${inputCode} 국가 차단이 설정되었습니다.`);
+                    if (!blockedCountries.includes(inputCode)) blockedCountries.push(inputCode);
+                    renderCountryList();
+                    document.getElementById('custom-country-code').value = '';
+                } else showAlert(data.error || '차단 설정에 실패했습니다.', 'error');
+            } catch { showAlert('오류가 발생했습니다.', 'error'); }
+        }
+
+        async function unblockCountry(code) {
+            try {
+                const res  = await fetch('/api/sites', {
+                    method: 'PUT', headers: HEADERS,
+                    body: JSON.stringify({ id: siteId, unblock_country: code }),
+                });
+                if (res.ok) {
+                    showAlert(`${code} 국가 차단이 해제되었습니다.`);
+                    blockedCountries = blockedCountries.filter(c => c !== code);
+                    renderCountryList();
+                } else showAlert('차단 해제에 실패했습니다.', 'error');
+            } catch { showAlert('오류가 발생했습니다.', 'error'); }
+        }
+
+        async function loadSuspiciousIPs() {
+            const el = document.getElementById('suspicious-ip-list');
+            el.innerHTML = '<div class="text-center py-4 text-gray-500 text-sm"><i class="fas fa-spinner fa-spin mr-2"></i> 로딩 중...</div>';
+            try {
+                const res  = await fetch(`/api/logs?site_id=${siteId}&type=suspicious&limit=20`, { headers: HEADERS });
+                const data = await res.json();
+                const ips  = data.suspicious_ips || [];
+                if (!ips.length) {
+                    el.innerHTML = '<p class="text-sm text-gray-500 text-center py-4">위험 의심 접근이 없습니다.</p>';
+                    return;
+                }
+                el.innerHTML = ips.map(ip => `
+                    <div class="flex items-center justify-between p-3 bg-white/5 border border-orange-500/20 rounded-xl text-sm">
+                        <div>
+                            <p class="font-mono font-bold">${escHtml(ip.ip)}</p>
+                            <p class="text-xs text-gray-500">${ip.country || '-'} · 시도: ${ip.count || 1}회 · ${ip.last_seen ? new Date(ip.last_seen).toLocaleString('ko-KR') : '-'}</p>
+                        </div>
+                        <button onclick="blockIPDirect('${escHtml(ip.ip)}')" class="text-xs bg-red-700/40 border border-red-500/30 text-red-300 px-3 py-1.5 rounded-lg hover:bg-red-700 transition">
+                            <i class="fas fa-ban mr-1"></i>차단
+                        </button>
+                    </div>`).join('');
+            } catch { el.innerHTML = '<p class="text-sm text-gray-500 text-center py-4">데이터를 불러오지 못했습니다.</p>'; }
+        }
+
+        async function blockIP() {
+            const ip = document.getElementById('block-ip-input').value.trim();
+            if (!ip) { showAlert('IP 주소를 입력해주세요.', 'error'); return; }
+            await blockIPDirect(ip);
+            document.getElementById('block-ip-input').value = '';
+        }
+
+        async function blockIPDirect(ip) {
+            try {
+                const res  = await fetch('/api/sites', {
+                    method: 'PUT', headers: HEADERS,
+                    body: JSON.stringify({ id: siteId, block_ip: ip }),
+                });
+                const data = await res.json();
+                if (res.ok) {
+                    showAlert(`${ip} 차단이 설정되었습니다.`);
+                    if (!blockedIPs.includes(ip)) {
+                        blockedIPs.push(ip);
+                        renderBlockedIPs();
+                    }
+                } else showAlert(data.error || '차단에 실패했습니다.', 'error');
+            } catch { showAlert('오류가 발생했습니다.', 'error'); }
+        }
+
+        function renderBlockedIPs() {
+            const el = document.getElementById('blocked-ip-list');
+            if (!blockedIPs.length) {
+                el.innerHTML = '<p class="text-sm text-gray-500 text-center py-4">차단된 IP가 없습니다.</p>';
+                return;
+            }
+            el.innerHTML = blockedIPs.map(ip => `
+                <div class="flex items-center justify-between p-3 bg-white/5 border border-red-500/20 rounded-xl text-sm">
+                    <span class="font-mono">${escHtml(ip)}</span>
+                    <button onclick="unblockIP('${escHtml(ip)}')" class="text-xs text-gray-400 hover:text-white transition px-2 py-1">
+                        <i class="fas fa-times"></i> 해제
+                    </button>
+                </div>`).join('');
+        }
+
+        async function unblockIP(ip) {
+            try {
+                await fetch('/api/sites', {
+                    method: 'PUT', headers: HEADERS,
+                    body: JSON.stringify({ id: siteId, unblock_ip: ip }),
+                });
+                blockedIPs = blockedIPs.filter(i => i !== ip);
+                renderBlockedIPs();
+                showAlert(`${ip} 차단이 해제되었습니다.`);
+            } catch { showAlert('오류가 발생했습니다.', 'error'); }
+        }
+
+        // ── 로그 ─────────────────────────────────────────────────────────────
         async function loadLogs(level) {
             if (level !== undefined) currentLogLevel = level || '';
             const el = document.getElementById('log-list');
             el.innerHTML = '<div class="text-center py-6 text-gray-500 text-sm"><i class="fas fa-spinner fa-spin mr-2"></i> 로딩 중...</div>';
-
-            // 필터 버튼 활성화
-            document.querySelectorAll('.log-filter-btn').forEach(btn => {
-                const isActive = btn.dataset.level === currentLogLevel;
-                btn.className = `text-xs px-2 py-1 rounded-lg transition log-filter-btn ${
-                    isActive ? 'bg-white/10 text-white' : 'bg-white/5 hover:bg-white/10 ' +
-                    (btn.dataset.level === 'info' ? 'text-blue-400' :
-                     btn.dataset.level === 'warning' ? 'text-yellow-400' :
-                     btn.dataset.level === 'error' ? 'text-red-400' : 'text-gray-400')
-                }`;
-            });
-
             try {
                 const params = new URLSearchParams({ site_id: siteId, limit: '200' });
                 if (currentLogLevel) params.set('level', currentLogLevel);
@@ -982,7 +1243,6 @@
                 const data = await res.json();
                 const logs = data.logs || [];
 
-                // 레벨 카운트 표시
                 const meta = data.meta?.level_counts;
                 if (meta) {
                     document.getElementById('log-cnt-info').textContent    = meta.info    || 0;
@@ -991,20 +1251,16 @@
                     document.getElementById('log-meta').classList.remove('hidden');
                 }
 
-                if (!logs.length) {
-                    el.innerHTML = '<p class="text-sm text-gray-500 text-center py-6">로그가 없습니다.</p>';
-                    return;
-                }
+                if (!logs.length) { el.innerHTML = '<p class="text-sm text-gray-500 text-center py-6">로그가 없습니다.</p>'; return; }
+
                 const lvlMap = { error: 'text-red-400', warning: 'text-yellow-400', info: 'text-blue-400' };
                 el.innerHTML = logs.map(l => `
                     <div class="p-3 bg-black/30 border border-white/5 rounded-xl text-xs font-mono flex gap-2 items-start">
-                        <span class="${lvlMap[l.level] || 'text-gray-400'} font-bold shrink-0">[${(l.level || 'info').toUpperCase()}]</span>
+                        <span class="${lvlMap[l.level]||'text-gray-400'} font-bold shrink-0">[${(l.level||'info').toUpperCase()}]</span>
                         <span class="text-gray-500 shrink-0">${new Date(l.created_at).toLocaleString('ko-KR')}</span>
                         <span class="text-gray-300 break-all">${escHtml(l.message)}</span>
                     </div>`).join('');
-            } catch {
-                el.innerHTML = '<p class="text-sm text-red-400 text-center py-6">로그를 불러오지 못했습니다.</p>';
-            }
+            } catch { el.innerHTML = '<p class="text-sm text-red-400 text-center py-6">로그를 불러오지 못했습니다.</p>'; }
         }
 
         async function clearLogs() {
@@ -1013,21 +1269,14 @@
                 const res  = await fetch(`/api/logs?site_id=${siteId}`, { method: 'DELETE', headers: HEADERS });
                 const data = await res.json();
                 if (data.error) { showAlert(data.error, 'error'); return; }
-                showAlert(data.message || '로그가 삭제되었습니다.', 'success');
+                showAlert(data.message || '로그가 삭제되었습니다.');
                 await loadLogs();
-            } catch {
-                showAlert('로그 삭제 중 오류가 발생했습니다.', 'error');
-            }
+            } catch { showAlert('로그 삭제 중 오류가 발생했습니다.', 'error'); }
         }
 
-        // ── 위험 구역 ──────────────────────────────────────────────────────────
-        function visitSite() {
-            if (siteData) window.open(`https://${siteData.primary_domain}`, '_blank');
-        }
-
-        function openWpAdmin() {
-            if (siteData) window.open(`https://${siteData.primary_domain}/wp-admin`, '_blank');
-        }
+        // ── 위험 구역 ─────────────────────────────────────────────────────────
+        function visitSite() { if (siteData) window.open(`https://${siteData.primary_domain}`, '_blank'); }
+        function openWpAdmin() { if (siteData) window.open(`https://${siteData.primary_domain}/wp-admin`, '_blank'); }
 
         async function suspendSite() {
             if (!confirm('사이트를 일시 중단하시겠습니까?')) return;
@@ -1043,31 +1292,25 @@
         }
 
         async function reinstallWp() {
-            if (!confirm('WordPress를 재설치하시겠습니까? 플러그인과 테마가 초기화될 수 있습니다.')) return;
-            showAlert('WordPress 재설치 기능은 준비 중입니다.', 'error');
+            if (!confirm('WordPress를 재설치하시겠습니까?')) return;
+            showAlert('WordPress 재설치 기능은 준비 중입니다.', 'info');
         }
 
         async function deleteSite() {
-            const confirm1 = confirm('⚠️ 이 호스팅을 완전히 삭제하시겠습니까?\n모든 파일과 데이터가 영구 삭제됩니다.');
-            if (!confirm1) return;
-            const name = prompt('삭제를 확인하려면 사이트 이름을 입력하세요:', '');
+            if (!confirm('⚠️ 이 호스팅을 완전히 삭제하시겠습니까?\n모든 파일과 데이터가 영구 삭제됩니다.')) return;
+            const name = prompt('삭제를 확인하려면 사이트 이름을 입력하세요:');
             if (!siteData || name !== siteData.site_name) {
-                showAlert('사이트 이름이 일치하지 않아 삭제가 취소되었습니다.', 'error');
-                return;
+                showAlert('사이트 이름이 일치하지 않아 삭제가 취소되었습니다.', 'error'); return;
             }
             try {
                 const res = await fetch(`/api/sites?id=${siteId}`, { method: 'DELETE', headers: HEADERS });
                 const d   = await res.json();
-                if (res.ok) {
-                    alert('호스팅이 삭제되었습니다.');
-                    window.location.href = '/hosting.html';
-                } else {
-                    showAlert(d.error || '삭제에 실패했습니다.', 'error');
-                }
+                if (res.ok) { alert('호스팅이 삭제되었습니다.'); window.location.href = '/hosting.html'; }
+                else showAlert(d.error || '삭제에 실패했습니다.', 'error');
             } catch { showAlert('오류가 발생했습니다.', 'error'); }
         }
 
-        // ── 초기화 ─────────────────────────────────────────────────────────────
+        // ── 초기화 ────────────────────────────────────────────────────────────
         loadSiteInfo();
     </script>
 </body>

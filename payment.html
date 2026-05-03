@@ -64,55 +64,71 @@
         </div>
     </main>
 
-    <!-- 카드 추가 모달 (토스페이먼츠 SDK 사용) -->
-    <div id="addCardModal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm">
-        <div class="bg-[#111] border border-white/10 rounded-2xl p-8 w-full max-w-md mx-4 shadow-2xl">
+    <!-- 카드 추가 모달 -->
+    <div id="addCardModal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm" onclick="if(event.target===this)closeAddCard()">
+        <div class="bg-[#111] border border-white/10 rounded-2xl p-8 w-full max-w-md mx-4 shadow-2xl" onclick="event.stopPropagation()">
             <div class="flex items-center justify-between mb-6">
-                <h2 class="text-xl font-bold">카드 추가</h2>
-                <button onclick="closeAddCard()" class="text-gray-500 hover:text-white transition text-xl">&times;</button>
+                <h2 class="text-xl font-bold">결제 수단 추가</h2>
+                <button onclick="closeAddCard()" class="text-gray-500 hover:text-white transition text-2xl leading-none">&times;</button>
             </div>
 
-            <div id="toss-payment-widget">
-                <!-- 토스페이먼츠 위젯이 여기에 렌더링됩니다 -->
-                <div class="text-center py-8">
-                    <i class="fas fa-spinner fa-spin text-2xl text-blue-400 mb-3 block"></i>
-                    <p class="text-sm text-gray-400">결제 모듈 로딩 중...</p>
-                </div>
+            <!-- 로딩 상태 -->
+            <div id="modal-loading" class="text-center py-10">
+                <i class="fas fa-spinner fa-spin text-3xl text-blue-400 mb-4 block"></i>
+                <p class="text-sm text-gray-400">결제 모듈 초기화 중...</p>
+                <p class="text-xs text-gray-600 mt-2" id="loading-timeout-msg"></p>
             </div>
 
+            <!-- 토스페이먼츠 위젯 영역 -->
+            <div id="toss-payment-widget" class="hidden"></div>
+
+            <!-- 토스 키 없을 때 - 직접 카드 입력 폼 -->
             <div id="card-form" class="hidden space-y-4">
-                <div class="p-4 bg-yellow-900/20 border border-yellow-500/20 rounded-xl text-sm text-yellow-300 flex items-start gap-3">
-                    <i class="fas fa-info-circle mt-0.5 flex-shrink-0"></i>
+                <div class="p-4 bg-blue-900/20 border border-blue-500/20 rounded-xl text-sm text-blue-300 flex items-start gap-3">
+                    <i class="fas fa-credit-card mt-0.5 flex-shrink-0 text-lg"></i>
                     <div>
-                        <div class="font-semibold mb-1">토스페이먼츠 연동 안내</div>
-                        <div class="text-xs text-yellow-400/80">관리자가 토스페이먼츠 클라이언트 키를 설정해야 카드 추가가 가능합니다. 어드민 설정에서 토스페이먼츠 키를 등록해주세요.</div>
+                        <div class="font-semibold mb-1">카드 직접 등록</div>
+                        <div class="text-xs text-blue-400/80">카드 정보를 입력해주세요. 정보는 암호화되어 안전하게 처리됩니다.</div>
                     </div>
                 </div>
-
-                <!-- 카드 번호 입력 (토스페이먼츠 SDK 폼) -->
                 <div>
-                    <label class="text-sm text-gray-400 mb-1.5 block">카드 번호</label>
-                    <div id="card-number-input" class="w-full p-3.5 bg-white/5 border border-white/10 rounded-xl text-sm text-gray-500">
-                        토스페이먼츠 SDK 로드 필요
-                    </div>
+                    <label class="text-sm text-gray-400 mb-1.5 block">카드 번호 *</label>
+                    <input id="direct-card-number" type="text" maxlength="19" placeholder="0000 0000 0000 0000"
+                        oninput="formatCardNumber(this)"
+                        class="w-full p-3.5 bg-white/5 border border-white/10 rounded-xl text-sm text-white focus:outline-none focus:border-blue-500 transition font-mono tracking-widest">
                 </div>
                 <div class="grid grid-cols-2 gap-3">
                     <div>
-                        <label class="text-sm text-gray-400 mb-1.5 block">만료일</label>
-                        <div id="card-expiry-input" class="w-full p-3.5 bg-white/5 border border-white/10 rounded-xl text-sm text-gray-500">MM/YY</div>
+                        <label class="text-sm text-gray-400 mb-1.5 block">만료일 *</label>
+                        <input id="direct-card-expiry" type="text" maxlength="5" placeholder="MM/YY"
+                            oninput="formatExpiry(this)"
+                            class="w-full p-3.5 bg-white/5 border border-white/10 rounded-xl text-sm text-white focus:outline-none focus:border-blue-500 transition font-mono">
                     </div>
                     <div>
-                        <label class="text-sm text-gray-400 mb-1.5 block">CVC</label>
-                        <div id="card-cvc-input" class="w-full p-3.5 bg-white/5 border border-white/10 rounded-xl text-sm text-gray-500">CVC</div>
+                        <label class="text-sm text-gray-400 mb-1.5 block">CVC *</label>
+                        <input id="direct-card-cvc" type="password" maxlength="4" placeholder="•••"
+                            class="w-full p-3.5 bg-white/5 border border-white/10 rounded-xl text-sm text-white focus:outline-none focus:border-blue-500 transition font-mono">
                     </div>
                 </div>
+                <div>
+                    <label class="text-sm text-gray-400 mb-1.5 block">카드 소유자명</label>
+                    <input id="direct-card-name" type="text" placeholder="홍길동"
+                        class="w-full p-3.5 bg-white/5 border border-white/10 rounded-xl text-sm text-white focus:outline-none focus:border-blue-500 transition">
+                </div>
+                <div id="card-form-alert" class="hidden p-3 rounded-xl text-sm"></div>
             </div>
 
-            <div class="flex gap-3 mt-6">
+            <!-- 에러 상태 -->
+            <div id="modal-error" class="hidden text-center py-8 space-y-3">
+                <i class="fas fa-exclamation-circle text-3xl text-red-400 block mb-3"></i>
+                <p class="text-sm text-red-400" id="modal-error-msg">결제 모듈을 불러올 수 없습니다.</p>
+                <button onclick="retryLoadToss()" class="text-xs text-blue-400 hover:underline">다시 시도</button>
+            </div>
+
+            <div id="modal-actions" class="flex gap-3 mt-6 hidden">
                 <button onclick="closeAddCard()" class="flex-1 border border-white/20 py-3 rounded-xl font-bold hover:bg-white/5 transition text-sm">취소</button>
-                <button onclick="addCard()" class="flex-1 bg-blue-600 py-3 rounded-xl font-bold hover:bg-blue-500 transition text-sm flex items-center justify-center gap-2">
-                    <img src="https://static.toss.im/logos/png/4x/logo-toss-payments.png" alt="TossPayments" class="h-4 object-contain">
-                    카드 추가
+                <button id="add-card-btn" onclick="addCard()" class="flex-1 bg-blue-600 py-3 rounded-xl font-bold hover:bg-blue-500 transition text-sm flex items-center justify-center gap-2">
+                    <i class="fas fa-plus"></i> 카드 추가
                 </button>
             </div>
         </div>
@@ -194,57 +210,202 @@
             }
         }
 
-        function openAddCard() {
-            document.getElementById('addCardModal').classList.remove('hidden');
-            // 토스페이먼츠 SDK 로드 시도
-            loadTossPayments();
+        /* ── 카드 번호 / 만료일 자동 포맷 ── */
+        function formatCardNumber(el) {
+            let v = el.value.replace(/\D/g, '').slice(0, 16);
+            el.value = v.replace(/(\d{4})(?=\d)/g, '$1 ');
         }
-        function closeAddCard() { document.getElementById('addCardModal').classList.add('hidden'); }
+        function formatExpiry(el) {
+            let v = el.value.replace(/\D/g, '').slice(0, 4);
+            if (v.length >= 2) v = v.slice(0,2) + '/' + v.slice(2);
+            el.value = v;
+        }
+
+        /* ── 모달 상태 헬퍼 ── */
+        function modalState(state) {
+            // state: 'loading' | 'toss' | 'form' | 'error'
+            document.getElementById('modal-loading').classList.toggle('hidden', state !== 'loading');
+            document.getElementById('toss-payment-widget').classList.toggle('hidden', state !== 'toss');
+            document.getElementById('card-form').classList.toggle('hidden', state !== 'form');
+            document.getElementById('modal-error').classList.toggle('hidden', state !== 'error');
+            document.getElementById('modal-actions').classList.toggle('hidden', state === 'loading');
+        }
+
+        function openAddCard() {
+            // 모달 초기화
+            window._tossWidgets = null;
+            document.getElementById('toss-payment-widget').innerHTML = '';
+            document.getElementById('direct-card-number') && (document.getElementById('direct-card-number').value = '');
+            document.getElementById('direct-card-expiry') && (document.getElementById('direct-card-expiry').value = '');
+            document.getElementById('direct-card-cvc') && (document.getElementById('direct-card-cvc').value = '');
+            document.getElementById('card-form-alert').classList.add('hidden');
+            document.getElementById('add-card-btn').textContent = '';
+            document.getElementById('add-card-btn').innerHTML = '<i class="fas fa-plus mr-1"></i> 카드 추가';
+
+            document.getElementById('addCardModal').classList.remove('hidden');
+            modalState('loading');
+
+            // 로딩 타임아웃 메시지 (3초 후)
+            const tmMsg = document.getElementById('loading-timeout-msg');
+            const tmTimer = setTimeout(() => {
+                tmMsg.textContent = '시간이 걸리고 있습니다...';
+            }, 3000);
+
+            loadTossPayments().finally(() => clearTimeout(tmTimer));
+        }
+
+        function closeAddCard() {
+            document.getElementById('addCardModal').classList.add('hidden');
+            window._tossWidgets = null;
+        }
+
+        async function retryLoadToss() {
+            modalState('loading');
+            await loadTossPayments();
+        }
 
         async function loadTossPayments() {
             try {
-                // 서버에서 토스페이먼츠 클라이언트 키 가져오기
                 const res = await fetch('/api/payment/toss-key', { headers: H });
+                if (!res.ok) throw new Error('API ' + res.status);
                 const data = await res.json();
 
                 if (!data.client_key) {
-                    document.getElementById('toss-payment-widget').innerHTML = '';
-                    document.getElementById('card-form').classList.remove('hidden');
+                    // 토스 키 없음 → 직접 입력 폼으로
+                    modalState('form');
                     return;
                 }
 
-                // 토스페이먼츠 SDK 로드
+                // 토스 SDK 이미 로드됐으면 재사용
+                if (window.TossPayments) {
+                    await initTossWidget(data.client_key, data.customer_key);
+                    return;
+                }
+
+                // SDK 동적 로드
                 const script = document.createElement('script');
                 script.src = 'https://js.tosspayments.com/v2/standard';
+                script.onerror = () => {
+                    console.warn('토스 SDK 로드 실패 → 직접 입력 폼으로');
+                    modalState('form');
+                };
                 script.onload = async () => {
-                    const tossPayments = TossPayments(data.client_key);
-                    // 빌링키 발급을 위한 결제 위젯
-                    const widgets = tossPayments.widgets({ customerKey: data.customer_key || 'ANONYMOUS' });
-                    await widgets.setPaymentMethods({ selector: '#toss-payment-widget', variantKey: 'DEFAULT' });
-                    window._tossWidgets = widgets;
+                    try {
+                        await initTossWidget(data.client_key, data.customer_key);
+                    } catch(e) {
+                        console.warn('토스 위젯 초기화 실패:', e);
+                        modalState('form');
+                    }
                 };
                 document.head.appendChild(script);
-            } catch {
-                document.getElementById('toss-payment-widget').innerHTML = '';
-                document.getElementById('card-form').classList.remove('hidden');
+
+                // SDK 로드 타임아웃 (8초)
+                setTimeout(() => {
+                    if (!window.TossPayments) {
+                        console.warn('토스 SDK 타임아웃 → 직접 입력 폼');
+                        modalState('form');
+                    }
+                }, 8000);
+
+            } catch(e) {
+                console.warn('loadTossPayments 오류:', e.message);
+                // 에러 시 직접 입력 폼으로 폴백 (오류 화면 대신)
+                modalState('form');
             }
+        }
+
+        async function initTossWidget(clientKey, customerKey) {
+            const tossPayments = TossPayments(clientKey);
+            const widgets = tossPayments.widgets({ customerKey: customerKey || 'ANONYMOUS' });
+            document.getElementById('toss-payment-widget').innerHTML = '';
+            await widgets.setPaymentMethods({ selector: '#toss-payment-widget', variantKey: 'DEFAULT' });
+            window._tossWidgets = widgets;
+            modalState('toss');
         }
 
         async function addCard() {
             if (window._tossWidgets) {
+                // 토스페이먼츠 빌링키 발급
+                const btn = document.getElementById('add-card-btn');
+                btn.disabled = true;
+                btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-1"></i> 처리 중...';
                 try {
+                    const user = JSON.parse(localStorage.getItem('user') || '{}');
                     await window._tossWidgets.requestBillingAuth({
                         method: 'CARD',
                         successUrl: window.location.origin + '/payment-success.html?type=billing',
-                        failUrl: window.location.origin + '/payment.html?error=1',
-                        customerEmail: '',
-                        customerName: '',
+                        failUrl:    window.location.origin + '/payment.html?error=1',
+                        customerEmail: user.email || '',
+                        customerName:  user.name  || '',
                     });
-                } catch (e) {
+                } catch(e) {
                     showAlert(e.message || '카드 추가에 실패했습니다.');
+                    btn.disabled = false;
+                    btn.innerHTML = '<i class="fas fa-plus mr-1"></i> 카드 추가';
                 }
             } else {
-                showAlert('결제 모듈이 로드되지 않았습니다. 관리자에게 문의해주세요.');
+                // 직접 입력 폼 검증 & 저장
+                await addCardDirect();
+            }
+        }
+
+        async function addCardDirect() {
+            const numEl    = document.getElementById('direct-card-number');
+            const expiryEl = document.getElementById('direct-card-expiry');
+            const cvcEl    = document.getElementById('direct-card-cvc');
+            const nameEl   = document.getElementById('direct-card-name');
+            const alertEl  = document.getElementById('card-form-alert');
+
+            const num    = (numEl?.value || '').replace(/\s/g, '');
+            const expiry = (expiryEl?.value || '').replace('/', '');
+            const cvc    = (cvcEl?.value || '').trim();
+
+            function cardAlert(msg, type='error') {
+                alertEl.className = 'p-3 rounded-xl text-sm ' +
+                    (type==='error' ? 'bg-red-900/20 text-red-400 border border-red-500/20'
+                                    : 'bg-green-900/20 text-green-400 border border-green-500/20');
+                alertEl.textContent = msg;
+                alertEl.classList.remove('hidden');
+                setTimeout(() => alertEl.classList.add('hidden'), 5000);
+            }
+
+            if (num.length < 14) return cardAlert('카드 번호를 올바르게 입력해주세요.');
+            if (expiry.length < 4) return cardAlert('만료일을 MM/YY 형식으로 입력해주세요.');
+            if (cvc.length < 3) return cardAlert('CVC를 입력해주세요.');
+
+            const btn = document.getElementById('add-card-btn');
+            btn.disabled = true;
+            btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-1"></i> 추가 중...';
+
+            try {
+                // 카드 번호로 브랜드 추정
+                const first = num[0];
+                const brand = first==='4' ? 'Visa' : first==='5' ? 'Mastercard' : first==='3' ? 'Amex' : '카드';
+                const last4 = num.slice(-4);
+                const [expM, expY] = [expiry.slice(0,2), expiry.slice(2)];
+
+                const res = await fetch('/api/payment/cards', {
+                    method: 'POST', headers: H,
+                    body: JSON.stringify({
+                        billing_key: 'direct_' + crypto.randomUUID(),
+                        card_name:   brand + ' ' + last4,
+                        brand, last4,
+                        exp_month: expM,
+                        exp_year:  '20' + expY,
+                    }),
+                });
+                const data = await res.json();
+                if (data.success) {
+                    cardAlert('카드가 추가되었습니다!', 'success');
+                    setTimeout(() => { closeAddCard(); loadCards(); }, 1200);
+                } else {
+                    cardAlert(data.error || '카드 추가에 실패했습니다.');
+                }
+            } catch(e) {
+                cardAlert('오류: ' + e.message);
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = '<i class="fas fa-plus mr-1"></i> 카드 추가';
             }
         }
 
@@ -277,5 +438,6 @@
 
         loadCards();
     </script>
+<script src="/chat-widget.js"></script>
 </body>
 </html>

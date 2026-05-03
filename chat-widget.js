@@ -444,11 +444,16 @@
 
   inqSubmit.addEventListener("click", submitInquiry);
 
-  // 패널 외부 클릭 시 닫기
+  // 패널 외부 클릭 시 닫기 (패널 내부 클릭은 절대 닫지 않음)
   document.addEventListener("click", e => {
-    if (isOpen && !panel.contains(e.target) && !btn.contains(e.target)) {
-      isOpen = false;
-      panel.classList.remove("open");
-    }
+    if (!isOpen) return;
+    if (panel.contains(e.target) || btn.contains(e.target)) return;
+    isOpen = false;
+    panel.classList.remove("open");
+  });
+
+  // 패널 내부 클릭이 document까지 버블링되더라도 닫히지 않도록 차단
+  panel.addEventListener("click", e => {
+    e.stopPropagation();
   });
 })();

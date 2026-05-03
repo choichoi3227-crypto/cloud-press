@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>내 호스팅 | CloudPress</title>
+    <title>호스팅 관리 | CloudPress</title>
     <link rel="stylesheet" href="/style.css">
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
@@ -17,20 +17,22 @@
 </head>
 <body class="bg-[#050505] text-white md:flex md:h-screen">
     <script>
-        const token = localStorage.getItem('admin_token');
-        if (!token) window.location.href = '/login.html';
+        if (!localStorage.getItem('admin_token')) window.location.href = '/login.html';
+    </script>
 
     <!-- Main -->
     <main class="flex-1 w-full overflow-y-auto">
-        <div class="p-8 max-w-6xl mx-auto">
+        <div class="p-6 md:p-8 max-w-6xl mx-auto">
             <header class="flex justify-between items-center mb-8">
                 <div>
-                    <h1 class="text-3xl font-bold">내 호스팅</h1>
+                    <h1 class="text-2xl md:text-3xl font-bold">호스팅 관리</h1>
                     <p id="site-count" class="text-gray-500 text-sm mt-1">로딩 중...</p>
                 </div>
                 <a href="/hosting-create.html"
-                    class="bg-blue-600 px-6 py-3 rounded-full text-white font-bold hover:bg-blue-500 transition flex items-center gap-2">
-                    <i class="fas fa-plus"></i> 새 호스팅 생성
+                    class="bg-blue-600 px-4 md:px-6 py-2.5 md:py-3 rounded-full text-white font-bold hover:bg-blue-500 transition flex items-center gap-2 text-sm md:text-base">
+                    <i class="fas fa-plus"></i>
+                    <span class="hidden sm:inline">새 호스팅 생성</span>
+                    <span class="sm:hidden">생성</span>
                 </a>
             </header>
 
@@ -43,8 +45,8 @@
                         oninput="filterSites()">
                 </div>
                 <select id="status-filter" onchange="filterSites()"
-                    class="px-4 py-3 bg-white/5 border border-white/10 rounded-xl outline-none focus:border-blue-500 transition text-sm">
-                    <option value="">전체 상태</option>
+                    class="px-3 py-3 bg-white/5 border border-white/10 rounded-xl outline-none focus:border-blue-500 transition text-sm">
+                    <option value="">전체</option>
                     <option value="active">운영 중</option>
                     <option value="suspended">중단됨</option>
                     <option value="creating">생성 중</option>
@@ -52,7 +54,12 @@
             </div>
 
             <!-- 호스팅 목록 -->
-            <div id="hosting-list"></div>
+            <div id="hosting-list">
+                <div class="text-center py-20 text-gray-500">
+                    <i class="fas fa-spinner fa-spin text-3xl mb-4 block"></i>
+                    <p>호스팅 목록을 불러오는 중...</p>
+                </div>
+            </div>
         </div>
     </main>
 
@@ -66,7 +73,7 @@
         function statusBadge(status) {
             const map = {
                 active:    { cls: 'status-active',    icon: 'fa-circle',    label: '운영 중' },
-                creating:  { cls: 'status-creating',  icon: 'fa-spinner',   label: '생성 중' },
+                creating:  { cls: 'status-creating',  icon: 'fa-spinner fa-spin', label: '생성 중' },
                 suspended: { cls: 'status-suspended', icon: 'fa-pause',     label: '중단됨'  },
             };
             const s = map[status] || { cls: 'status-creating', icon: 'fa-question', label: status };
@@ -99,16 +106,16 @@
                     <div class="site-card bg-[#0f0f0f] border border-white/10 rounded-2xl p-6 cursor-pointer"
                          onclick="window.location='/hosting-detail.html?id=${site.id}'">
                         <div class="flex justify-between items-start mb-4">
-                            <div>
-                                <h3 class="text-lg font-bold">${escHtml(site.site_name)}</h3>
+                            <div class="min-w-0 flex-1 pr-3">
+                                <h3 class="text-lg font-bold truncate">${escHtml(site.site_name)}</h3>
                                 <a href="https://${escHtml(site.primary_domain)}" target="_blank"
                                    onclick="event.stopPropagation()"
                                    class="text-blue-400 text-sm hover:underline flex items-center gap-1 mt-1">
                                     <i class="fas fa-external-link-alt text-xs"></i>
-                                    ${escHtml(site.primary_domain)}
+                                    <span class="truncate">${escHtml(site.primary_domain)}</span>
                                 </a>
                             </div>
-                            <div class="flex flex-col items-end gap-2">
+                            <div class="flex flex-col items-end gap-2 flex-shrink-0">
                                 ${statusBadge(site.status)}
                                 ${phpBadge(site.php_version || '8.2')}
                             </div>
@@ -118,13 +125,13 @@
                             <span><i class="fas fa-calendar mr-1"></i>
                                 ${site.created_at ? new Date(site.created_at).toLocaleDateString('ko-KR') : '-'}
                             </span>
-                            <div class="flex gap-3">
+                            <div class="flex gap-3 items-center">
                                 ${site.cache_enabled
                                     ? '<span class="text-green-500"><i class="fas fa-bolt mr-1"></i>캐시 ON</span>'
                                     : '<span class="text-gray-600"><i class="fas fa-bolt mr-1"></i>캐시 OFF</span>'}
-                                <span onclick="event.stopPropagation()" class="text-gray-500 hover:text-red-400 transition cursor-pointer" onclick="deleteSite('${site.id}', event)">
-                                    <i class="fas fa-trash" onclick="deleteSite('${site.id}', event)"></i>
-                                </span>
+                                <button onclick="deleteSite('${site.id}', event)" class="text-gray-500 hover:text-red-400 transition p-1">
+                                    <i class="fas fa-trash"></i>
+                                </button>
                             </div>
                         </div>
                     </div>
@@ -155,14 +162,13 @@
                 }
                 const data = await res.json();
                 allSites   = data.sites || [];
-                document.getElementById('site-count').textContent =
-                    `전체 ${allSites.length}개`;
+                document.getElementById('site-count').textContent = `전체 ${allSites.length}개`;
                 renderSites(allSites);
             } catch (e) {
                 console.error('[hosting] 로드 실패:', e);
                 document.getElementById('hosting-list').innerHTML =
                     `<div class="text-center py-16 text-red-400">
-                        <i class="fas fa-exclamation-circle text-3xl mb-3"></i>
+                        <i class="fas fa-exclamation-circle text-3xl mb-3 block"></i>
                         <p>호스팅 목록을 불러오지 못했습니다.</p>
                     </div>`;
             }

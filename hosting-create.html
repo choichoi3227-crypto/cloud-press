@@ -518,6 +518,22 @@
             document.getElementById('done-wp-link').href     = `${siteUrl}/wp-admin`;
         }
         document.getElementById('done-detail-link').href = `/hosting-detail.html?id=${createdSiteId}`;
+
+        // 3초 후 자동으로 hosting.html로 이동
+        let countdown = 5;
+        const countEl = document.createElement('p');
+        countEl.className = 'text-xs text-gray-500 text-center mt-4';
+        countEl.textContent = `${countdown}초 후 호스팅 목록으로 이동합니다...`;
+        document.getElementById('step-done').querySelector('.space-y-3')?.appendChild(countEl);
+
+        const redirectTimer = setInterval(() => {
+            countdown--;
+            if (countEl) countEl.textContent = `${countdown}초 후 호스팅 목록으로 이동합니다...`;
+            if (countdown <= 0) {
+                clearInterval(redirectTimer);
+                window.location.href = '/hosting.html';
+            }
+        }, 1000);
     }
 
     // ── 폼 유틸 ──────────────────────────────────────────────────────────────
@@ -693,5 +709,6 @@
         stopElapsedTimer();
     });
     </script>
+<script src="/chat-widget.js"></script>
 </body>
 </html>

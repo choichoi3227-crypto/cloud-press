@@ -39,6 +39,7 @@
         <a href="/admin.html"          class="flex items-center gap-3 p-3 rounded-xl hover:bg-white/5 transition text-gray-400 text-sm"><i class="fas fa-chart-line w-5 text-center"></i> 개요</a>
         <a href="/admin-users.html"    class="flex items-center gap-3 p-3 rounded-xl hover:bg-white/5 transition text-gray-400 text-sm"><i class="fas fa-users w-5 text-center"></i> 사용자 관리</a>
         <a href="/admin-sites.html"    class="flex items-center gap-3 p-3 rounded-xl hover:bg-white/5 transition text-gray-400 text-sm"><i class="fas fa-globe w-5 text-center"></i> 사이트 관리</a>
+        <a href="/admin-inquiries.html" class="flex items-center gap-3 p-3 rounded-xl hover:bg-white/5 transition text-gray-400 text-sm"><i class="fas fa-comments w-5 text-center"></i> 문의 관리</a>
         <a href="/admin-settings.html" class="flex items-center gap-3 p-3 rounded-xl bg-white/10 font-bold text-sm"><i class="fas fa-cog w-5 text-center"></i> 시스템 설정</a>
     </nav>
     <button onclick="logout()" class="mt-auto w-full bg-red-600/20 border border-red-500/30 text-red-400 py-3 rounded-xl font-bold hover:bg-red-600/30 transition text-sm">
@@ -310,6 +311,82 @@
             대용량 사이트는 여러 토큰을 추가하여 분산하세요.
         </div>
     </div>
+
+    <!-- ── Gemini AI 챗봇 설정 ── -->
+    <div class="p-6 bg-[#111] rounded-2xl border border-white/5 space-y-5">
+        <div class="flex items-center justify-between">
+            <h2 class="font-bold flex items-center gap-2">
+                <span class="text-purple-400 text-lg">✦</span>
+                Gemini AI 챗봇 설정
+            </h2>
+            <span id="gemini-count-badge" class="text-xs bg-white/10 text-gray-300 px-3 py-1 rounded-full">로딩 중...</span>
+        </div>
+        <p class="text-sm text-gray-400">
+            챗봇이 스크립트로 처리하지 못하는 문의를 Cloudflare AI → Gemini 순으로 처리합니다.<br>
+            여러 API 키를 추가하면 자동으로 부하를 분산합니다. <span class="text-purple-400">API 키는 무제한으로 추가 가능합니다.</span>
+        </p>
+
+        <!-- 모델 설정 -->
+        <div class="p-4 bg-black/30 rounded-xl space-y-3">
+            <div class="text-xs text-gray-500 font-bold uppercase tracking-wider">사용 모델 (텍스트로 직접 입력)</div>
+            <div class="flex gap-3">
+                <input id="gemini-model-input" type="text"
+                    placeholder="gemini-2.5-flash-lite-preview-06-17"
+                    class="flex-1 bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-sm font-mono focus:outline-none focus:border-purple-500 transition" />
+                <button onclick="saveGeminiModel()"
+                    class="bg-purple-600 hover:bg-purple-500 text-white font-bold px-5 py-2.5 rounded-xl transition text-sm">
+                    저장
+                </button>
+            </div>
+            <p class="text-xs text-gray-600">기본값: <code class="bg-white/10 px-1 rounded">gemini-2.5-flash-lite-preview-06-17</code> — 직접 모델명을 입력하세요.</p>
+            <div id="gemini-model-alert" class="hidden p-3 rounded-xl text-sm"></div>
+        </div>
+
+        <!-- API 키 추가 -->
+        <div class="p-4 bg-black/30 rounded-xl space-y-3">
+            <div class="text-xs text-gray-500 font-bold uppercase tracking-wider">새 API 키 추가</div>
+            <div class="flex flex-col md:flex-row gap-3">
+                <div class="flex-1">
+                    <label class="text-xs text-gray-500 mb-1 block">Gemini API Key</label>
+                    <input id="gemini-key-input" type="password"
+                        placeholder="AIzaSy..."
+                        class="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-sm font-mono focus:outline-none focus:border-purple-500 transition"
+                        autocomplete="off" />
+                    <p class="text-xs text-gray-600 mt-1">
+                        <a href="https://aistudio.google.com/apikey" target="_blank" class="text-purple-400 hover:underline">
+                            <i class="fas fa-external-link-alt mr-1"></i>Google AI Studio
+                        </a>에서 무료 발급 가능합니다.
+                    </p>
+                </div>
+                <div class="md:w-40">
+                    <label class="text-xs text-gray-500 mb-1 block">레이블 (선택)</label>
+                    <input id="gemini-key-label" type="text"
+                        placeholder="API 키 1"
+                        class="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-purple-500 transition" />
+                </div>
+            </div>
+            <div id="gemini-add-alert" class="hidden p-3 rounded-xl text-sm"></div>
+            <button onclick="addGeminiKey()"
+                class="bg-purple-600 hover:bg-purple-500 text-white font-bold px-6 py-2.5 rounded-xl transition flex items-center gap-2">
+                <i class="fas fa-plus"></i>
+                API 추가
+            </button>
+        </div>
+
+        <!-- 등록된 키 목록 -->
+        <div>
+            <div class="text-xs text-gray-500 font-bold uppercase tracking-wider mb-3">등록된 API 키</div>
+            <div id="gemini-key-list" class="space-y-2">
+                <div class="text-center text-gray-600 py-4 text-sm">로딩 중...</div>
+            </div>
+        </div>
+
+        <div class="p-3 bg-purple-900/20 border border-purple-500/20 rounded-xl text-xs text-purple-300">
+            <i class="fas fa-info-circle mr-2"></i>
+            Gemini 2.5 Flash Lite는 분당 30 요청 무료 제공. 여러 키 추가 시 자동 분산됩니다.<br>
+            챗봇 처리 순서: <strong>정해진 스크립트</strong> → <strong>Cloudflare AI</strong> → <strong>Gemini (폴백)</strong>
+        </div>
+    </div>
 </main>
 
 <script src="/src/auth-frontend.js"></script>
@@ -521,6 +598,95 @@ async function saveTossSettings() {
 loadStats();
 loadGithubTokens();
 loadAdminSettings();
+loadGeminiSettings();
+
+// ── Gemini 설정 ─────────────────────────────────────────────────────────────
+async function loadGeminiSettings() {
+    try {
+        const res  = await fetch('/api/admin/ai-settings', { headers: HEADERS });
+        const data = await res.json();
+        document.getElementById('gemini-count-badge').textContent = `키 ${data.count || 0}개 등록됨`;
+        if (data.model) document.getElementById('gemini-model-input').value = data.model;
+        renderGeminiKeys(data.keys || []);
+    } catch (e) {
+        document.getElementById('gemini-key-list').innerHTML = '<div class="text-red-400 text-sm">로드 실패</div>';
+    }
+}
+
+function renderGeminiKeys(keys) {
+    const el = document.getElementById('gemini-key-list');
+    if (!keys.length) {
+        el.innerHTML = '<div class="text-center text-gray-600 py-4 text-sm">등록된 API 키가 없습니다.</div>';
+        return;
+    }
+    el.innerHTML = keys.map(k => `
+        <div class="flex items-center gap-3 p-3 bg-black/20 rounded-xl border border-white/5">
+            <div class="w-8 h-8 rounded-lg bg-purple-900/30 border border-purple-500/20 flex items-center justify-center flex-shrink-0">
+                <i class="fas fa-key text-purple-400 text-xs"></i>
+            </div>
+            <div class="flex-1 min-w-0">
+                <div class="text-sm font-bold truncate">${escHtml(k.label || '(레이블 없음)')}</div>
+                <div class="text-xs text-gray-500 font-mono">${escHtml(k.api_key_masked)}</div>
+            </div>
+            <div class="text-xs text-gray-600">${k.created_at ? new Date(k.created_at).toLocaleDateString('ko-KR') : ''}</div>
+            <button onclick="removeGeminiKey(${k.id}, '${escHtml(k.label || '')}')"
+                class="text-red-400 hover:text-red-300 transition p-1.5 hover:bg-red-900/20 rounded-lg">
+                <i class="fas fa-trash-alt text-xs"></i>
+            </button>
+        </div>
+    `).join('');
+}
+
+async function addGeminiKey() {
+    const key   = document.getElementById('gemini-key-input').value.trim();
+    const label = document.getElementById('gemini-key-label').value.trim();
+    const alertEl = document.getElementById('gemini-add-alert');
+    if (!key) { showAlert(alertEl, 'API 키를 입력해주세요.', 'error'); return; }
+    const btn = document.querySelector('button[onclick="addGeminiKey()"]');
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>추가 중...';
+    try {
+        const res  = await fetch('/api/admin/ai-settings', {
+            method: 'POST', headers: HEADERS,
+            body: JSON.stringify({ api_key: key, label }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || '오류');
+        showAlert(alertEl, data.message, 'success');
+        document.getElementById('gemini-key-input').value = '';
+        document.getElementById('gemini-key-label').value = '';
+        await loadGeminiSettings();
+    } catch (e) {
+        showAlert(alertEl, e.message, 'error');
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="fas fa-plus mr-2"></i>API 추가';
+    }
+}
+
+async function removeGeminiKey(id, label) {
+    if (!confirm(`"${label || 'API 키'}"를 삭제하시겠습니까?`)) return;
+    try {
+        const res  = await fetch(`/api/admin/ai-settings?id=${id}`, { method: 'DELETE', headers: HEADERS });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || '오류');
+        await loadGeminiSettings();
+    } catch (e) { alert('삭제 오류: ' + e.message); }
+}
+
+async function saveGeminiModel() {
+    const model = document.getElementById('gemini-model-input').value.trim();
+    const alertEl = document.getElementById('gemini-model-alert');
+    if (!model) { showAlert(alertEl, '모델명을 입력해주세요.', 'error'); return; }
+    try {
+        const res  = await fetch('/api/admin/ai-settings', {
+            method: 'PUT', headers: HEADERS, body: JSON.stringify({ model }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || '오류');
+        showAlert(alertEl, data.message + ` (${data.model})`, 'success');
+    } catch (e) { showAlert(alertEl, e.message, 'error'); }
+}
 </script>
 </body>
 </html>

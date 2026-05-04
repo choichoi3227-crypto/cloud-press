@@ -537,7 +537,45 @@ function sitesEncode64(src, count) {
   }
   return out;
 }
-async function sitesPhpassCreate(password) {
+function sitesMd5(data) {
+  const enc = new TextEncoder();
+  const bytes = typeof data === "string" ? enc.encode(data) : data;
+  const T = new Uint32Array(64);
+  for (let i = 0; i < 64; i++) T[i] = (Math.abs(Math.sin(i + 1)) * 0x100000000) >>> 0;
+  const S = [7,12,17,22,7,12,17,22,7,12,17,22,7,12,17,22,
+             5, 9,14,20,5, 9,14,20,5, 9,14,20,5, 9,14,20,
+             4,11,16,23,4,11,16,23,4,11,16,23,4,11,16,23,
+             6,10,15,21,6,10,15,21,6,10,15,21,6,10,15,21];
+  const msgLen = bytes.length;
+  const bitLen = msgLen * 8;
+  const padLen = ((msgLen % 64) < 56 ? 56 : 120) - (msgLen % 64);
+  const padded = new Uint8Array(msgLen + padLen + 8);
+  padded.set(bytes); padded[msgLen] = 0x80;
+  const view = new DataView(padded.buffer);
+  view.setUint32(msgLen + padLen,     bitLen >>> 0, true);
+  view.setUint32(msgLen + padLen + 4, Math.floor(bitLen / 0x100000000), true);
+  let a0=0x67452301,b0=0xefcdab89,c0=0x98badcfe,d0=0x10325476;
+  for (let i = 0; i < padded.length; i += 64) {
+    const M = new Uint32Array(16);
+    for (let j=0;j<16;j++) M[j]=view.getUint32(i+j*4,true);
+    let [a,b,c,d]=[a0,b0,c0,d0];
+    for (let j=0;j<64;j++) {
+      let f,g;
+      if      (j<16){f=(b&c)|(~b&d);g=j;}
+      else if (j<32){f=(d&b)|(~d&c);g=(5*j+1)%16;}
+      else if (j<48){f=b^c^d;g=(3*j+5)%16;}
+      else          {f=c^(b|~d);g=(7*j)%16;}
+      f=(f+a+T[j]+M[g])>>>0; a=d; d=c; c=b;
+      b=(b+((f<<S[j])|(f>>>(32-S[j]))))>>>0;
+    }
+    a0=(a0+a)>>>0;b0=(b0+b)>>>0;c0=(c0+c)>>>0;d0=(d0+d)>>>0;
+  }
+  const out=new Uint8Array(16); const ov=new DataView(out.buffer);
+  ov.setUint32(0,a0,true);ov.setUint32(4,b0,true);ov.setUint32(8,c0,true);ov.setUint32(12,d0,true);
+  return out;
+}
+
+function sitesPhpassCreate(password) {
   const countLog2 = 8;
   const chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789./";
   const rnd = new Uint8Array(8);
@@ -547,13 +585,12 @@ async function sitesPhpassCreate(password) {
   const prefix = `$P$${SITES_ITOA64[countLog2]}${salt}`;
   let count = 1 << countLog2;
   const enc = new TextEncoder();
-  const md5 = async (data) => new Uint8Array(await crypto.subtle.digest("MD5", typeof data === "string" ? enc.encode(data) : data));
-  let h = await md5(salt + password);
   const pb = enc.encode(password);
+  let h = sitesMd5(salt + password);
   while (count--) {
     const c = new Uint8Array(h.length + pb.length);
     c.set(h); c.set(pb, h.length);
-    h = await md5(c);
+    h = sitesMd5(c);
   }
   return prefix + sitesEncode64(h, 16);
 }
@@ -562,7 +599,7 @@ async function buildWpInitSql(siteId, domain, adminUser, adminPass, adminEmail) 
   const now     = new Date().toISOString().slice(0, 19).replace("T", " ");
   const siteUrl = `https://${domain}`;
   // 올바른 phpass 해시 생성 (worker-wp.js의 phpassCheck와 완전 호환)
-  const passHash = await sitesPhpassCreate(adminPass);
+  const passHash = sitesPhpassCreate(adminPass);
 
   // WordPress 6.x 완전한 스키마 (공식 wp-admin/includes/schema.php 기반)
   return `

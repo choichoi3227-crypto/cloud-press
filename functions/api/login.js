@@ -28,14 +28,14 @@ export async function onRequestPost(context) {
       return jsonErr("이메일 또는 비밀번호가 올바르지 않습니다.", 401);
 
     const secret = env.JWT_SECRET || "cp_dev_secret_change_me";
-    const token  = await generateJWT(
+    const jwtToken = await generateJWT(
       { id: user.id, email: user.email, role: user.role },
       secret
     );
 
-    await sessionCreate(env.SESSIONS, user.id, user.email, user.role);
+    await sessionCreate(env.SESSIONS, user.id, user.email, user.role).catch(() => {});
 
-    return jsonOk({ success: true, token });
+    return jsonOk({ success: true, token: jwtToken });
   } catch (e) {
     console.error("[login]", e);
     return jsonErr("로그인 오류: " + e.message, 500);

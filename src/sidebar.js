@@ -6,13 +6,13 @@
   const path = window.location.pathname;
 
   function isActive(href) {
-    if (href === '/dashboard.html') return path === '/dashboard' || path === '/';
+    if (href === '/dashboard') return path === '/dashboard' || path === '/';
     return path.startsWith(href);
   }
 
   // 서비스 메뉴 항목 중 활성화 여부
-  const servicePages = ['/hosting.html', '/hosting-create.html', '/hosting-detail.html',
-    '/domains.html', '/dns.html', '/payment.html', '/account.html'];
+  const servicePages = ['/hosting', '/hosting-create', '/hosting-detail',
+    '/domains', '/dns', '/payment', '/account'];
   const isServiceActive = servicePages.some(p => path.startsWith(p));
 
   // ── 사용자 정보 로드 ─────────────────────────────────────────
@@ -34,16 +34,16 @@
     const initials = name.charAt(0).toUpperCase();
 
     const navItems = [
-      { href: '/dashboard.html', icon: 'fas fa-tachometer-alt', label: '대시보드' },
-      { href: '/traffic.html', icon: 'fas fa-chart-line', label: '트래픽' },
-      { href: '/storage.html', icon: 'fas fa-hdd', label: '스토리지' },
+      { href: '/dashboard', icon: 'fas fa-tachometer-alt', label: '대시보드' },
+      { href: '/traffic', icon: 'fas fa-chart-line', label: '트래픽' },
+      { href: '/storage', icon: 'fas fa-hdd', label: '스토리지' },
     ];
 
     const serviceItems = [
-      { href: '/hosting.html', icon: 'fas fa-server', label: '호스팅 관리' },
-      { href: '/domains.html', icon: 'fas fa-globe', label: '도메인 관리' },
-      { href: '/payment.html', icon: 'fas fa-credit-card', label: '결제 수단 관리' },
-      { href: '/account.html', icon: 'fas fa-user-circle', label: '내 정보 관리' },
+      { href: '/hosting', icon: 'fas fa-server', label: '호스팅 관리' },
+      { href: '/domains', icon: 'fas fa-globe', label: '도메인 관리' },
+      { href: '/payment', icon: 'fas fa-credit-card', label: '결제 수단 관리' },
+      { href: '/account', icon: 'fas fa-user-circle', label: '내 정보 관리' },
     ];
 
     return `
@@ -139,13 +139,13 @@
     const role = user?.role;
 
     const allLinks = [
-      { href: '/dashboard.html', icon: 'fas fa-tachometer-alt', label: '대시보드' },
-      { href: '/traffic.html', icon: 'fas fa-chart-line', label: '트래픽' },
-      { href: '/storage.html', icon: 'fas fa-hdd', label: '스토리지' },
-      { href: '/hosting.html', icon: 'fas fa-server', label: '호스팅 관리' },
-      { href: '/domains.html', icon: 'fas fa-globe', label: '도메인 관리' },
-      { href: '/payment.html', icon: 'fas fa-credit-card', label: '결제 수단' },
-      { href: '/account.html', icon: 'fas fa-user-circle', label: '내 정보 관리' },
+      { href: '/dashboard', icon: 'fas fa-tachometer-alt', label: '대시보드' },
+      { href: '/traffic', icon: 'fas fa-chart-line', label: '트래픽' },
+      { href: '/storage', icon: 'fas fa-hdd', label: '스토리지' },
+      { href: '/hosting', icon: 'fas fa-server', label: '호스팅 관리' },
+      { href: '/domains', icon: 'fas fa-globe', label: '도메인 관리' },
+      { href: '/payment', icon: 'fas fa-credit-card', label: '결제 수단' },
+      { href: '/account', icon: 'fas fa-user-circle', label: '내 정보 관리' },
     ];
 
     return `

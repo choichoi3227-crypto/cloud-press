@@ -3,7 +3,7 @@
 async function loadDashboardData() {
   const token = localStorage.getItem('admin_token');
   if (!token) {
-    window.location.href = '/login.html';
+    window.location.href = '/login';
     return;
   }
 
@@ -14,7 +14,7 @@ async function loadDashboardData() {
     const res = await fetch('/api/sites', { headers });
     if (res.status === 401) {
       localStorage.removeItem('admin_token');
-      window.location.href = '/login.html';
+      window.location.href = '/login';
       return;
     }
     const data = await res.json();
@@ -88,10 +88,10 @@ async function loadDashboardData() {
 loadDashboardData();
   // "제공 예정" 알림 제거 및 페이지 이동 처리
   window.createHosting = function() {
-      location.href = '/create-hosting.html';
+      location.href = '/hosting-create';
   };
 
   // 호스팅 상세 페이지로 이동
   window.viewSiteDetails = function(siteId) {
-      location.href = `/hosting-detail.html?id=${siteId}`;
+      location.href = `/hosting-detail?id=${siteId}`;
   };

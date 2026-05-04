@@ -48,10 +48,86 @@ async function getCfAccountId(cf) {
   return r.result?.[0]?.id || null;
 }
 
+// ── 폴백 Worker 스크립트 (worker-wp.js를 가져오지 못한 경우) ─────────────
+// 최소한의 기능만 포함한 폴백 스크립트입니다.
+// ASSETS 바인딩이 정상이라면 이 함수는 호출되지 않습니다.
+
+function buildFallbackWorkerScript() {
+  return `/**
+ * CloudPress WordPress Worker - Fallback v5.1
+ * worker-wp.js를 로드하지 못한 경우 자동으로 사용되는 최소 스크립트입니다.
+ * 정상 동작을 위해 ASSETS 바인딩에 worker-wp.js가 포함되어야 합니다.
+ */
+const WP_CORE_OWNER  = "WordPress";
+const WP_CORE_REPO   = "WordPress";
+const WP_CORE_BRANCH = "master";
+
+const CORS = {
+  "Access-Control-Allow-Origin":  "*",
+  "Access-Control-Allow-Methods": "GET,POST,PUT,DELETE,OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type,Authorization",
+};
+
+function ghRaw(owner, repo, branch, path) {
+  return \`https://raw.githubusercontent.com/\${owner}/\${repo}/\${branch}/\${path}\`;
+}
+
+const STATIC_EXT = /\\.(css|js|jpg|jpeg|png|gif|webp|svg|ico|woff2?|ttf|eot|otf|map)$/i;
+
+export default {
+  async fetch(request, env) {
+    const url = new URL(request.url);
+    if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: CORS });
+
+    if (url.pathname === "/api/health") {
+      return new Response(JSON.stringify({
+        status: "ok", version: "5.1-fallback",
+        site: env.SITE_ID || "%%SITE_ID%%",
+        note: "worker-wp.js fallback active",
+      }), { status: 200, headers: { ...CORS, "Content-Type": "application/json" } });
+    }
+
+    // wp-content → 사용자 레포
+    if (url.pathname.startsWith("/wp-content/")) {
+      const owner = env.GITHUB_OWNER || "%%GITHUB_OWNER%%";
+      const repo  = env.GITHUB_REPO  || "%%GITHUB_REPO%%";
+      if (owner && repo) {
+        const rawUrl = \`https://raw.githubusercontent.com/\${owner}/\${repo}/main/\${url.pathname.slice(1)}\`;
+        const res = await fetch(rawUrl, { headers: { "User-Agent": "CloudPress-Fallback/5.1" } });
+        if (res.ok) return new Response(await res.arrayBuffer(), {
+          status: 200,
+          headers: { ...CORS, "Content-Type": res.headers.get("Content-Type") || "application/octet-stream" },
+        });
+      }
+    }
+
+    // 코어 정적 파일 → WordPress/WordPress
+    if (STATIC_EXT.test(url.pathname)) {
+      const rawUrl = ghRaw(WP_CORE_OWNER, WP_CORE_REPO, WP_CORE_BRANCH, url.pathname.replace(/^\\//, ""));
+      const res = await fetch(rawUrl, { headers: { "User-Agent": "CloudPress-Fallback/5.1" }, cf: { cacheEverything: true, cacheTtl: 86400 } });
+      if (res.ok) return new Response(await res.arrayBuffer(), {
+        status: 200,
+        headers: { ...CORS, "Content-Type": res.headers.get("Content-Type") || "application/octet-stream", "Cache-Control": "public, max-age=86400" },
+      });
+    }
+
+    return new Response(
+      \`<!DOCTYPE html><html lang="ko"><head><meta charset="UTF-8"><meta http-equiv="refresh" content="10">
+<title>CloudPress 준비 중</title></head><body style="font-family:sans-serif;text-align:center;padding:60px">
+<h2>☁️ WordPress 준비 중</h2><p>사이트를 초기화하고 있습니다. 잠시 후 새로고침됩니다.</p>
+<small>CloudPress v5.1 · Site: %%SITE_ID%%</small></body></html>\`,
+      { headers: { ...CORS, "Content-Type": "text/html; charset=utf-8" } }
+    );
+  },
+};
+`;
+}
+
 // ── CF Worker 생성 + D1/KV 바인딩 포함 ────────────────────────────────────
 //
-// worker.js의 실제 코드를 업로드하고, D1/KV를 바인딩에 연결합니다.
-// 변수로 치환할 부분: GITHUB_OWNER, GITHUB_REPO, SITE_ID
+// worker-wp.js를 ASSETS에서 읽어 사이트 변수를 치환한 뒤 CF API로 업로드합니다.
+// WordPress 코어 → WordPress/WordPress 공식 GitHub 레포
+// 사용자 콘텐츠  → 호스팅 생성 시 만들어진 개인 GitHub 레포 (GITHUB_OWNER/GITHUB_REPO)
 //
 async function createCfWorkerWithBindings({
   cf,
@@ -64,10 +140,39 @@ async function createCfWorkerWithBindings({
   kvId,
   jwtSecret,
   githubToken,
+  env,
 }) {
-  // ── 실제 worker.js 코드 (worker.js와 동일한 로직, 사이트 변수만 주입) ──
-  // CloudPress 플랫폼의 worker.js를 기반으로 각 사이트의 환경변수를 하드코딩
+  // ── worker-wp.js 소스 취득 ──────────────────────────────────────────────
+  // ASSETS 바인딩에서 worker-wp.js를 읽어 사이트 변수만 치환하여 배포합니다.
+  // WordPress 코어 → WordPress/WordPress 공식 레포
+  // 사용자 콘텐츠  → 호스팅 생성 시 만들어진 개인 GitHub 레포
+  let wpWorkerSource = null;
+
+  // 1순위: ASSETS 바인딩 (Cloudflare Pages)
+  if (env?.ASSETS) {
+    try {
+      const assetRes = await env.ASSETS.fetch(new Request("https://worker/worker-wp.js"));
+      if (assetRes.ok) {
+        wpWorkerSource = await assetRes.text();
+      }
+    } catch (e) {
+      console.warn("[worker] ASSETS fetch 실패:", e.message);
+    }
+  }
+
+  // 2순위: 환경변수에 소스가 있으면 사용 (사전 설정용)
+  if (!wpWorkerSource && env?.WORKER_WP_SOURCE) {
+    wpWorkerSource = env.WORKER_WP_SOURCE;
+  }
+
+  // 3순위: 소스를 얻지 못한 경우 최소 폴백 스크립트 사용
+  if (!wpWorkerSource) {
+    console.warn("[worker] worker-wp.js 소스를 가져오지 못했습니다. 폴백 스크립트를 사용합니다.");
+    wpWorkerSource = buildFallbackWorkerScript();
+  }
+
   const workerScript = buildSiteWorkerScript({
+    source:      wpWorkerSource,
     siteId,
     githubOwner: githubOwner || "",
     githubRepo:  githubRepo  || "",
@@ -153,445 +258,16 @@ async function createCfWorkerWithBindings({
 }
 
 // ── 사이트 Worker 스크립트 생성 ─────────────────────────────────────────────
-// WordPress/WordPress 공식 GitHub 레포에서 직접 PHP 파일을 서빙합니다.
-// 사용자 레포는 wp-content(uploads, themes, plugins)만 저장합니다.
+// worker-wp.js를 기반으로 사이트 변수(SITE_ID, GITHUB_OWNER, GITHUB_REPO)만 치환합니다.
+// WordPress 코어 파일 → WordPress/WordPress 공식 레포
+// 사용자 콘텐츠    → 호스팅 생성 시 만들어진 개인 GitHub 레포
 
-function buildSiteWorkerScript({ siteId, githubOwner, githubRepo }) {
-  return `/**
- * CloudPress WordPress Worker v5.0
- * Core: WordPress/WordPress (github.com/WordPress/WordPress) - 100% Official
- * User Data: ${githubOwner}/${githubRepo} (uploads, themes, plugins only)
- * Site: ${siteId}
- */
-
-// ─── Constants ────────────────────────────────────────────────────────────
-const WP_CORE_OWNER  = "WordPress";
-const WP_CORE_REPO   = "WordPress";
-const WP_CORE_BRANCH = "master"; // 공식 WordPress/WordPress 최신 안정 브랜치
-
-// ─── GitHub Raw CDN ────────────────────────────────────────────────────────
-function ghRaw(owner, repo, branch, path) {
-  return \`https://raw.githubusercontent.com/\${owner}/\${repo}/\${branch}/\${path}\`;
-}
-
-function wpCoreRaw(path) {
-  return ghRaw(WP_CORE_OWNER, WP_CORE_REPO, WP_CORE_BRANCH, path);
-}
-
-function userRepoRaw(env, path) {
-  if (!env.GITHUB_OWNER || !env.GITHUB_REPO) return null;
-  return ghRaw(env.GITHUB_OWNER, env.GITHUB_REPO, "main", path);
-}
-
-// ─── GitHub API helper ─────────────────────────────────────────────────────
-function ghApiHeaders(token) {
-  const h = {
-    Accept: "application/vnd.github+json",
-    "X-GitHub-Api-Version": "2022-11-28",
-    "User-Agent": "CloudPress-Worker/5.0",
-  };
-  if (token) h.Authorization = \`Bearer \${token}\`;
-  return h;
-}
-
-// ─── KV Cache helpers ──────────────────────────────────────────────────────
-async function kvGet(kv, key) {
-  if (!kv) return null;
-  try { return await kv.get(key); } catch { return null; }
-}
-async function kvSet(kv, key, val, ttl = 3600) {
-  if (!kv) return;
-  try { await kv.put(key, val, { expirationTtl: ttl }); } catch {}
-}
-
-// ─── Static file extensions ────────────────────────────────────────────────
-const STATIC_EXT = /\.(css|js|jpg|jpeg|png|gif|webp|svg|ico|woff2?|ttf|eot|otf|map|txt|xml|json|zip)$/i;
-
-// ─── CORS headers ──────────────────────────────────────────────────────────
-const CORS = {
-  "Access-Control-Allow-Origin":  "*",
-  "Access-Control-Allow-Methods": "GET,POST,PUT,DELETE,OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type,Authorization,X-Requested-With",
-};
-
-function ok(body, status = 200, headers = {}) {
-  return new Response(body, { status, headers: { ...headers, ...CORS } });
-}
-
-// ─── Setup / loading page (shown while provisioning) ──────────────────────
-function setupPage(msg = "WordPress 초기화 중...") {
-  return \`<!DOCTYPE html>
-<html lang="ko">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<meta http-equiv="refresh" content="5">
-<title>CloudPress — WordPress 준비 중</title>
-<style>
-  *{box-sizing:border-box;margin:0;padding:0}
-  body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
-    background:linear-gradient(135deg,#0f0c29,#302b63,#24243e);
-    min-height:100vh;display:flex;align-items:center;justify-content:center}
-  .card{background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.14);
-    border-radius:24px;padding:48px 40px;max-width:420px;width:92%;text-align:center}
-  .logo{width:72px;height:72px;background:linear-gradient(135deg,#3b82f6,#8b5cf6);
-    border-radius:20px;margin:0 auto 24px;display:flex;align-items:center;
-    justify-content:center;font-size:36px}
-  h1{color:#fff;font-size:20px;font-weight:800;margin-bottom:10px}
-  p{color:rgba(255,255,255,.5);font-size:13px;line-height:1.6;margin-bottom:24px}
-  .bar-wrap{background:rgba(255,255,255,.1);border-radius:100px;height:6px;overflow:hidden}
-  .bar{height:100%;background:linear-gradient(90deg,#3b82f6,#8b5cf6);border-radius:100px;
-    animation:slide 2s ease-in-out infinite}
-  @keyframes slide{0%{width:10%;margin-left:0}50%{width:55%;margin-left:20%}100%{width:10%;margin-left:85%}}
-  small{display:block;margin-top:14px;color:rgba(255,255,255,.22);font-size:11px}
-</style>
-</head>
-<body>
-  <div class="card">
-    <div class="logo">☁️</div>
-    <h1>WordPress 준비 중</h1>
-    <p>\${msg}</p>
-    <div class="bar-wrap"><div class="bar"></div></div>
-    <small>CloudPress v5.0 · WordPress/WordPress 공식 코어 · 5초 후 자동 새로고침</small>
-  </div>
-</body>
-</html>\`;
-}
-
-// ─── wp-config.php generator ───────────────────────────────────────────────
-function buildWpConfig(env, siteUrl) {
-  const uid = () => crypto.randomUUID().replace(/-/g, "");
-  // SQLite Integration (db.php drop-in) 사용을 위한 설정
-  return \`<?php
-/**
- * WordPress Configuration - CloudPress v5.0
- * Core from WordPress/WordPress (github.com/WordPress/WordPress)
- */
-// Database - SQLite via D1 (wp-content/db.php drop-in)
-define( 'DB_NAME',     'cloudpress' );
-define( 'DB_USER',     'cloudpress' );
-define( 'DB_PASSWORD', '' );
-define( 'DB_HOST',     'localhost' );
-define( 'DB_CHARSET',  'utf8mb4' );
-define( 'DB_COLLATE',  '' );
-
-// Security keys & salts
-define( 'AUTH_KEY',         '\${uid()}' );
-define( 'SECURE_AUTH_KEY',  '\${uid()}' );
-define( 'LOGGED_IN_KEY',    '\${uid()}' );
-define( 'NONCE_KEY',        '\${uid()}' );
-define( 'AUTH_SALT',        '\${uid()}' );
-define( 'SECURE_AUTH_SALT', '\${uid()}' );
-define( 'LOGGED_IN_SALT',   '\${uid()}' );
-define( 'NONCE_SALT',       '\${uid()}' );
-
-\\\$table_prefix = 'wp_';
-
-// Site URLs
-define( 'WP_HOME',    '\${siteUrl}' );
-define( 'WP_SITEURL', '\${siteUrl}' );
-
-// CloudPress environment
-define( 'CLOUDPRESS_SITE_ID',       '\${siteId}' );
-define( 'CLOUDPRESS_GITHUB_OWNER',  '\${env.GITHUB_OWNER || ""}' );
-define( 'CLOUDPRESS_GITHUB_REPO',   '\${env.GITHUB_REPO  || ""}' );
-define( 'CLOUDPRESS_GITHUB_TOKEN',  '\${env.GITHUB_TOKEN || ""}' );
-
-// Paths
-define( 'WP_CONTENT_DIR', '/var/task/wp-content' );
-define( 'WP_CONTENT_URL', '\${siteUrl}/wp-content' );
-
-// Performance & Security
-define( 'WP_DEBUG',                   false );
-define( 'DISALLOW_FILE_EDIT',         true );
-define( 'DISALLOW_FILE_MODS',         false ); // 플러그인/테마 설치 허용
-define( 'AUTOMATIC_UPDATER_DISABLED', true );
-define( 'WP_POST_REVISIONS',          5 );
-define( 'EMPTY_TRASH_DAYS',           7 );
-
-// D1/SQLite 경로
-define( 'SQLITE_DB_REALPATH', '/tmp/cloudpress_\${siteId.replace(/-/g,"_")}.db' );
-
-if ( ! defined( 'ABSPATH' ) ) {
-  define( 'ABSPATH', __DIR__ . '/' );
-}
-require_once ABSPATH . 'wp-settings.php';
-\`;
-}
-
-// ─── PHP env for php-wasm runner ──────────────────────────────────────────
-function buildPhpEnv(request, env, url, siteUrl) {
-  return {
-    WP_HOME:             siteUrl,
-    WP_SITEURL:          siteUrl,
-    GITHUB_OWNER:        env.GITHUB_OWNER || "",
-    GITHUB_REPO:         env.GITHUB_REPO  || "",
-    GITHUB_TOKEN:        env.GITHUB_TOKEN || "",
-    WP_CORE_OWNER:       WP_CORE_OWNER,
-    WP_CORE_REPO:        WP_CORE_REPO,
-    REQUEST_URI:         url.pathname + url.search,
-    REQUEST_METHOD:      request.method,
-    HTTP_HOST:           url.host,
-    SERVER_NAME:         url.host,
-    SERVER_PORT:         url.protocol === "https:" ? "443" : "80",
-    HTTPS:               url.protocol === "https:" ? "on" : "off",
-    CONTENT_TYPE:        request.headers.get("Content-Type") || "",
-    HTTP_COOKIE:         request.headers.get("Cookie") || "",
-    HTTP_AUTHORIZATION:  request.headers.get("Authorization") || "",
-    HTTP_ACCEPT:         request.headers.get("Accept") || "",
-    HTTP_ACCEPT_LANGUAGE:request.headers.get("Accept-Language") || "",
-    HTTP_USER_AGENT:     request.headers.get("User-Agent") || "",
-    HTTP_REFERER:        request.headers.get("Referer") || "",
-    SCRIPT_FILENAME:     url.pathname,
-    PHP_SELF:            url.pathname,
-    REMOTE_ADDR:         request.headers.get("CF-Connecting-IP") || "127.0.0.1",
-    HTTP_CF_IPCOUNTRY:   request.headers.get("CF-IPCountry") || "",
-  };
-}
-
-// ─── Fetch a file from WordPress/WordPress core (official repo) ────────────
-async function fetchWpCore(path, cache) {
-  const cacheKey = \`wpc:\${path}\`;
-  const cached = await kvGet(cache, cacheKey);
-  if (cached !== null) return cached;
-
-  const url = wpCoreRaw(path);
-  const res = await fetch(url, {
-    headers: { "User-Agent": "CloudPress-Worker/5.0" },
-    cf: { cacheEverything: true, cacheTtl: 86400 },
-  });
-  if (!res.ok) return null;
-
-  const text = await res.text();
-  // PHP files cached for 1 hour, static for 24 hours
-  const ttl = path.endsWith(".php") ? 3600 : 86400;
-  await kvSet(cache, cacheKey, text, ttl);
-  return text;
-}
-
-// ─── Serve static files from official WP core ─────────────────────────────
-async function serveStaticFromCore(path, env) {
-  const rawUrl = wpCoreRaw(path);
-  const res = await fetch(rawUrl, {
-    headers: { "User-Agent": "CloudPress-Worker/5.0" },
-    cf: { cacheEverything: true, cacheTtl: 86400 },
-  });
-  if (!res.ok) return null;
-
-  // Preserve content-type from GitHub raw
-  const ct = res.headers.get("Content-Type") || "application/octet-stream";
-  const body = await res.arrayBuffer();
-  return new Response(body, {
-    status: 200,
-    headers: {
-      "Content-Type": ct,
-      "Cache-Control": "public, max-age=86400",
-      "X-Source": "WordPress/WordPress",
-    },
-  });
-}
-
-// ─── Serve from user repo (wp-content) ────────────────────────────────────
-async function serveFromUserRepo(env, repoPath) {
-  if (!env.GITHUB_OWNER || !env.GITHUB_REPO) return null;
-  const rawUrl = userRepoRaw(env, repoPath);
-  if (!rawUrl) return null;
-
-  const headers = ghApiHeaders(env.GITHUB_TOKEN || null);
-  const res = await fetch(rawUrl, {
-    headers,
-    cf: { cacheEverything: true, cacheTtl: 3600 },
-  });
-  if (!res.ok) return null;
-
-  const ct = res.headers.get("Content-Type") || "application/octet-stream";
-  const body = await res.arrayBuffer();
-  return new Response(body, {
-    status: 200,
-    headers: {
-      "Content-Type": ct,
-      "Cache-Control": "public, max-age=3600",
-      "X-Source": "user-repo",
-    },
-  });
-}
-
-// ─── Check WordPress is installed (D1 has wp_options) ─────────────────────
-async function isWpInstalled(db, kv) {
-  const cached = await kvGet(kv, "wp:installed");
-  if (cached === "1") return true;
-  if (!db) return false;
-  try {
-    const r = await db.prepare(
-      "SELECT name FROM sqlite_master WHERE type='table' AND name='wp_options' LIMIT 1"
-    ).all();
-    if (r.results?.length > 0) {
-      await kvSet(kv, "wp:installed", "1", 86400);
-      return true;
-    }
-  } catch {}
-  return false;
-}
-
-// ─── Run PHP via php-wasm Service Binding ─────────────────────────────────
-async function runPhp(phpCode, env, phpEnv, extraFiles = {}) {
-  if (!env.PHP_RUNNER) {
-    return new Response(
-      "<?php echo 'PHP_RUNNER 서비스 바인딩이 필요합니다.'; ?>",
-      { status: 503, headers: { "Content-Type": "text/html; charset=utf-8" } }
-    );
-  }
-  return env.PHP_RUNNER.fetch(
-    new Request("https://php-runner/run", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        code:  phpCode,
-        env:   phpEnv,
-        files: extraFiles,
-      }),
-    })
-  );
-}
-
-// ─── Main fetch handler ────────────────────────────────────────────────────
-export default {
-  async fetch(request, env) {
-    const url = new URL(request.url);
-
-    // CORS preflight
-    if (request.method === "OPTIONS") {
-      return new Response(null, { status: 204, headers: CORS });
-    }
-
-    // Health check
-    if (url.pathname === "/api/health") {
-      return ok(JSON.stringify({
-        status:  "ok",
-        version: "5.0.0",
-        core:    "WordPress/WordPress (official)",
-        site:    env.SITE_ID || "${siteId}",
-        ts:      new Date().toISOString(),
-      }), 200, { "Content-Type": "application/json" });
-    }
-
-    const siteUrl  = \`\${url.protocol}//\${url.host}\`;
-    const wpConf   = buildWpConfig(env, siteUrl);
-    const phpEnv   = buildPhpEnv(request, env, url, siteUrl);
-    const hasGithub = !!(env.GITHUB_OWNER && env.GITHUB_REPO);
-
-    // ── Static assets from wp-content (user repo) ──────────────────────────
-    if (url.pathname.startsWith("/wp-content/uploads/") ||
-        url.pathname.startsWith("/wp-content/themes/")  ||
-        url.pathname.startsWith("/wp-content/plugins/")) {
-      if (hasGithub) {
-        const repoPath = url.pathname.slice(1); // remove leading /
-        const res = await serveFromUserRepo(env, repoPath);
-        if (res) return res;
-      }
-      // Fallback: try WP core (for bundled default themes)
-      if (STATIC_EXT.test(url.pathname)) {
-        const corePath = url.pathname.slice(1);
-        const res = await serveStaticFromCore(corePath, env);
-        if (res) return res;
-      }
-      return new Response("Not Found", { status: 404, headers: CORS });
-    }
-
-    // ── Static assets from WP core (css, js, images etc.) ─────────────────
-    if (STATIC_EXT.test(url.pathname)) {
-      const corePath = url.pathname.replace(/^\//, "");
-      const res = await serveStaticFromCore(corePath, env);
-      if (res) return res;
-      return new Response("Not Found", { status: 404, headers: CORS });
-    }
-
-    // ── Check GitHub is configured ─────────────────────────────────────────
-    if (!hasGithub) {
-      return new Response(
-        setupPage("GitHub 저장소가 설정되지 않았습니다. CloudPress 대시보드에서 GitHub 연동을 확인해주세요."),
-        { status: 503, headers: { "Content-Type": "text/html; charset=utf-8" } }
-      );
-    }
-
-    // ── Check WordPress installed ──────────────────────────────────────────
-    const installed = await isWpInstalled(env.DB, env.CACHE);
-    if (!installed) {
-      return new Response(
-        setupPage("WordPress 데이터베이스를 초기화하고 있습니다..."),
-        { headers: { "Content-Type": "text/html; charset=utf-8" } }
-      );
-    }
-
-    // ── Resolve PHP file from official WordPress/WordPress ─────────────────
-    let phpPath = url.pathname;
-    if (!phpPath || phpPath === "/") phpPath = "/index.php";
-    // Ensure .php extension
-    if (!phpPath.endsWith(".php")) {
-      // Try as directory index
-      phpPath = phpPath.replace(/\\/+$/, "") + "/index.php";
-    }
-
-    // Strip leading slash for GitHub raw path
-    const corePath = phpPath.replace(/^\\//, "");
-
-    // Fetch from official WordPress/WordPress repo
-    const phpCode = await fetchWpCore(corePath, env.CACHE);
-    if (!phpCode) {
-      // File not found in core — try index.php (WordPress routing)
-      const indexCode = await fetchWpCore("index.php", env.CACHE);
-      if (!indexCode) {
-        return new Response(
-          setupPage("WordPress 코어 파일을 가져오는 중입니다. 잠시 후 새로고침해주세요."),
-          { headers: { "Content-Type": "text/html; charset=utf-8" } }
-        );
-      }
-      return runPhp(indexCode, env, phpEnv, {
-        "/wordpress/wp-config.php": wpConf,
-      });
-    }
-
-    // Page cache for GET requests (non-admin, non-login)
-    const isAdminOrLogin = url.pathname.startsWith("/wp-admin") ||
-                           url.pathname === "/wp-login.php" ||
-                           url.pathname === "/wp-cron.php";
-
-    if (request.method === "GET" && !isAdminOrLogin && env.CACHE) {
-      const cacheKey = \`page:\${url.pathname}\${url.search}\`;
-      const cached = await kvGet(env.CACHE, cacheKey);
-      if (cached) {
-        return new Response(cached, {
-          headers: {
-            "Content-Type": "text/html; charset=utf-8",
-            "X-Cache": "HIT",
-            "Cache-Control": "public, max-age=60",
-          },
-        });
-      }
-
-      const resp = await runPhp(phpCode, env, phpEnv, {
-        "/wordpress/wp-config.php": wpConf,
-      });
-
-      if (resp.status === 200) {
-        const ct = resp.headers.get("Content-Type") || "";
-        if (ct.includes("text/html")) {
-          const html = await resp.clone().text();
-          // Don't cache logged-in pages
-          if (!html.includes("logged-in") && !html.includes("is-logged-in")) {
-            await kvSet(env.CACHE, cacheKey, html, 300);
-          }
-        }
-      }
-      return resp;
-    }
-
-    return runPhp(phpCode, env, phpEnv, {
-      "/wordpress/wp-config.php": wpConf,
-    });
-  },
-};
-`;
+function buildSiteWorkerScript({ source, siteId, githubOwner, githubRepo }) {
+  // worker-wp.js 소스의 플레이스홀더를 실제 사이트 값으로 치환
+  return source
+    .replace(/%%SITE_ID%%/g,      siteId      || "")
+    .replace(/%%GITHUB_OWNER%%/g, githubOwner || "")
+    .replace(/%%GITHUB_REPO%%/g,  githubRepo  || "");
 }
 
 // ── CF D1 DB 생성 ──────────────────────────────────────────────────────────
@@ -1392,7 +1068,8 @@ export async function onRequestPost(context) {
           d1Id, kvId,
           jwtSecret:   env.JWT_SECRET || "",
           githubToken: activeGhToken  || env.GITHUB_TOKEN || "",
-        }).catch(() => false);
+          env, // ASSETS 바인딩으로 worker-wp.js 소스 취득
+        }).catch((e) => { console.error("[worker-create] 오류:", e.message); return false; });
 
         if (workerOk) {
           await log(`Worker 생성 완료: ${workerName}`);

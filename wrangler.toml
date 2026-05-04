@@ -13,7 +13,7 @@ compatibility_flags = ["nodejs_compat"]
 
 # ── 정적 파일 서빙 (CloudPress 대시보드 HTML/CSS/JS) ─────────────────────
 [assets]
-directory = "./"
+directory = "."
 binding   = "ASSETS"
 
 # ── D1: 플랫폼 메타데이터 DB ─────────────────────────────────────────────

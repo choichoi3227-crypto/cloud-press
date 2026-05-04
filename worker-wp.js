@@ -120,8 +120,54 @@ async function getAuthUser(request, env) {
   return jwtVerify(token, getJwtSecret(env));
 }
 
-// ─── phpass 호환 비밀번호 검증 (MD5 기반 간소화) ────────────────────────────
-// WordPress의 phpass $P$ 해시 완전 검증
+// ─── MD5 pure-JS 구현 (Cloudflare Workers는 crypto.subtle.digest("MD5") 미지원) ──
+// RFC 1321 기반 MD5. phpass($P$) 검증/생성에 사용.
+
+function md5Hash(data) {
+  const bytes = typeof data === "string" ? new TextEncoder().encode(data) : data;
+  // MD5 constants
+  const T = new Uint32Array(64);
+  for (let i = 0; i < 64; i++) T[i] = (Math.abs(Math.sin(i + 1)) * 0x100000000) >>> 0;
+  const S = [7,12,17,22,7,12,17,22,7,12,17,22,7,12,17,22,
+             5, 9,14,20,5, 9,14,20,5, 9,14,20,5, 9,14,20,
+             4,11,16,23,4,11,16,23,4,11,16,23,4,11,16,23,
+             6,10,15,21,6,10,15,21,6,10,15,21,6,10,15,21];
+  // Padding
+  const msgLen = bytes.length;
+  const bitLen = msgLen * 8;
+  const padLen = ((msgLen % 64) < 56 ? 56 : 120) - (msgLen % 64);
+  const padded = new Uint8Array(msgLen + padLen + 8);
+  padded.set(bytes);
+  padded[msgLen] = 0x80;
+  const view = new DataView(padded.buffer);
+  view.setUint32(msgLen + padLen,     bitLen >>> 0,        true);
+  view.setUint32(msgLen + padLen + 4, Math.floor(bitLen / 0x100000000), true);
+  // Process
+  let a0 = 0x67452301, b0 = 0xefcdab89, c0 = 0x98badcfe, d0 = 0x10325476;
+  for (let i = 0; i < padded.length; i += 64) {
+    const M = new Uint32Array(16);
+    for (let j = 0; j < 16; j++) M[j] = view.getUint32(i + j * 4, true);
+    let [a, b, c, d] = [a0, b0, c0, d0];
+    for (let j = 0; j < 64; j++) {
+      let f, g;
+      if      (j < 16) { f = (b & c) | (~b & d);           g = j; }
+      else if (j < 32) { f = (d & b) | (~d & c);           g = (5*j+1)%16; }
+      else if (j < 48) { f = b ^ c ^ d;                    g = (3*j+5)%16; }
+      else             { f = c ^ (b | ~d);                  g = (7*j)%16; }
+      f = (f + a + T[j] + M[g]) >>> 0;
+      a = d; d = c; c = b;
+      b = (b + ((f << S[j]) | (f >>> (32 - S[j])))) >>> 0;
+    }
+    a0=(a0+a)>>>0; b0=(b0+b)>>>0; c0=(c0+c)>>>0; d0=(d0+d)>>>0;
+  }
+  const out = new Uint8Array(16);
+  const ov  = new DataView(out.buffer);
+  ov.setUint32(0,  a0, true); ov.setUint32(4,  b0, true);
+  ov.setUint32(8,  c0, true); ov.setUint32(12, d0, true);
+  return out;
+}
+
+// ─── phpass 호환 비밀번호 검증/생성 ─────────────────────────────────────────
 
 const ITOA64 = "./0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
 
@@ -142,61 +188,45 @@ function encode64(src, count) {
   return output;
 }
 
-async function md5Hash(data) {
-  const buf = await crypto.subtle.digest("MD5", typeof data === "string" ? new TextEncoder().encode(data) : data);
-  return new Uint8Array(buf);
-}
-
-async function phpassCheck(password, hash) {
+function phpassCheck(password, hash) {
   if (hash.startsWith("$P$") || hash.startsWith("$H$")) {
     const countLog2 = ITOA64.indexOf(hash[3]);
-    const salt = hash.slice(4, 12);
-    let count = 1 << countLog2;
-    let hashBytes = await md5Hash(salt + password);
+    const salt      = hash.slice(4, 12);
+    let count       = 1 << countLog2;
     const passBytes = new TextEncoder().encode(password);
-    const combined = new Uint8Array(hashBytes.length + passBytes.length);
-    combined.set(hashBytes);
-    combined.set(passBytes, hashBytes.length);
-    hashBytes = await md5Hash(combined);
-    while (--count) {
-      const c2 = new Uint8Array(hashBytes.length + passBytes.length);
-      c2.set(hashBytes);
-      c2.set(passBytes, hashBytes.length);
-      hashBytes = await md5Hash(c2);
+    let h = md5Hash(salt + password);
+    while (count--) {
+      const c = new Uint8Array(h.length + passBytes.length);
+      c.set(h); c.set(passBytes, h.length);
+      h = md5Hash(c);
     }
-    const result = hash.slice(0, 12) + encode64(hashBytes, 16);
-    return result === hash;
+    return (hash.slice(0, 12) + encode64(h, 16)) === hash;
   }
   // MD5 plain (legacy)
   if (hash.length === 32 && /^[0-9a-f]{32}$/.test(hash)) {
-    const md5 = await md5Hash(password);
-    const hex = Array.from(md5).map(b => b.toString(16).padStart(2,"0")).join("");
-    return hex === hash;
+    const h = md5Hash(password);
+    return Array.from(h).map(b => b.toString(16).padStart(2,"0")).join("") === hash;
   }
-  // bcrypt / argon2 - 단순 비교 (실제 환경에서는 서버 검증 필요)
-  // 여기서는 CloudPress 초기 설치 패스워드($P$ 형식)만 지원
   return false;
 }
 
-async function phpassCreate(password) {
-  // $P$B 형식으로 생성 (WordPress 기본)
+function phpassCreate(password) {
   const countLog2 = 8; // 2^8 = 256 iterations
   const chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789./";
-  let salt = "";
-  const rnd = new Uint8Array(8);
+  const rnd   = new Uint8Array(8);
   crypto.getRandomValues(rnd);
+  let salt = "";
   for (const b of rnd) salt += chars[b % chars.length];
-
-  const prefix = `$P$${ITOA64[countLog2]}${salt}`;
-  let count = 1 << countLog2;
-  let hashBytes = await md5Hash(salt + password);
+  const prefix    = `$P$${ITOA64[countLog2]}${salt}`;
+  let count       = 1 << countLog2;
   const passBytes = new TextEncoder().encode(password);
+  let h = md5Hash(salt + password);
   while (count--) {
-    const c = new Uint8Array(hashBytes.length + passBytes.length);
-    c.set(hashBytes); c.set(passBytes, hashBytes.length);
-    hashBytes = await md5Hash(c);
+    const c = new Uint8Array(h.length + passBytes.length);
+    c.set(h); c.set(passBytes, h.length);
+    h = md5Hash(c);
   }
-  return prefix + encode64(hashBytes, 16);
+  return prefix + encode64(h, 16);
 }
 
 // ─── WordPress 설치 확인 ──────────────────────────────────────────────────────
@@ -340,7 +370,7 @@ async function autoInstallWordPress(env, url) {
 
     // ── 2. 관리자 사용자 생성 ────────────────────────────────────────────────
     // phpassCreate()로 정상 WordPress 호환 해시 생성
-    const hashedPass = await phpassCreate(adminPass);
+    const hashedPass = phpassCreate(adminPass);
     await d.prepare(
       `INSERT OR IGNORE INTO wp_users
         (user_login, user_pass, user_nicename, user_email, user_url, user_registered, user_status, display_name)
@@ -821,7 +851,7 @@ class WpRestApi {
     if (data.url)          updates.user_url        = data.url;
     if (data.description)  updates.user_url        = data.url; // store in meta
     if (data.password) {
-      updates.user_pass = await phpassCreate(data.password);
+      updates.user_pass = phpassCreate(data.password);
       // Invalidate sessions
       await this.d.prepare("DELETE FROM wp_usermeta WHERE user_id=? AND meta_key='session_tokens'").bind(userId).run();
     }
@@ -1475,7 +1505,7 @@ async function handleCloudPressApi(request, env, url, user, body, params) {
     const d = db(env);
     const u = await d.prepare("SELECT * FROM wp_users WHERE user_login=? OR user_email=? LIMIT 1").bind(username, username).first();
     if (!u) return json({ code: "invalid_username", message: "존재하지 않는 사용자입니다." }, 401);
-    const ok = await phpassCheck(password, u.user_pass);
+    const ok = phpassCheck(password, u.user_pass);
     if (!ok) return json({ code: "incorrect_password", message: "비밀번호가 올바르지 않습니다." }, 401);
 
     const capsRow = await d.prepare("SELECT meta_value FROM wp_usermeta WHERE user_id=? AND meta_key='wp_capabilities'").bind(u.ID).first();
@@ -1537,10 +1567,10 @@ async function buildAdminPage(env, url, user) {
   const wpAdminUrl = `${siteUrl}/wp-admin/`;
 
   // WordPress 관리자 스타일 (공식 CDN에서 불러옴)
-  // jsDelivr CDN - raw.githubusercontent.com은 text/plain으로 서빙되어 CSS 적용 불가
-  const wpAdminCss = `https://cdn.jsdelivr.net/npm/wordpress-static@${WP_VER}/wp-admin/css/wp-admin.min.css`;
-  const colorCss   = `https://cdn.jsdelivr.net/npm/wordpress-static@${WP_VER}/wp-admin/css/colors/fresh/colors.min.css`;
-  const commonCss  = `https://cdn.jsdelivr.net/npm/wordpress-static@${WP_VER}/wp-admin/css/common.min.css`;
+  // Worker 경로로 서빙 - Worker가 중간에서 올바른 Content-Type(text/css)으로 프록시
+  const wpAdminCss = `/wp-admin/css/wp-admin.min.css`;
+  const colorCss   = `/wp-admin/css/colors/fresh/colors.min.css`;
+  const commonCss  = `/wp-admin/css/common.min.css`;
 
   return `<!DOCTYPE html>
 <html lang="ko" class="wp-toolbar">
@@ -2451,8 +2481,8 @@ function buildAdminMenu(currentPage, wpAdminUrl) {
 async function buildLoginPage(env, url, errorMsg = "") {
   const siteUrl  = await getOption(env, "siteurl") || `${url.protocol}//${url.host}`;
   const blogname = await getOption(env, "blogname") || "WordPress 사이트";
-  // jsDelivr CDN - raw.githubusercontent.com은 text/plain으로 서빙됨
-  const wpCoreCss = `https://cdn.jsdelivr.net/npm/wordpress-static@${WP_VER}/wp-login.css`;
+  // Worker 경로로 서빙 - Worker가 중간에서 올바른 Content-Type(text/css)으로 프록시
+  const wpCoreCss = `/wp-login.css`;
 
   return `<!DOCTYPE html>
 <html lang="ko">
@@ -2640,7 +2670,7 @@ async function buildFrontPage(env, url, request) {
 <title>${currentPost ? currentPost.post_title + " — " : ""}${blogname}</title>
 <meta name="description" content="${tagline}">
 <link rel="stylesheet" href="${siteUrl}/wp-content/themes/${template}/style.css" id="theme-css">
-<link rel="stylesheet" href="${WP_GITHUB_RAW}/wp-includes/css/dist/block-library/style.min.css" id="wp-block-library-css">
+<link rel="stylesheet" href="/wp-includes/css/dist/block-library/style.min.css" id="wp-block-library-css">
 <style>
 /* WordPress デフォルトスタイル */
 body { margin:0; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Oxygen,Ubuntu,sans-serif; }
@@ -2693,7 +2723,7 @@ ${themeCss ? `<style id="theme-inline-css">/* Theme: ${template} */\n${themeCss.
     </div>
   </footer>
 </div>
-<script src="${WP_GITHUB_RAW}/wp-includes/js/wp-embed.min.js" defer></script>
+<script src="/wp-includes/js/wp-embed.min.js" defer></script>
 </body>
 </html>`;
 
@@ -2794,7 +2824,10 @@ export default {
     }
 
     // ── WordPress 코어 정적 자산 (wp-includes/, wp-admin/css 등) ─────────────
+    // 루트 정적 파일(wp-login.css 등) + 코어 정적 자산
     if (STATIC_EXT.test(url.pathname) && (
+      url.pathname === "/wp-login.css" ||
+      url.pathname === "/wp-signup.css" ||
       url.pathname.startsWith("/wp-includes/") ||
       url.pathname.startsWith("/wp-admin/css/") ||
       url.pathname.startsWith("/wp-admin/images/") ||

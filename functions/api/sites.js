@@ -140,6 +140,9 @@ async function createCfWorkerWithBindings({
   kvId,
   jwtSecret,
   githubToken,
+  adminUser,
+  adminPass,
+  adminEmail,
   env,
 }) {
   // ── worker-wp.js 소스 취득 ──────────────────────────────────────────────
@@ -202,9 +205,11 @@ async function createCfWorkerWithBindings({
 
   // 환경변수 (plain_text secrets)
   const plainTextBindings = [
-    { type: "plain_text", name: "SITE_ID",       text: siteId },
-    { type: "plain_text", name: "GITHUB_OWNER",  text: githubOwner || "" },
-    { type: "plain_text", name: "GITHUB_REPO",   text: githubRepo  || "" },
+    { type: "plain_text", name: "SITE_ID",        text: siteId },
+    { type: "plain_text", name: "GITHUB_OWNER",   text: githubOwner || "" },
+    { type: "plain_text", name: "GITHUB_REPO",    text: githubRepo  || "" },
+    { type: "plain_text", name: "WP_ADMIN_USER",  text: adminUser  || "admin" },
+    { type: "plain_text", name: "WP_ADMIN_EMAIL", text: adminEmail || "" },
   ];
 
   // secret_text (민감 정보)
@@ -214,6 +219,10 @@ async function createCfWorkerWithBindings({
   }
   if (jwtSecret) {
     secretBindings.push({ type: "secret_text", name: "JWT_SECRET", text: jwtSecret });
+  }
+  // 관리자 비밀번호 (secret 바인딩 - Worker에서 자동 설치 시 사용)
+  if (adminPass) {
+    secretBindings.push({ type: "secret_text", name: "WP_ADMIN_PASS", text: adminPass });
   }
 
   const allBindings = [...bindings, ...plainTextBindings, ...secretBindings];
@@ -511,13 +520,49 @@ WordPress 코어는 [WordPress/WordPress](https://github.com/WordPress/WordPress
 
 // ── WordPress D1 초기화 SQL ────────────────────────────────────────────────
 
-function buildWpInitSql(siteId, domain, adminUser, adminPass, adminEmail) {
+// phpass 헬퍼 (sites.js 전용 - D1 초기화 SQL용)
+const SITES_ITOA64 = "./0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+function sitesEncode64(src, count) {
+  let out = "", i = 0;
+  while (i < count) {
+    let v = src[i++];
+    out += SITES_ITOA64[v & 0x3f];
+    if (i < count) v |= src[i] << 8;
+    out += SITES_ITOA64[(v >> 6) & 0x3f];
+    if (i++ >= count) break;
+    if (i < count) v |= src[i] << 16;
+    out += SITES_ITOA64[(v >> 12) & 0x3f];
+    if (i++ >= count) break;
+    out += SITES_ITOA64[(v >> 18) & 0x3f];
+  }
+  return out;
+}
+async function sitesPhpassCreate(password) {
+  const countLog2 = 8;
+  const chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789./";
+  const rnd = new Uint8Array(8);
+  crypto.getRandomValues(rnd);
+  let salt = "";
+  for (const b of rnd) salt += chars[b % chars.length];
+  const prefix = `$P$${SITES_ITOA64[countLog2]}${salt}`;
+  let count = 1 << countLog2;
+  const enc = new TextEncoder();
+  const md5 = async (data) => new Uint8Array(await crypto.subtle.digest("MD5", typeof data === "string" ? enc.encode(data) : data));
+  let h = await md5(salt + password);
+  const pb = enc.encode(password);
+  while (count--) {
+    const c = new Uint8Array(h.length + pb.length);
+    c.set(h); c.set(pb, h.length);
+    h = await md5(c);
+  }
+  return prefix + sitesEncode64(h, 16);
+}
+
+async function buildWpInitSql(siteId, domain, adminUser, adminPass, adminEmail) {
   const now     = new Date().toISOString().slice(0, 19).replace("T", " ");
   const siteUrl = `https://${domain}`;
-  // WordPress 비밀번호 해싱 - phpass MD5 기반 (WordPress 기본 방식)
-  // 실제 phpass는 PHP에서 실행되므로 여기서는 초기 설정값 사용
-  // WordPress는 첫 로그인 시 자동으로 bcrypt로 업그레이드함
-  const passHash = `$P$B${adminPass.slice(0, 8).padEnd(8, "x")}${btoa(adminPass).slice(0, 22)}`;
+  // 올바른 phpass 해시 생성 (worker-wp.js의 phpassCheck와 완전 호환)
+  const passHash = await sitesPhpassCreate(adminPass);
 
   // WordPress 6.x 완전한 스키마 (공식 wp-admin/includes/schema.php 기반)
   return `
@@ -1068,6 +1113,9 @@ export async function onRequestPost(context) {
           d1Id, kvId,
           jwtSecret:   env.JWT_SECRET || "",
           githubToken: activeGhToken  || env.GITHUB_TOKEN || "",
+          adminUser:  wp_admin_user,
+          adminPass:  wp_admin_pass,
+          adminEmail: wp_admin_email,
           env, // ASSETS 바인딩으로 worker-wp.js 소스 취득
         }).catch((e) => { console.error("[worker-create] 오류:", e.message); return false; });
 
@@ -1083,7 +1131,7 @@ export async function onRequestPost(context) {
         if (d1Id) {
           const tempDomain = `${workerName}.workers.dev`;
           await log("WordPress 데이터베이스 초기화 중...");
-          const initSql = buildWpInitSql(id, tempDomain, wp_admin_user, wp_admin_pass, wp_admin_email);
+          const initSql = await buildWpInitSql(id, tempDomain, wp_admin_user, wp_admin_pass, wp_admin_email);
           const execRes = await cf.post(
             `/accounts/${cfAccountId}/d1/database/${d1Id}/exec`,
             { sql: initSql }

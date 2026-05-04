@@ -71,6 +71,7 @@ id      = "9b8370d20a9646b9aa73f63c9200379f"
 [vars]
 SUPABASE_REGION = "ap-northeast-2"
 
+
 [dev]
 port           = 8788
 local_protocol = "http"

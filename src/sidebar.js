@@ -226,6 +226,22 @@
   }
 
   // ── 전역 함수 ─────────────────────────────────────────────────
+  // ── 로그아웃 (auth-frontend.js가 없어도 동작하도록 내장) ────
+  window.logout = window.logout || async function () {
+    try {
+      const token = localStorage.getItem('admin_token');
+      if (token) {
+        await fetch('/api/logout', {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${token}` }
+        }).catch(() => {});
+      }
+    } catch {}
+    localStorage.removeItem('admin_token');
+    sessionStorage.clear();
+    window.location.href = '/login.html';
+  };
+
   window.toggleServiceMenu = function () {
     const submenu = document.getElementById('service-submenu');
     const chevron = document.getElementById('service-chevron');

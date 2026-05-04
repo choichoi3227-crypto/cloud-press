@@ -497,27 +497,28 @@ import {
 import { onRequest as middlewareHandler } from "./functions/_middleware.js";
 
 // Pages-Functions 스타일의 context 객체 생성
-function makeContext(request, env, params = {}) {
+function makeContext(request, env, params = {}, workerCtx = null) {
   return {
     request,
     env,
     params,
+    _workerCtx: workerCtx, // 실제 Workers ctx (waitUntil용)
     next: async () => new Response("not found", { status: 404 }),
-    waitUntil: () => {},
+    waitUntil: workerCtx
+      ? workerCtx.waitUntil.bind(workerCtx)
+      : () => {},
   };
 }
 
 // /api/* 라우터
-async function handleApiRequest(request, env) {
+async function handleApiRequest(request, env, _workerCtx = null) {
   const url    = new URL(request.url);
   const path   = url.pathname.replace(/\/$/, ""); // trailing slash 제거
   const method = request.method.toUpperCase();
-  const ctx    = makeContext(request, env);
-
   // 미들웨어 적용 (CORS, Rate Limit 등)
   // next()가 실제 핸들러를 실행하도록 래핑
   const runWithMiddleware = async (handler) => {
-    const ctxWithNext = makeContext(request, env, {});
+    const ctxWithNext = makeContext(request, env, {}, _workerCtx);
     ctxWithNext.next = async () => {
       try { return await handler(ctxWithNext); }
       catch (e) {
@@ -646,7 +647,7 @@ export default {
 
     // ── /api/* 는 항상 API 라우터로 (WordPress/ASSETS보다 우선)
     if (url.pathname.startsWith("/api/")) {
-      return handleApiRequest(request, env);
+      return handleApiRequest(request, env, ctx);
     }
 
     // ── WordPress 사이트 서빙

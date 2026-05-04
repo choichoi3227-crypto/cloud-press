@@ -425,6 +425,210 @@ async function verifyJWT(token, secret) {
   } catch { return null; }
 }
 
+// ─── API 라우터 (functions/ 핸들러를 worker.js에서 직접 import) ────────────
+// Cloudflare Workers(worker.js)는 Pages Functions(functions/)를 자동 실행하지 않으므로
+// /api/* 요청을 여기서 직접 라우팅한다.
+
+import { onRequestPost as loginHandler }  from "./functions/api/login.js";
+import { onRequestPost as signupHandler, onRequestGet as signupGet } from "./functions/api/signup.js";
+import { onRequestPost as logoutHandler } from "./functions/api/logout.js";
+import { onRequestGet  as meHandler }     from "./functions/api/me.js";
+import { onRequestGet  as healthHandler } from "./functions/api/health.js";
+import {
+  onRequestGet    as sitesGet,
+  onRequestPost   as sitesPost,
+  onRequestPut    as sitesPut,
+  onRequestDelete as sitesDelete,
+} from "./functions/api/sites.js";
+import {
+  onRequestGet    as accountGet,
+  onRequestPut    as accountPut,
+} from "./functions/api/account.js";
+import {
+  onRequestGet    as adminGet,
+  onRequestPut    as adminPut,
+  onRequestDelete as adminDelete,
+} from "./functions/api/admin.js";
+import {
+  onRequestGet    as cacheGet,
+  onRequestPut    as cachePut,
+  onRequestDelete as cacheDelete,
+} from "./functions/api/cache.js";
+import {
+  onRequestGet    as domainsGet,
+  onRequestPost   as domainsPost,
+  onRequestDelete as domainsDelete,
+} from "./functions/api/domains.js";
+import {
+  onRequestGet    as dnsGet,
+  onRequestPost   as dnsPost,
+  onRequestDelete as dnsDelete,
+} from "./functions/api/dns.js";
+import {
+  onRequestGet    as logsGet,
+  onRequestPost   as logsPost,
+  onRequestDelete as logsDelete,
+} from "./functions/api/logs.js";
+import {
+  onRequestGet    as sshGet,
+  onRequestPost   as sshPost,
+  onRequestDelete as sshDelete,
+} from "./functions/api/ssh-keys.js";
+import {
+  onRequestGet as phpVerGet,
+  onRequestPut as phpVerPut,
+} from "./functions/api/php-versions.js";
+import {
+  onRequestGet    as backupsGet,
+  onRequestPost   as backupsPost,
+  onRequestDelete as backupsDelete,
+} from "./functions/api/backups.js";
+import {
+  onRequestGet    as notifyGet,
+  onRequestPost   as notifyPost,
+} from "./functions/api/notify.js";
+import {
+  onRequestPost as chatPost,
+} from "./functions/api/chat.js";
+import {
+  onRequestGet    as paymentGet,
+  onRequestPost   as paymentPost,
+} from "./functions/api/payment.js";
+import { onRequest as middlewareHandler } from "./functions/_middleware.js";
+
+// Pages-Functions 스타일의 context 객체 생성
+function makeContext(request, env, params = {}) {
+  return {
+    request,
+    env,
+    params,
+    next: async () => new Response("not found", { status: 404 }),
+    waitUntil: () => {},
+  };
+}
+
+// /api/* 라우터
+async function handleApiRequest(request, env) {
+  const url    = new URL(request.url);
+  const path   = url.pathname.replace(/\/$/, ""); // trailing slash 제거
+  const method = request.method.toUpperCase();
+  const ctx    = makeContext(request, env);
+
+  // 미들웨어 적용 (CORS, Rate Limit 등)
+  // next()가 실제 핸들러를 실행하도록 래핑
+  const runWithMiddleware = async (handler) => {
+    const ctxWithNext = makeContext(request, env, {});
+    ctxWithNext.next = async () => {
+      try { return await handler(ctxWithNext); }
+      catch (e) {
+        console.error("[api error]", e);
+        return new Response(JSON.stringify({ error: "내부 서버 오류: " + e.message }), {
+          status: 500,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+    };
+    return middlewareHandler(ctxWithNext);
+  };
+
+  // ── 인증
+  if (path === "/api/login")  return runWithMiddleware(method === "POST" ? loginHandler  : () => jsonErr("Method Not Allowed", 405));
+  if (path === "/api/signup") return runWithMiddleware(method === "POST" ? signupHandler : () => jsonErr("Method Not Allowed", 405));
+  if (path === "/api/logout") return runWithMiddleware(method === "POST" ? logoutHandler : () => jsonErr("Method Not Allowed", 405));
+  if (path === "/api/me")     return runWithMiddleware(method === "GET"  ? meHandler     : () => jsonErr("Method Not Allowed", 405));
+
+  // ── 헬스체크
+  if (path === "/api/health") return runWithMiddleware(healthHandler);
+
+  // ── 사이트 관리
+  if (path === "/api/sites") {
+    if (method === "GET")    return runWithMiddleware(sitesGet);
+    if (method === "POST")   return runWithMiddleware(sitesPost);
+    if (method === "PUT")    return runWithMiddleware(sitesPut);
+    if (method === "DELETE") return runWithMiddleware(sitesDelete);
+  }
+
+  // ── 계정
+  if (path === "/api/account") {
+    if (method === "GET") return runWithMiddleware(accountGet);
+    if (method === "PUT") return runWithMiddleware(accountPut);
+  }
+
+  // ── 관리자
+  if (path.startsWith("/api/admin")) {
+    if (method === "GET")    return runWithMiddleware(adminGet);
+    if (method === "PUT")    return runWithMiddleware(adminPut);
+    if (method === "DELETE") return runWithMiddleware(adminDelete);
+  }
+
+  // ── 캐시
+  if (path === "/api/cache") {
+    if (method === "GET")    return runWithMiddleware(cacheGet);
+    if (method === "PUT")    return runWithMiddleware(cachePut);
+    if (method === "DELETE") return runWithMiddleware(cacheDelete);
+  }
+
+  // ── 도메인
+  if (path === "/api/domains") {
+    if (method === "GET")    return runWithMiddleware(domainsGet);
+    if (method === "POST")   return runWithMiddleware(domainsPost);
+    if (method === "DELETE") return runWithMiddleware(domainsDelete);
+  }
+
+  // ── DNS
+  if (path === "/api/dns") {
+    if (method === "GET")    return runWithMiddleware(dnsGet);
+    if (method === "POST")   return runWithMiddleware(dnsPost);
+    if (method === "DELETE") return runWithMiddleware(dnsDelete);
+  }
+
+  // ── 로그
+  if (path === "/api/logs") {
+    if (method === "GET")    return runWithMiddleware(logsGet);
+    if (method === "POST")   return runWithMiddleware(logsPost);
+    if (method === "DELETE") return runWithMiddleware(logsDelete);
+  }
+
+  // ── SSH 키
+  if (path === "/api/ssh-keys" || path.startsWith("/api/ssh-keys/")) {
+    if (method === "GET")    return runWithMiddleware(sshGet);
+    if (method === "POST")   return runWithMiddleware(sshPost);
+    if (method === "DELETE") return runWithMiddleware(sshDelete);
+  }
+
+  // ── PHP 버전
+  if (path === "/api/php-versions") {
+    if (method === "GET") return runWithMiddleware(phpVerGet);
+    if (method === "PUT") return runWithMiddleware(phpVerPut);
+  }
+
+  // ── 백업
+  if (path === "/api/backups" || path.startsWith("/api/backups/")) {
+    if (method === "GET")    return runWithMiddleware(backupsGet);
+    if (method === "POST")   return runWithMiddleware(backupsPost);
+    if (method === "DELETE") return runWithMiddleware(backupsDelete);
+  }
+
+  // ── 알림
+  if (path === "/api/notify" || path.startsWith("/api/notify/")) {
+    if (method === "GET")  return runWithMiddleware(notifyGet);
+    if (method === "POST") return runWithMiddleware(notifyPost);
+  }
+
+  // ── 챗봇
+  if (path === "/api/chat" || path.startsWith("/api/chat/")) {
+    if (method === "POST") return runWithMiddleware(chatPost);
+  }
+
+  // ── 결제
+  if (path === "/api/payment" || path.startsWith("/api/payment/")) {
+    if (method === "GET")  return runWithMiddleware(paymentGet);
+    if (method === "POST") return runWithMiddleware(paymentPost);
+  }
+
+  return jsonErr("API 경로를 찾을 수 없습니다.", 404);
+}
+
 // ─── 메인 핸들러 ───────────────────────────────────────────────────────────
 
 export default {
@@ -440,92 +644,9 @@ export default {
       }});
     }
 
-    // ── 헬스체크
-    if (url.pathname === "/api/health") {
-      const coreGh = new WPCoreStorage();
-      const coreOk = await coreGh.exists("wp-load.php").catch(()=>false);
-      return jsonOk({
-        status: "ok", version: "4.0.0",
-        wp_core: `${WP_CORE_OWNER}/${WP_CORE_REPO} (공식)`,
-        wp_core_accessible: coreOk,
-        user_repo: env.GITHUB_OWNER && env.GITHUB_REPO ? `${env.GITHUB_OWNER}/${env.GITHUB_REPO}` : "미설정",
-        bindings: { DB:!!env.DB, KV:!!env.KV, CACHE:!!env.CACHE, PHP_RUNNER:!!env.PHP_RUNNER },
-        ts: new Date().toISOString(),
-      });
-    }
-
-    // ── WordPress DB 초기화
-    if (url.pathname === "/api/wp-init" && method === "POST") {
-      const token = (request.headers.get("Authorization")||"").replace("Bearer ","");
-      const secret = env.JWT_SECRET || env.CLOUDPRESS_SECRET || "";
-      if (secret && !(await verifyJWT(token, secret))) return jsonErr("인증 필요", 401);
-      let body = {};
-      try { body = await request.json(); } catch {}
-      if (!env.DB) return jsonErr("DB 바인딩 없음", 503);
-      const ok = await initWordPressDB(
-        env.DB,
-        body.site_url    || `https://${url.host}`,
-        body.admin_user  || env.WP_ADMIN_USER  || "admin",
-        body.admin_pass  || "changeme",
-        body.admin_email || env.WP_ADMIN_EMAIL || "admin@example.com"
-      );
-      if (ok) {
-        await setCached(env.KV, "wp:installed", "1", 86400*365);
-        return jsonOk({ success:true, message:"WordPress DB 초기화 완료" });
-      }
-      return jsonErr("DB 초기화 실패", 500);
-    }
-
-    // ── 캐시 퍼지
-    if (url.pathname === "/api/cache-purge" && method === "POST") {
-      await env.KV?.delete("wp:installed").catch(()=>{});
-      return jsonOk({ success:true, message:"캐시 퍼지 완료" });
-    }
-
-    // ── GitHub 저장소 초기화 (호스팅 생성 시)
-    if (url.pathname === "/api/github-init" && method === "POST") {
-      const token = (request.headers.get("Authorization")||"").replace("Bearer ","");
-      const secret = env.JWT_SECRET || env.CLOUDPRESS_SECRET || "";
-      if (secret && !(await verifyJWT(token, secret))) return jsonErr("인증 필요", 401);
-      let body = {};
-      try { body = await request.json(); } catch {}
-      const { repo_name, github_token, github_owner } = body;
-      const ghToken = github_token || env.GITHUB_TOKEN;
-      const ghOwner = github_owner || env.GITHUB_OWNER;
-      if (!repo_name || !ghToken || !ghOwner) return jsonErr("repo_name, github_token, github_owner 필요", 400);
-
-      const gh = new GitHubStorage(ghToken, ghOwner, repo_name);
-      const created = await gh.createRepo(repo_name, true);
-      if (!created) return jsonErr("GitHub 저장소 생성 실패", 500);
-
-      // 저장소 초기화 대기 후 README 작성
-      await new Promise(r => setTimeout(r, 2500));
-      const gh2 = new GitHubStorage(ghToken, ghOwner, repo_name, "main");
-      await gh2.putFile(
-        "README.md",
-        `# CloudPress: ${repo_name}\n\n이 저장소는 CloudPress WordPress 사이트의 사용자 데이터를 저장합니다.\n\n## 구조\n- \`wp-content/uploads/\` — 미디어 파일\n- \`wp-content/themes/\` — 커스텀 테마\n- \`wp-content/plugins/\` — 커스텀 플러그인\n\n## WordPress 코어\nWordPress 코어 파일은 [WordPress/WordPress](https://github.com/WordPress/WordPress) 공식 레포지토리에서 직접 제공됩니다.\n`,
-        "Initialize CloudPress site repository",
-        null
-      );
-
-      // wp-content 폴더 구조 초기화
-      const folders = [
-        ["wp-content/uploads/.gitkeep", ""],
-        ["wp-content/themes/.gitkeep",  ""],
-        ["wp-content/plugins/.gitkeep", ""],
-      ];
-      for (const [path, content] of folders) {
-        await gh2.putFile(path, content, `Init ${path}`, null).catch(()=>{});
-        await new Promise(r => setTimeout(r, 500));
-      }
-
-      return jsonOk({
-        success: true,
-        message: "GitHub 저장소가 생성되었습니다.",
-        repo_url: created.html_url,
-        repo_name: created.name,
-        owner: created.owner?.login,
-      });
+    // ── /api/* 는 항상 API 라우터로 (WordPress/ASSETS보다 우선)
+    if (url.pathname.startsWith("/api/")) {
+      return handleApiRequest(request, env);
     }
 
     // ── WordPress 사이트 서빙

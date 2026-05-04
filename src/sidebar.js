@@ -6,14 +6,14 @@
   const path = window.location.pathname;
 
   function isActive(href) {
-    if (href === '/dashboard.html') return path === '/dashboard.html' || path === '/';
-    return path.startsWith(href.replace('.html', ''));
+    if (href === '/dashboard.html') return path === '/dashboard' || path === '/';
+    return path.startsWith(href);
   }
 
   // 서비스 메뉴 항목 중 활성화 여부
   const servicePages = ['/hosting.html', '/hosting-create.html', '/hosting-detail.html',
     '/domains.html', '/dns.html', '/payment.html', '/account.html'];
-  const isServiceActive = servicePages.some(p => path.startsWith(p.replace('.html', '')));
+  const isServiceActive = servicePages.some(p => path.startsWith(p));
 
   // ── 사용자 정보 로드 ─────────────────────────────────────────
   async function loadUserInfo() {
@@ -50,7 +50,7 @@
     <aside id="cp-sidebar" class="w-64 border-r border-white/10 flex flex-col flex-shrink-0 hidden md:flex" style="background:#07090f;">
       <!-- 로고 -->
       <div class="px-6 pt-7 pb-5 border-b border-white/5">
-        <a href="/dashboard.html" class="text-2xl font-black text-blue-500 tracking-tight">CLOUD<span class="text-white">PRESS</span></a>
+        <a href="/dashboard" class="text-2xl font-black text-blue-500 tracking-tight">CLOUD<span class="text-white">PRESS</span></a>
       </div>
 
       <!-- 네비게이션 -->
@@ -85,7 +85,7 @@
       <!-- 어드민 링크 (어드민만) -->
       ${role === 'admin' ? `
       <div class="px-3 pb-2">
-        <a href="/admin.html" class="flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-purple-400 hover:bg-purple-900/20 transition-all">
+        <a href="/admin" class="flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-purple-400 hover:bg-purple-900/20 transition-all">
           <i class="fas fa-shield-alt w-4 text-center"></i>
           관리자 패널
         </a>
@@ -109,14 +109,14 @@
               <div class="text-sm text-white font-medium mt-0.5 truncate">${email}</div>
             </div>
             <div class="p-1">
-              <a href="/account.html" class="flex items-center gap-3 px-3 py-2 rounded-lg text-sm text-gray-300 hover:bg-white/5 hover:text-white transition-all">
+              <a href="/account" class="flex items-center gap-3 px-3 py-2 rounded-lg text-sm text-gray-300 hover:bg-white/5 hover:text-white transition-all">
                 <i class="fas fa-user-circle w-4 text-center text-gray-500"></i> 내 정보 관리
               </a>
-              <a href="/payment.html" class="flex items-center gap-3 px-3 py-2 rounded-lg text-sm text-gray-300 hover:bg-white/5 hover:text-white transition-all">
+              <a href="/payment" class="flex items-center gap-3 px-3 py-2 rounded-lg text-sm text-gray-300 hover:bg-white/5 hover:text-white transition-all">
                 <i class="fas fa-credit-card w-4 text-center text-gray-500"></i> 결제 수단
               </a>
               ${role === 'admin' ? `
-              <a href="/admin.html" class="flex items-center gap-3 px-3 py-2 rounded-lg text-sm text-purple-400 hover:bg-purple-900/20 transition-all">
+              <a href="/admin" class="flex items-center gap-3 px-3 py-2 rounded-lg text-sm text-purple-400 hover:bg-purple-900/20 transition-all">
                 <i class="fas fa-shield-alt w-4 text-center"></i> 관리자 패널
               </a>` : ''}
             </div>
@@ -151,7 +151,7 @@
     return `
     <header id="cp-mobile-header" class="md:hidden sticky top-0 z-50 border-b border-white/10" style="background:#07090f;">
       <div class="flex justify-between items-center px-4 py-3">
-        <a href="/dashboard.html" class="text-xl font-black text-blue-500">CLOUD<span class="text-white">PRESS</span></a>
+        <a href="/dashboard" class="text-xl font-black text-blue-500">CLOUD<span class="text-white">PRESS</span></a>
         <div class="flex items-center gap-2">
           <button id="mobile-profile-btn" onclick="toggleMobileProfileDropdown()" class="w-8 h-8 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center text-sm font-bold">
             ${initials}
@@ -168,16 +168,16 @@
           <div class="text-sm font-semibold text-white">${name}</div>
           <div class="text-xs text-gray-500">${email}</div>
         </div>
-        <a href="/account.html" class="flex items-center gap-3 px-3 py-2 rounded-xl hover:bg-white/5 text-sm text-gray-300"><i class="fas fa-user-circle w-4"></i> 내 정보 관리</a>
-        <a href="/payment.html" class="flex items-center gap-3 px-3 py-2 rounded-xl hover:bg-white/5 text-sm text-gray-300"><i class="fas fa-credit-card w-4"></i> 결제 수단</a>
-        ${role === 'admin' ? `<a href="/admin.html" class="flex items-center gap-3 px-3 py-2 rounded-xl hover:bg-purple-900/20 text-sm text-purple-400"><i class="fas fa-shield-alt w-4"></i> 관리자 패널</a>` : ''}
+        <a href="/account" class="flex items-center gap-3 px-3 py-2 rounded-xl hover:bg-white/5 text-sm text-gray-300"><i class="fas fa-user-circle w-4"></i> 내 정보 관리</a>
+        <a href="/payment" class="flex items-center gap-3 px-3 py-2 rounded-xl hover:bg-white/5 text-sm text-gray-300"><i class="fas fa-credit-card w-4"></i> 결제 수단</a>
+        ${role === 'admin' ? `<a href="/admin" class="flex items-center gap-3 px-3 py-2 rounded-xl hover:bg-purple-900/20 text-sm text-purple-400"><i class="fas fa-shield-alt w-4"></i> 관리자 패널</a>` : ''}
         <button onclick="logout()" class="w-full flex items-center gap-3 px-3 py-2 rounded-xl text-red-400 hover:bg-red-900/20 text-sm"><i class="fas fa-sign-out-alt w-4"></i> 로그아웃</button>
       </div>
 
       <!-- 모바일 내비게이션 메뉴 -->
       <div id="mobileMenu" class="hidden border-t border-white/10 py-2 px-2 space-y-0.5">
         ${allLinks.map(item => `
-          <a href="${item.href}" class="flex items-center gap-3 px-4 py-3 rounded-xl hover:bg-white/5 transition text-sm ${path.startsWith(item.href.replace('.html', '')) ? 'bg-white/10 font-bold text-white' : 'text-gray-400'}">
+          <a href="${item.href}" class="flex items-center gap-3 px-4 py-3 rounded-xl hover:bg-white/5 transition text-sm ${path.startsWith(item.href) ? 'bg-white/10 font-bold text-white' : 'text-gray-400'}">
             <i class="${item.icon} w-5 text-center"></i> ${item.label}
           </a>
         `).join('')}
@@ -239,7 +239,7 @@
     } catch {}
     localStorage.removeItem('admin_token');
     sessionStorage.clear();
-    window.location.href = '/login.html';
+    window.location.href = '/login';
   };
 
   window.toggleServiceMenu = function () {

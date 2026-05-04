@@ -223,10 +223,13 @@ async function autoInstallWordPress(env, url) {
   const d = db(env);
   if (!d) return false; // DB 바인딩 자체가 없으면 불가
 
-  const siteUrl  = `${url.protocol}//${url.host}`;
-  const sid      = siteId(env);
-  const now      = new Date().toISOString().replace("T", " ").slice(0, 19);
-  const adminPass = crypto.randomUUID().slice(0, 12); // 임시 비밀번호 (나중에 변경 가능)
+  const siteUrl   = `${url.protocol}//${url.host}`;
+  const sid       = siteId(env);
+  const now       = new Date().toISOString().replace("T", " ").slice(0, 19);
+  // 사용자가 호스팅 생성 시 입력한 관리자 정보를 Worker 환경변수에서 읽음
+  const adminUser  = env.WP_ADMIN_USER  || "admin";
+  const adminPass  = env.WP_ADMIN_PASS  || crypto.randomUUID().slice(0, 12);
+  const adminEmail = env.WP_ADMIN_EMAIL || `admin@${url.host}`;
 
   try {
     // ── 1. 테이블 생성 ───────────────────────────────────────────────────────
@@ -336,12 +339,13 @@ async function autoInstallWordPress(env, url) {
     }
 
     // ── 2. 관리자 사용자 생성 ────────────────────────────────────────────────
-    const hashedPass = `$P$B${btoa(adminPass).slice(0, 22)}`; // 간단한 임시 해시 (로그인은 wp-login.php로)
+    // phpassCreate()로 정상 WordPress 호환 해시 생성
+    const hashedPass = await phpassCreate(adminPass);
     await d.prepare(
       `INSERT OR IGNORE INTO wp_users
         (user_login, user_pass, user_nicename, user_email, user_url, user_registered, user_status, display_name)
        VALUES (?,?,?,?,?,?,0,?)`
-    ).bind("admin", hashedPass, "admin", `admin@${url.host}`, siteUrl, now, "관리자").run();
+    ).bind(adminUser, hashedPass, adminUser, adminEmail, siteUrl, now, adminUser).run();
 
     const adminRow = await d.prepare("SELECT ID FROM wp_users WHERE user_login='admin' LIMIT 1").first();
     const adminId  = adminRow?.ID || 1;
@@ -356,7 +360,7 @@ async function autoInstallWordPress(env, url) {
       ["siteurl",          siteUrl],
       ["blogname",         "내 WordPress 사이트"],
       ["blogdescription",  "CloudPress로 만든 WordPress"],
-      ["admin_email",      `admin@${url.host}`],
+      ["admin_email",      adminEmail],
       ["blogpublic",       "1"],
       ["blog_charset",     "UTF-8"],
       ["date_format",      "Y년 n월 j일"],
@@ -375,7 +379,9 @@ async function autoInstallWordPress(env, url) {
       ["_site_transient_update_core", ""],
       ["cp_auto_installed", "1"],
       ["cp_installed_at",  now],
-      ["cp_admin_pass",    adminPass], // 대시보드에서 조회 가능하도록
+      ["cp_admin_pass",    adminPass],
+      ["cp_admin_user",    adminUser],
+      ["cp_admin_email",   adminEmail],
     ];
 
     for (const [k, v] of options) {
@@ -475,8 +481,27 @@ async function serveGithubAsset(env, repoPath) {
 
 // ─── WordPress 코어 정적 자산 서빙 ──────────────────────────────────────────
 
+// 파일 확장자로 올바른 Content-Type 결정
+function mimeByExt(path) {
+  if (path.endsWith(".css"))   return "text/css; charset=utf-8";
+  if (path.endsWith(".js"))    return "application/javascript; charset=utf-8";
+  if (path.endsWith(".svg"))   return "image/svg+xml";
+  if (path.endsWith(".png"))   return "image/png";
+  if (path.endsWith(".jpg") || path.endsWith(".jpeg")) return "image/jpeg";
+  if (path.endsWith(".gif"))   return "image/gif";
+  if (path.endsWith(".webp"))  return "image/webp";
+  if (path.endsWith(".ico"))   return "image/x-icon";
+  if (path.endsWith(".woff"))  return "font/woff";
+  if (path.endsWith(".woff2")) return "font/woff2";
+  if (path.endsWith(".ttf"))   return "font/ttf";
+  if (path.endsWith(".json"))  return "application/json; charset=utf-8";
+  if (path.endsWith(".xml"))   return "application/xml; charset=utf-8";
+  return null; // 서버 응답 그대로 사용
+}
+
 async function serveCoreAsset(filePath) {
-  // jsDelivr CDN 우선 (빠름), GitHub Raw 폴백
+  // jsDelivr CDN 우선 (빠름) - 올바른 Content-Type 서빙
+  // raw.githubusercontent.com은 text/plain으로 응답해 CSS/JS가 적용 안 됨
   const urls = [
     `${WP_CORE_CDN}/${filePath}`,
     `${WP_GITHUB_RAW}/${filePath}`,
@@ -485,8 +510,9 @@ async function serveCoreAsset(filePath) {
     try {
       const res = await fetch(url, { cf: { cacheEverything: true, cacheTtl: 86400 } });
       if (res.ok) {
-        const ct   = res.headers.get("Content-Type") || "application/octet-stream";
         const body = await res.arrayBuffer();
+        // 확장자 기반 Content-Type 강제 설정 (raw.githubusercontent.com 대응)
+        const ct = mimeByExt(filePath) || res.headers.get("Content-Type") || "application/octet-stream";
         return new Response(body, {
           headers: {
             ...CORS, "Content-Type": ct,
@@ -1511,9 +1537,10 @@ async function buildAdminPage(env, url, user) {
   const wpAdminUrl = `${siteUrl}/wp-admin/`;
 
   // WordPress 관리자 스타일 (공식 CDN에서 불러옴)
-  const wpAdminCss = `${WP_GITHUB_RAW}/wp-admin/css/wp-admin.min.css`;
-  const colorCss   = `${WP_GITHUB_RAW}/wp-admin/css/colors/fresh/colors.min.css`;
-  const commonCss  = `${WP_GITHUB_RAW}/wp-admin/css/common.min.css`;
+  // jsDelivr CDN - raw.githubusercontent.com은 text/plain으로 서빙되어 CSS 적용 불가
+  const wpAdminCss = `https://cdn.jsdelivr.net/npm/wordpress-static@${WP_VER}/wp-admin/css/wp-admin.min.css`;
+  const colorCss   = `https://cdn.jsdelivr.net/npm/wordpress-static@${WP_VER}/wp-admin/css/colors/fresh/colors.min.css`;
+  const commonCss  = `https://cdn.jsdelivr.net/npm/wordpress-static@${WP_VER}/wp-admin/css/common.min.css`;
 
   return `<!DOCTYPE html>
 <html lang="ko" class="wp-toolbar">
@@ -2424,7 +2451,8 @@ function buildAdminMenu(currentPage, wpAdminUrl) {
 async function buildLoginPage(env, url, errorMsg = "") {
   const siteUrl  = await getOption(env, "siteurl") || `${url.protocol}//${url.host}`;
   const blogname = await getOption(env, "blogname") || "WordPress 사이트";
-  const wpCoreCss = `${WP_GITHUB_RAW}/wp-login.css`;
+  // jsDelivr CDN - raw.githubusercontent.com은 text/plain으로 서빙됨
+  const wpCoreCss = `https://cdn.jsdelivr.net/npm/wordpress-static@${WP_VER}/wp-login.css`;
 
   return `<!DOCTYPE html>
 <html lang="ko">

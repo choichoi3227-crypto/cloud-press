@@ -54,3 +54,19 @@ ALTER TABLE sites ADD COLUMN plan_expires_at TEXT;
 CREATE INDEX IF NOT EXISTS idx_payments_user   ON payments(user_id);
 CREATE INDEX IF NOT EXISTS idx_payments_site   ON payments(site_id);
 CREATE INDEX IF NOT EXISTS idx_payments_status ON payments(status);
+
+-- ── v5 마이그레이션 (GitHub repo 컬럼 + github_tokens 테이블) ─────────────
+-- sites 테이블에 GitHub repo 컬럼 추가
+ALTER TABLE sites ADD COLUMN github_repo_owner TEXT;
+ALTER TABLE sites ADD COLUMN github_repo_name  TEXT;
+
+-- GitHub 토큰 풀 테이블 (관리자가 여러 토큰 등록 가능)
+CREATE TABLE IF NOT EXISTS github_tokens (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  token        TEXT NOT NULL,
+  masked_token TEXT NOT NULL DEFAULT '',
+  label        TEXT NOT NULL DEFAULT '',
+  active       INTEGER NOT NULL DEFAULT 1,
+  created_at   TEXT DEFAULT CURRENT_TIMESTAMP,
+  last_used_at TEXT DEFAULT CURRENT_TIMESTAMP
+);

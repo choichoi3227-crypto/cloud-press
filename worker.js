@@ -348,9 +348,26 @@ async function handleWordPressRequest(request, env) {
     return new Response("미디어 없음", { status: 404 });
   }
 
-  const installed = await checkInstalled(env.DB, env.KV);
+  let installed = await checkInstalled(env.DB, env.KV);
   if (!installed) {
-    return new Response(setupPage("init"), { headers: { "Content-Type": "text/html;charset=utf-8" } });
+    // DB가 연결돼 있으면 자동으로 WordPress 설치 시도
+    if (env.DB) {
+      const siteUrl = `${url.protocol}//${url.host}`;
+      const ok = await initWordPressDB(
+        env.DB, siteUrl,
+        "admin",
+        crypto.randomUUID().slice(0, 12),
+        `admin@${url.host}`
+      );
+      if (ok) {
+        installed = true;
+        if (env.KV) await setCached(env.KV, "wp:installed", "1", 86400);
+      } else {
+        return new Response(setupPage("init"), { headers: { "Content-Type": "text/html;charset=utf-8" } });
+      }
+    } else {
+      return new Response(setupPage("init"), { headers: { "Content-Type": "text/html;charset=utf-8" } });
+    }
   }
 
   // 공식 코어 접근 확인

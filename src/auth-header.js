@@ -72,7 +72,7 @@
   window.doLogout = async function () {
     try { await fetch('/api/logout', { method: 'POST', headers: HEADERS }); } catch {}
     localStorage.removeItem('admin_token');
-    window.location.href = '/login.html';
+    window.location.href = '/login';
   };
 
   init();

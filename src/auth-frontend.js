@@ -1,7 +1,7 @@
 // src/auth-frontend.js
 function logout() {
     localStorage.removeItem('admin_token');
-    window.location.href = '/login.html';
+    window.location.href = '/login';
 }
 
 // JWT 토큰에서 페이로드 디코딩 (클라이언트 측에서만 사용, 보안에 민감한 정보는 백엔드에서 처리)

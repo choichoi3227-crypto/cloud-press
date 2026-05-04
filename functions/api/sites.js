@@ -1280,8 +1280,8 @@ export async function onRequestPost(context) {
     "SELECT cf_global_api_key, cf_email FROM users WHERE id = ?"
   ).bind(payload.id).first();
 
-  if (!user?.cf_global_api_key || !user?.cf_email)
-    return jsonErr("Cloudflare Global API 키가 설정되어 있지 않습니다. 계정 설정에서 먼저 등록해주세요.", 400);
+  // CF API 키가 없어도 기본 호스팅 생성 가능 (Worker/D1/KV 자동생성은 건너뜀)
+  const hasCfApi = !!(user?.cf_global_api_key && user?.cf_email);
 
   const ghToken  = await pickGithubToken(env);
   const hasGithub = !!ghToken;
@@ -1290,17 +1290,18 @@ export async function onRequestPost(context) {
   const id      = crypto.randomUUID();
   const shortId = id.replace(/-/g, "").slice(0, 8);
 
-  // ── CF API 인스턴스 ────────────────────────────────────────────────────────
-  const cf = new CfApi(user.cf_global_api_key, user.cf_email, null);
-
-  // ── CF 계정 ID 조회 ────────────────────────────────────────────────────────
-  let cfAccountId = env.CF_ACCOUNT_ID || null;
-  if (!cfAccountId) {
-    cfAccountId = await getCfAccountId(cf).catch(() => null);
+  // ── CF API 인스턴스 (API 키가 있을 때만) ──────────────────────────────────
+  let cf = null;
+  let cfAccountId = null;
+  if (hasCfApi) {
+    cf = new CfApi(user.cf_global_api_key, user.cf_email, null);
+    cfAccountId = env.CF_ACCOUNT_ID || null;
+    if (!cfAccountId) {
+      cfAccountId = await getCfAccountId(cf).catch(() => null);
+    }
+    if (cfAccountId) cf.accountId = cfAccountId;
+    else cf = null; // 계정 ID 조회 실패 시 CF 사용 안 함
   }
-  if (!cfAccountId)
-    return jsonErr("Cloudflare 계정 ID를 가져올 수 없습니다.", 500);
-  cf.accountId = cfAccountId;
 
   // ── 사이트 레코드 먼저 DB에 저장 (provisioning 상태) ─────────────────────
   const dbName = `wp_${id.replace(/-/g, "").slice(0, 16)}`;
@@ -1362,80 +1363,70 @@ export async function onRequestPost(context) {
         await log("GitHub 토큰 미설정 - 관리자 설정에서 토큰 추가 필요", "warning");
       }
 
-      // 2) CF D1 DB 생성
-      const d1Name = `cp-db-${shortId}`;
-      await log(`D1 데이터베이스 생성 중: ${d1Name}`);
-      const d1 = await createCfD1(cf, cfAccountId, d1Name);
-      const d1Id = d1?.id || null;
-      if (d1Id) await log(`D1 생성 완료: ${d1Name} (${d1Id})`);
-      else      await log("D1 생성 실패 (계속 진행)", "warning");
+      // 2) CF D1 DB 생성 (CF API 있을 때만)
+      let d1Id = null;
+      let kvId = null;
+      let workerName = `cp-site-${shortId}`;
 
-      // 3) CF KV 생성
-      const kvName = `cp-kv-${shortId}`;
-      await log(`KV 네임스페이스 생성 중: ${kvName}`);
-      const kv = await createCfKV(cf, cfAccountId, kvName);
-      const kvId = kv?.id || null;
-      if (kvId) await log(`KV 생성 완료: ${kvName} (${kvId})`);
-      else      await log("KV 생성 실패 (계속 진행)", "warning");
+      if (cf && cfAccountId) {
+        const d1Name = `cp-db-${shortId}`;
+        await log(`D1 데이터베이스 생성 중: ${d1Name}`);
+        const d1 = await createCfD1(cf, cfAccountId, d1Name).catch(() => null);
+        d1Id = d1?.id || null;
+        if (d1Id) await log(`D1 생성 완료: ${d1Name} (${d1Id})`);
+        else      await log("D1 생성 실패 (계속 진행)", "warning");
 
-      // 4) CF Worker 생성 + D1/KV 바인딩 연결
-      const workerName = `cp-site-${shortId}`;
-      await log(`Cloudflare Worker 생성 및 바인딩 연결 중: ${workerName}`);
+        // 3) CF KV 생성
+        const kvName = `cp-kv-${shortId}`;
+        await log(`KV 네임스페이스 생성 중: ${kvName}`);
+        const kv = await createCfKV(cf, cfAccountId, kvName).catch(() => null);
+        kvId = kv?.id || null;
+        if (kvId) await log(`KV 생성 완료: ${kvName} (${kvId})`);
+        else      await log("KV 생성 실패 (계속 진행)", "warning");
 
-      const workerOk = await createCfWorkerWithBindings({
-        cf,
-        accountId:   cfAccountId,
-        workerName,
-        siteId:      id,
-        githubOwner: githubOwner || "",
-        githubRepo:  githubRepoName || "",
-        d1Id,
-        kvId,
-        jwtSecret:   env.JWT_SECRET || "",
-        githubToken: activeGhToken  || env.GITHUB_TOKEN || "",
-      });
+        // 4) CF Worker 생성 + D1/KV 바인딩 연결
+        await log(`Cloudflare Worker 생성 중: ${workerName}`);
+        const workerOk = await createCfWorkerWithBindings({
+          cf, accountId: cfAccountId, workerName, siteId: id,
+          githubOwner: githubOwner || "", githubRepo: githubRepoName || "",
+          d1Id, kvId,
+          jwtSecret:   env.JWT_SECRET || "",
+          githubToken: activeGhToken  || env.GITHUB_TOKEN || "",
+        }).catch(() => false);
 
-      if (!workerOk) await log("Worker 생성 실패 (계속 진행)", "warning");
-      else           await log(`Worker 생성 완료 + D1/KV 바인딩 연결: ${workerName}`);
-
-      // 5) workers.dev 서브도메인 활성화
-      if (workerOk) {
-        const subOk = await enableWorkersDevSubdomain(cf, cfAccountId, workerName);
-        if (subOk) await log(`workers.dev 서브도메인 활성화: ${workerName}.workers.dev`);
-      }
-
-      // 6) WordPress D1 초기화 SQL 실행
-      const tempDomain = `${workerName}.workers.dev`;
-      if (d1Id) {
-        await log("WordPress 데이터베이스 초기화 중...");
-        const initSql = buildWpInitSql(id, tempDomain, wp_admin_user, wp_admin_pass, wp_admin_email);
-
-        // D1 exec API: 멀티 스테이트먼트 SQL 실행 (/query는 단일 statement만 지원)
-        const execRes = await cf.post(
-          `/accounts/${cfAccountId}/d1/database/${d1Id}/exec`,
-          { sql: initSql }
-        );
-
-        if (execRes.success) {
-          await log("WordPress DB 초기화 완료 (테이블 생성 + 데이터 삽입)");
+        if (workerOk) {
+          await log(`Worker 생성 완료: ${workerName}`);
+          const subOk = await enableWorkersDevSubdomain(cf, cfAccountId, workerName).catch(() => false);
+          if (subOk) await log(`workers.dev 서브도메인 활성화: ${workerName}.workers.dev`);
         } else {
-          // exec 실패시 statement별 분리 재시도
-          await log("exec API 실패, statement별 실행 재시도...", "warning");
-          const statements = initSql
-            .split(";")
-            .map(s => s.trim())
-            .filter(s => s.length > 10 && !s.startsWith("--"));
-          let ok = 0, fail = 0;
-          for (const stmt of statements) {
-            const r = await cf.post(
-              `/accounts/${cfAccountId}/d1/database/${d1Id}/query`,
-              { sql: stmt + ";" }
-            ).catch(() => ({ success: false }));
-            if (r.success) ok++; else fail++;
-          }
-          if (fail === 0) await log(`WordPress DB 초기화 완료 (${ok}개 statement)`);
-          else            await log(`WordPress DB 초기화: 성공 ${ok}개, 실패 ${fail}개`, fail > ok ? "error" : "warning");
+          await log("Worker 생성 실패 (계속 진행)", "warning");
         }
+
+        // 5) WordPress D1 초기화 SQL 실행
+        if (d1Id) {
+          const tempDomain = `${workerName}.workers.dev`;
+          await log("WordPress 데이터베이스 초기화 중...");
+          const initSql = buildWpInitSql(id, tempDomain, wp_admin_user, wp_admin_pass, wp_admin_email);
+          const execRes = await cf.post(
+            `/accounts/${cfAccountId}/d1/database/${d1Id}/exec`,
+            { sql: initSql }
+          ).catch(() => ({ success: false }));
+
+          if (execRes.success) {
+            await log("WordPress DB 초기화 완료");
+          } else {
+            await log("exec API 실패, statement별 실행 재시도...", "warning");
+            const statements = initSql.split(";").map(s => s.trim()).filter(s => s.length > 10 && !s.startsWith("--"));
+            let okCnt = 0, failCnt = 0;
+            for (const stmt of statements) {
+              const r = await cf.post(`/accounts/${cfAccountId}/d1/database/${d1Id}/query`, { sql: stmt + ";" }).catch(() => ({ success: false }));
+              if (r.success) okCnt++; else failCnt++;
+            }
+            await log(`WordPress DB 초기화: 성공 ${okCnt}개, 실패 ${failCnt}개`, failCnt > okCnt ? "error" : "info");
+          }
+        }
+      } else {
+        await log("CF API 키 미설정 — Worker/D1/KV 자동 생성 건너뜀 (GitHub 저장소만 생성)", "warning");
       }
 
       // 7) GitHub에 WordPress 파일 백그라운드 업로드
@@ -1450,6 +1441,10 @@ export async function onRequestPost(context) {
       }
 
       // 8) DB 업데이트 (active 상태로)
+      const finalDomain = (cf && cfAccountId)
+        ? `${workerName}.workers.dev`
+        : `${id.slice(0,8)}.cloudpress.app`; // CF 없을 때 임시 도메인
+
       await env.DB.prepare(
         `UPDATE sites SET
           primary_domain    = ?,
@@ -1460,9 +1455,9 @@ export async function onRequestPost(context) {
           github_repo_name  = ?,
           status = 'active'
          WHERE id = ?`
-      ).bind(tempDomain, workerName, d1Id, kvId, githubOwner, githubRepoName, id).run();
+      ).bind(finalDomain, workerName, d1Id, kvId, githubOwner, githubRepoName, id).run();
 
-      await log(`호스팅 생성 완료! 도메인: https://${tempDomain}`);
+      await log(`호스팅 생성 완료! 도메인: https://${finalDomain}`);
 
     } catch (e) {
       await log("프로비저닝 오류: " + e.message, "error");
@@ -1470,8 +1465,14 @@ export async function onRequestPost(context) {
     }
   };
 
-  if (context.waitUntil) {
-    context.waitUntil(provision());
+  // waitUntil: Pages Functions와 Worker 모두 호환
+  // worker.js에서 makeContext의 waitUntil이 더미일 수 있으므로
+  // 실제 Workers ctx.waitUntil이 있으면 사용, 없으면 백그라운드 실행
+  const realWaitUntil = context._workerCtx?.waitUntil?.bind(context._workerCtx);
+  if (realWaitUntil) {
+    realWaitUntil(provision());
+  } else if (context.waitUntil && context.waitUntil !== (() => {})) {
+    try { context.waitUntil(provision()); } catch { provision().catch(() => {}); }
   } else {
     provision().catch(() => {});
   }

@@ -23,7 +23,7 @@
 <body class="bg-[#050505] text-white md:flex md:h-screen">
     <script>
         const token = localStorage.getItem('admin_token');
-        if (!token) window.location.href = '/login.html';
+        if (!token) window.location.href = '/login';
     </script>
 
     <main class="flex-1 w-full overflow-y-auto">
@@ -204,7 +204,7 @@
             try {
                 const TOKEN_CHECK = localStorage.getItem('admin_token');
                 if (!TOKEN_CHECK) {
-                    document.getElementById('card-list').innerHTML = `<div class="text-center py-12 text-gray-600 text-sm">로그인이 필요합니다. <a href="/login.html" class="text-blue-400 underline">로그인하기</a></div>`;
+                    document.getElementById('card-list').innerHTML = `<div class="text-center py-12 text-gray-600 text-sm">로그인이 필요합니다. <a href="/login" class="text-blue-400 underline">로그인하기</a></div>`;
                     return;
                 }
                 const res = await fetch('/api/payment/cards', { headers: H });
@@ -349,8 +349,8 @@
                     const user = JSON.parse(localStorage.getItem('user') || '{}');
                     await window._tossWidgets.requestBillingAuth({
                         method: 'CARD',
-                        successUrl: window.location.origin + '/payment-success.html?type=billing',
-                        failUrl:    window.location.origin + '/payment.html?error=1',
+                        successUrl: window.location.origin + '/payment-success?type=billing',
+                        failUrl:    window.location.origin + '/payment?error=1',
                         customerEmail: user.email || '',
                         customerName:  user.name  || '',
                     });

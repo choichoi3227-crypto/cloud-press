@@ -19,7 +19,7 @@
 <body class="bg-[#050505] text-white md:flex md:h-screen">
     <script>
         const token = localStorage.getItem('admin_token');
-        if (!token) window.location.href = '/login.html';
+        if (!token) window.location.href = '/login';
     </script>
 
     <!-- Main -->
@@ -230,7 +230,7 @@
         function closeNsModal() { document.getElementById('nsModal').classList.add('hidden'); }
 
         function openDns(domain, siteId) {
-            window.location.href = `/dns.html?domain=${encodeURIComponent(domain)}&site_id=${siteId}`;
+            window.location.href = `/dns?domain=${encodeURIComponent(domain)}&site_id=${siteId}`;
         }
 
         async function addDomain() {

@@ -11,7 +11,7 @@
 <body class="bg-[#050505] text-white md:flex md:h-screen">
 <script>
     const _at = localStorage.getItem('admin_token');
-    if (!_at) window.location.href = '/login.html';
+    if (!_at) window.location.href = '/login';
 </script>
 
 <!-- 모바일 헤더 -->
@@ -21,11 +21,11 @@
         <button id="mobileMenuBtn" class="text-gray-400 hover:text-white p-2"><i class="fas fa-bars text-xl"></i></button>
     </div>
     <div id="mobileMenu" class="hidden border-t border-white/10 py-2 px-2 space-y-1">
-        <a href="/admin.html"            class="flex items-center gap-3 px-4 py-3 rounded-xl hover:bg-white/5 transition text-gray-400"><i class="fas fa-chart-line w-5"></i> 개요</a>
-        <a href="/admin-users.html"      class="flex items-center gap-3 px-4 py-3 rounded-xl hover:bg-white/5 transition text-gray-400"><i class="fas fa-users w-5"></i> 사용자 관리</a>
-        <a href="/admin-sites.html"      class="flex items-center gap-3 px-4 py-3 rounded-xl hover:bg-white/5 transition text-gray-400"><i class="fas fa-globe w-5"></i> 사이트 관리</a>
-        <a href="/admin-inquiries.html"  class="flex items-center gap-3 px-4 py-3 rounded-xl bg-white/10 font-bold"><i class="fas fa-comments w-5"></i> 문의 관리</a>
-        <a href="/admin-settings.html"   class="flex items-center gap-3 px-4 py-3 rounded-xl hover:bg-white/5 transition text-gray-400"><i class="fas fa-cog w-5"></i> 시스템 설정</a>
+        <a href="/admin"            class="flex items-center gap-3 px-4 py-3 rounded-xl hover:bg-white/5 transition text-gray-400"><i class="fas fa-chart-line w-5"></i> 개요</a>
+        <a href="/admin-users"      class="flex items-center gap-3 px-4 py-3 rounded-xl hover:bg-white/5 transition text-gray-400"><i class="fas fa-users w-5"></i> 사용자 관리</a>
+        <a href="/admin-sites"      class="flex items-center gap-3 px-4 py-3 rounded-xl hover:bg-white/5 transition text-gray-400"><i class="fas fa-globe w-5"></i> 사이트 관리</a>
+        <a href="/admin-inquiries"  class="flex items-center gap-3 px-4 py-3 rounded-xl bg-white/10 font-bold"><i class="fas fa-comments w-5"></i> 문의 관리</a>
+        <a href="/admin-settings"   class="flex items-center gap-3 px-4 py-3 rounded-xl hover:bg-white/5 transition text-gray-400"><i class="fas fa-cog w-5"></i> 시스템 설정</a>
         <div class="border-t border-white/10 mt-2 pt-2">
             <button onclick="logout()" class="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-red-400 hover:bg-red-900/20 transition"><i class="fas fa-sign-out-alt w-5"></i> 로그아웃</button>
         </div>
@@ -37,11 +37,11 @@
 <aside class="w-64 border-r border-white/10 p-6 flex flex-col hidden md:flex flex-shrink-0">
     <div class="text-2xl font-black text-blue-500 mb-10">CP <span class="text-white">ADMIN</span></div>
     <nav class="flex-1 space-y-1">
-        <a href="/admin.html"            class="flex items-center gap-3 p-3 rounded-xl hover:bg-white/5 transition text-gray-400 text-sm"><i class="fas fa-chart-line w-5 text-center"></i> 개요</a>
-        <a href="/admin-users.html"      class="flex items-center gap-3 p-3 rounded-xl hover:bg-white/5 transition text-gray-400 text-sm"><i class="fas fa-users w-5 text-center"></i> 사용자 관리</a>
-        <a href="/admin-sites.html"      class="flex items-center gap-3 p-3 rounded-xl hover:bg-white/5 transition text-gray-400 text-sm"><i class="fas fa-globe w-5 text-center"></i> 사이트 관리</a>
-        <a href="/admin-inquiries.html"  class="flex items-center gap-3 p-3 rounded-xl bg-white/10 font-bold text-sm"><i class="fas fa-comments w-5 text-center"></i> 문의 관리</a>
-        <a href="/admin-settings.html"   class="flex items-center gap-3 p-3 rounded-xl hover:bg-white/5 transition text-gray-400 text-sm"><i class="fas fa-cog w-5 text-center"></i> 시스템 설정</a>
+        <a href="/admin"            class="flex items-center gap-3 p-3 rounded-xl hover:bg-white/5 transition text-gray-400 text-sm"><i class="fas fa-chart-line w-5 text-center"></i> 개요</a>
+        <a href="/admin-users"      class="flex items-center gap-3 p-3 rounded-xl hover:bg-white/5 transition text-gray-400 text-sm"><i class="fas fa-users w-5 text-center"></i> 사용자 관리</a>
+        <a href="/admin-sites"      class="flex items-center gap-3 p-3 rounded-xl hover:bg-white/5 transition text-gray-400 text-sm"><i class="fas fa-globe w-5 text-center"></i> 사이트 관리</a>
+        <a href="/admin-inquiries"  class="flex items-center gap-3 p-3 rounded-xl bg-white/10 font-bold text-sm"><i class="fas fa-comments w-5 text-center"></i> 문의 관리</a>
+        <a href="/admin-settings"   class="flex items-center gap-3 p-3 rounded-xl hover:bg-white/5 transition text-gray-400 text-sm"><i class="fas fa-cog w-5 text-center"></i> 시스템 설정</a>
     </nav>
     <button onclick="logout()" class="mt-auto w-full bg-red-600/20 border border-red-500/30 text-red-400 py-3 rounded-xl font-bold hover:bg-red-600/30 transition text-sm">
         <i class="fas fa-sign-out-alt mr-2"></i> 로그아웃
@@ -346,7 +346,7 @@ function statusIcon(s)   { return s==='open'?'●':s==='replied'?'✓':'✕'; }
 function fmtDate(d)      { if (!d) return '-'; return new Date(d).toLocaleString('ko-KR', {month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}); }
 function escHtml(s)      { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 
-function logout() { localStorage.removeItem('admin_token'); window.location.href = '/login.html'; }
+function logout() { localStorage.removeItem('admin_token'); window.location.href = '/login'; }
 
 // 초기화
 loadInquiries();

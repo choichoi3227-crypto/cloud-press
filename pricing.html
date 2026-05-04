@@ -47,16 +47,16 @@
 
         <!-- 데스크톱 네비 -->
         <nav class="hidden md:flex gap-8 items-center text-sm font-medium text-gray-400">
-            <a href="/features.html" class="hover:text-white transition">기능</a>
-            <a href="/pricing.html" class="text-white">요금제</a>
-            <a href="/about.html" class="hover:text-white transition">소개</a>
-            <a href="/faq.html" class="hover:text-white transition">FAQ</a>
-            <a href="/contact.html" class="hover:text-white transition">문의하기</a>
+            <a href="/features" class="hover:text-white transition">기능</a>
+            <a href="/pricing" class="text-white">요금제</a>
+            <a href="/about" class="hover:text-white transition">소개</a>
+            <a href="/faq" class="hover:text-white transition">FAQ</a>
+            <a href="/contact" class="hover:text-white transition">문의하기</a>
 
             <!-- 비로그인 상태 -->
             <div id="nav-guest" class="flex items-center gap-3">
-                <a href="/login.html" class="hover:text-white transition">로그인</a>
-                <a href="/signup.html" class="bg-blue-600 px-5 py-2 rounded-full text-white font-bold hover:bg-blue-500 transition">무료 시작</a>
+                <a href="/login" class="hover:text-white transition">로그인</a>
+                <a href="/signup" class="bg-blue-600 px-5 py-2 rounded-full text-white font-bold hover:bg-blue-500 transition">무료 시작</a>
             </div>
 
             <!-- 로그인 상태: 프로필 드롭다운 -->
@@ -77,11 +77,11 @@
                         <div id="dropdown-email" class="text-sm font-medium text-white mt-0.5 truncate"></div>
                     </div>
                     <div class="py-1">
-                        <a href="/dashboard.html"
+                        <a href="/dashboard"
                             class="flex items-center gap-3 px-4 py-2.5 text-sm text-gray-300 hover:bg-white/5 hover:text-white transition">
                             <i class="fas fa-tachometer-alt w-4 text-blue-400"></i> 콘솔 이동하기
                         </a>
-                        <a href="/account.html"
+                        <a href="/account"
                             class="flex items-center gap-3 px-4 py-2.5 text-sm text-gray-300 hover:bg-white/5 hover:text-white transition">
                             <i class="fas fa-user-circle w-4 text-gray-400"></i> 내 정보 관리
                         </a>
@@ -104,18 +104,18 @@
 
     <!-- 모바일 메뉴 -->
     <div id="mobileMenu" class="hidden md:hidden border-t border-white/10 mt-3 pt-3 pb-2 px-4 space-y-1">
-        <a href="/features.html" class="block px-3 py-2 rounded-lg text-gray-400 hover:text-white hover:bg-white/5 transition text-sm">기능</a>
-        <a href="/pricing.html"  class="block px-3 py-2 rounded-lg text-white bg-white/5 text-sm font-bold">요금제</a>
-        <a href="/about.html"    class="block px-3 py-2 rounded-lg text-gray-400 hover:text-white hover:bg-white/5 transition text-sm">소개</a>
-        <a href="/faq.html"      class="block px-3 py-2 rounded-lg text-gray-400 hover:text-white hover:bg-white/5 transition text-sm">FAQ</a>
-        <a href="/contact.html"  class="block px-3 py-2 rounded-lg text-gray-400 hover:text-white hover:bg-white/5 transition text-sm">문의하기</a>
+        <a href="/features" class="block px-3 py-2 rounded-lg text-gray-400 hover:text-white hover:bg-white/5 transition text-sm">기능</a>
+        <a href="/pricing"  class="block px-3 py-2 rounded-lg text-white bg-white/5 text-sm font-bold">요금제</a>
+        <a href="/about"    class="block px-3 py-2 rounded-lg text-gray-400 hover:text-white hover:bg-white/5 transition text-sm">소개</a>
+        <a href="/faq"      class="block px-3 py-2 rounded-lg text-gray-400 hover:text-white hover:bg-white/5 transition text-sm">FAQ</a>
+        <a href="/contact"  class="block px-3 py-2 rounded-lg text-gray-400 hover:text-white hover:bg-white/5 transition text-sm">문의하기</a>
         <div class="border-t border-white/10 pt-2 mt-2 space-y-1" id="mobile-guest">
-            <a href="/login.html"  class="block px-3 py-2 text-gray-400 hover:text-white text-sm">로그인</a>
-            <a href="/signup.html" class="block px-3 py-2 bg-blue-600 text-white rounded-xl font-bold text-center text-sm hover:bg-blue-500 transition">무료 시작</a>
+            <a href="/login"  class="block px-3 py-2 text-gray-400 hover:text-white text-sm">로그인</a>
+            <a href="/signup" class="block px-3 py-2 bg-blue-600 text-white rounded-xl font-bold text-center text-sm hover:bg-blue-500 transition">무료 시작</a>
         </div>
         <div class="border-t border-white/10 pt-2 mt-2 space-y-1 hidden" id="mobile-user">
-            <a href="/dashboard.html" class="block px-3 py-2 text-gray-300 hover:text-white text-sm"><i class="fas fa-tachometer-alt mr-2 text-blue-400"></i>콘솔 이동하기</a>
-            <a href="/account.html"   class="block px-3 py-2 text-gray-300 hover:text-white text-sm"><i class="fas fa-user-circle mr-2 text-gray-400"></i>내 정보 관리</a>
+            <a href="/dashboard" class="block px-3 py-2 text-gray-300 hover:text-white text-sm"><i class="fas fa-tachometer-alt mr-2 text-blue-400"></i>콘솔 이동하기</a>
+            <a href="/account"   class="block px-3 py-2 text-gray-300 hover:text-white text-sm"><i class="fas fa-user-circle mr-2 text-gray-400"></i>내 정보 관리</a>
             <button onclick="doLogout()" class="w-full text-left px-3 py-2 text-red-400 hover:bg-red-900/20 rounded-lg text-sm transition"><i class="fas fa-sign-out-alt mr-2"></i>로그아웃</button>
         </div>
     </div>
@@ -252,8 +252,8 @@
         <h2 class="text-2xl font-black mb-4">요금 관련 궁금한 점이 있으신가요?</h2>
         <p class="text-gray-500 mb-6">언제든지 문의하시면 친절하게 안내드립니다.</p>
         <div class="flex flex-col sm:flex-row justify-center gap-4">
-            <a href="/faq.html" class="border border-white/20 px-8 py-3 rounded-full font-bold hover:bg-white/5 transition text-gray-300">FAQ 보기</a>
-            <a href="/contact.html" class="bg-blue-600 px-8 py-3 rounded-full font-bold hover:bg-blue-500 transition">문의하기</a>
+            <a href="/faq" class="border border-white/20 px-8 py-3 rounded-full font-bold hover:bg-white/5 transition text-gray-300">FAQ 보기</a>
+            <a href="/contact" class="bg-blue-600 px-8 py-3 rounded-full font-bold hover:bg-blue-500 transition">문의하기</a>
         </div>
     </div>
 </section>
@@ -289,11 +289,11 @@
                 <h3 class="text-lg font-bold mb-2">로그인이 필요합니다</h3>
                 <p class="text-sm text-gray-400 mb-6">결제를 진행하려면 먼저 로그인해주세요.</p>
                 <div class="flex gap-3 justify-center">
-                    <a href="/login.html?redirect=/pricing.html"
+                    <a href="/login.html?redirect=/pricing"
                         class="bg-blue-600 hover:bg-blue-500 px-6 py-3 rounded-xl font-bold transition">
                         로그인
                     </a>
-                    <a href="/signup.html"
+                    <a href="/signup"
                         class="border border-white/20 hover:bg-white/5 px-6 py-3 rounded-xl font-bold transition text-gray-300">
                         회원가입
                     </a>
@@ -312,7 +312,7 @@
                 </div>
                 <div id="no-sites-msg" class="hidden p-4 bg-yellow-900/20 border border-yellow-500/20 rounded-xl text-sm text-yellow-300">
                     <i class="fas fa-exclamation-triangle mr-2"></i>
-                    호스팅이 없습니다. <a href="/hosting-create.html" class="underline">새 호스팅을 생성</a>한 후 업그레이드하세요.
+                    호스팅이 없습니다. <a href="/hosting-create" class="underline">새 호스팅을 생성</a>한 후 업그레이드하세요.
                 </div>
 
                 <!-- 선택된 호스팅 요약 -->
@@ -366,7 +366,7 @@
                 <p class="text-gray-400 text-sm mb-2" id="done-plan-msg"></p>
                 <p class="text-gray-500 text-xs mb-6" id="done-expire-msg"></p>
                 <div class="flex gap-3 justify-center">
-                    <a id="done-console-link" href="/hosting.html"
+                    <a id="done-console-link" href="/hosting"
                         class="bg-blue-600 hover:bg-blue-500 px-5 py-3 rounded-xl font-bold transition">
                         콘솔에서 확인
                     </a>
@@ -482,7 +482,7 @@ document.addEventListener('click', e => {
 async function doLogout() {
     try { await fetch('/api/logout', { method: 'POST', headers: HEADERS }); } catch {}
     localStorage.removeItem('admin_token');
-    window.location.href = '/login.html';
+    window.location.href = '/login';
 }
 
 // ── 토스 SDK 초기화 ────────────────────────────────────────────────────────
@@ -527,9 +527,9 @@ function setBilling(type) {
 // ── 무료 플랜 처리 ─────────────────────────────────────────────────────────
 function handleFreePlan() {
     if (currentUser) {
-        window.location.href = '/hosting-create.html';
+        window.location.href = '/hosting-create';
     } else {
-        window.location.href = '/signup.html';
+        window.location.href = '/signup';
     }
 }
 
@@ -723,8 +723,8 @@ async function startTossPayment() {
             orderName:     reqData.order_name,
             customerEmail: reqData.customer_email,
             customerName:  reqData.customer_name,
-            successUrl:    `${location.origin}/payment-success.html`,
-            failUrl:       `${location.origin}/pricing.html?payment=fail`,
+            successUrl:    `${location.origin}/payment-success`,
+            failUrl:       `${location.origin}/pricing?payment=fail`,
         });
 
     } catch (e) {

@@ -17,16 +17,16 @@
         <div class="max-w-7xl mx-auto flex justify-between items-center">
             <a href="/" class="text-2xl font-black tracking-tighter text-blue-500">CLOUD<span class="text-white">PRESS</span></a>
             <nav class="hidden md:flex gap-8 items-center text-sm font-medium text-gray-400">
-                <a href="/features.html" class="hover:text-white transition">기능</a>
-                <a href="/pricing.html" class="hover:text-white transition">요금제</a>
-                <a href="/about.html" class="hover:text-white transition">소개</a>
-                <a href="/faq.html" class="hover:text-white transition">FAQ</a>
-                <a href="/contact.html" class="text-white font-bold">문의하기</a>
+                <a href="/features" class="hover:text-white transition">기능</a>
+                <a href="/pricing" class="hover:text-white transition">요금제</a>
+                <a href="/about" class="hover:text-white transition">소개</a>
+                <a href="/faq" class="hover:text-white transition">FAQ</a>
+                <a href="/contact" class="text-white font-bold">문의하기</a>
 
                 <!-- 비로그인 상태 -->
                 <div id="nav-guest" class="flex items-center gap-3">
-                    <a href="/login.html" class="hover:text-white transition">로그인</a>
-                    <a href="/signup.html" class="bg-blue-600 px-5 py-2 rounded-full text-white font-bold hover:bg-blue-500 transition">무료 시작</a>
+                    <a href="/login" class="hover:text-white transition">로그인</a>
+                    <a href="/signup" class="bg-blue-600 px-5 py-2 rounded-full text-white font-bold hover:bg-blue-500 transition">무료 시작</a>
                 </div>
 
                 <!-- 로그인 상태: 프로필 드롭다운 -->
@@ -47,11 +47,11 @@
                             <div id="dropdown-email" class="text-sm font-medium text-white mt-0.5 truncate"></div>
                         </div>
                         <div class="py-1">
-                            <a href="/dashboard.html"
+                            <a href="/dashboard"
                                 class="flex items-center gap-3 px-4 py-2.5 text-sm text-gray-300 hover:bg-white/5 hover:text-white transition">
                                 <i class="fas fa-tachometer-alt w-4 text-blue-400"></i> 콘솔 이동하기
                             </a>
-                            <a href="/account.html"
+                            <a href="/account"
                                 class="flex items-center gap-3 px-4 py-2.5 text-sm text-gray-300 hover:bg-white/5 hover:text-white transition">
                                 <i class="fas fa-user-circle w-4 text-gray-400"></i> 내 정보 관리
                             </a>
@@ -74,18 +74,18 @@
 
         <!-- 모바일 메뉴 -->
         <div id="mobileMenu" class="hidden md:hidden border-t border-white/10 mt-3 pt-3 pb-2 px-4 space-y-1">
-            <a href="/features.html" class="block px-3 py-2 rounded-lg text-gray-400 hover:text-white hover:bg-white/5 transition text-sm">기능</a>
-            <a href="/pricing.html" class="block px-3 py-2 rounded-lg text-gray-400 hover:text-white hover:bg-white/5 transition text-sm">요금제</a>
-            <a href="/about.html" class="block px-3 py-2 rounded-lg text-gray-400 hover:text-white hover:bg-white/5 transition text-sm">소개</a>
-            <a href="/faq.html" class="block px-3 py-2 rounded-lg text-gray-400 hover:text-white hover:bg-white/5 transition text-sm">FAQ</a>
-            <a href="/contact.html" class="block px-3 py-2 rounded-lg text-white bg-white/5 text-sm font-bold">문의하기</a>
+            <a href="/features" class="block px-3 py-2 rounded-lg text-gray-400 hover:text-white hover:bg-white/5 transition text-sm">기능</a>
+            <a href="/pricing" class="block px-3 py-2 rounded-lg text-gray-400 hover:text-white hover:bg-white/5 transition text-sm">요금제</a>
+            <a href="/about" class="block px-3 py-2 rounded-lg text-gray-400 hover:text-white hover:bg-white/5 transition text-sm">소개</a>
+            <a href="/faq" class="block px-3 py-2 rounded-lg text-gray-400 hover:text-white hover:bg-white/5 transition text-sm">FAQ</a>
+            <a href="/contact" class="block px-3 py-2 rounded-lg text-white bg-white/5 text-sm font-bold">문의하기</a>
             <div class="border-t border-white/10 pt-2 mt-2 space-y-1" id="mobile-guest">
-                <a href="/login.html"  class="block px-3 py-2 text-gray-400 hover:text-white text-sm">로그인</a>
-                <a href="/signup.html" class="block px-3 py-2 bg-blue-600 text-white rounded-xl font-bold text-center text-sm hover:bg-blue-500 transition">무료 시작</a>
+                <a href="/login"  class="block px-3 py-2 text-gray-400 hover:text-white text-sm">로그인</a>
+                <a href="/signup" class="block px-3 py-2 bg-blue-600 text-white rounded-xl font-bold text-center text-sm hover:bg-blue-500 transition">무료 시작</a>
             </div>
             <div class="border-t border-white/10 pt-2 mt-2 space-y-1 hidden" id="mobile-user">
-                <a href="/dashboard.html" class="block px-3 py-2 text-gray-300 hover:text-white text-sm"><i class="fas fa-tachometer-alt mr-2 text-blue-400"></i>콘솔 이동하기</a>
-                <a href="/account.html"   class="block px-3 py-2 text-gray-300 hover:text-white text-sm"><i class="fas fa-user-circle mr-2 text-gray-400"></i>내 정보 관리</a>
+                <a href="/dashboard" class="block px-3 py-2 text-gray-300 hover:text-white text-sm"><i class="fas fa-tachometer-alt mr-2 text-blue-400"></i>콘솔 이동하기</a>
+                <a href="/account"   class="block px-3 py-2 text-gray-300 hover:text-white text-sm"><i class="fas fa-user-circle mr-2 text-gray-400"></i>내 정보 관리</a>
                 <button onclick="doLogout()" class="w-full text-left px-3 py-2 text-red-400 hover:bg-red-900/20 rounded-lg text-sm transition"><i class="fas fa-sign-out-alt mr-2"></i>로그아웃</button>
             </div>
         </div>
@@ -117,7 +117,7 @@
                 <i class="fas fa-question-circle text-green-400 text-3xl mb-4"></i>
                 <h3 class="font-bold text-lg mb-2">자주 묻는 질문</h3>
                 <p class="text-gray-500 text-sm mb-4">빠른 답변을 원하신다면</p>
-                <a href="/faq.html" class="text-green-400 hover:underline text-sm font-medium">FAQ 바로가기 →</a>
+                <a href="/faq" class="text-green-400 hover:underline text-sm font-medium">FAQ 바로가기 →</a>
             </div>
         </div>
 

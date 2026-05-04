@@ -23,7 +23,7 @@
 </head>
 <body class="bg-[#050505] text-white md:flex md:h-screen">
     <script>
-        if (!localStorage.getItem('admin_token')) window.location.href = '/login.html';
+        if (!localStorage.getItem('admin_token')) window.location.href = '/login';
     </script>
 
     <!-- Main -->
@@ -33,7 +33,7 @@
             <!-- 헤더 -->
             <div class="flex items-center justify-between mb-6">
                 <div class="flex items-center gap-3 min-w-0">
-                    <a href="/hosting.html" class="text-gray-500 hover:text-white transition flex-shrink-0">
+                    <a href="/hosting" class="text-gray-500 hover:text-white transition flex-shrink-0">
                         <i class="fas fa-arrow-left text-lg"></i>
                     </a>
                     <div class="min-w-0">
@@ -522,7 +522,7 @@
         let   editingFilePath = '';
         let   blockedIPs = [];
 
-        if (!siteId) { alert('사이트 ID가 없습니다.'); window.location.href = '/hosting.html'; }
+        if (!siteId) { alert('사이트 ID가 없습니다.'); window.location.href = '/hosting'; }
 
         // ── 탭 전환 ──────────────────────────────────────────────────────────
         function switchTab(name, btn) {
@@ -565,7 +565,7 @@
         async function loadSiteInfo() {
             try {
                 const res  = await fetch(`/api/sites?id=${siteId}`, { headers: HEADERS });
-                if (res.status === 401) { localStorage.removeItem('admin_token'); window.location.href = '/login.html'; return; }
+                if (res.status === 401) { localStorage.removeItem('admin_token'); window.location.href = '/login'; return; }
                 const data = await res.json();
                 siteData   = data.site || data;
 
@@ -1305,7 +1305,7 @@
             try {
                 const res = await fetch(`/api/sites?id=${siteId}`, { method: 'DELETE', headers: HEADERS });
                 const d   = await res.json();
-                if (res.ok) { alert('호스팅이 삭제되었습니다.'); window.location.href = '/hosting.html'; }
+                if (res.ok) { alert('호스팅이 삭제되었습니다.'); window.location.href = '/hosting'; }
                 else showAlert(d.error || '삭제에 실패했습니다.', 'error');
             } catch { showAlert('오류가 발생했습니다.', 'error'); }
         }

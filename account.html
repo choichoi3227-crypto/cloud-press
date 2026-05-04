@@ -10,7 +10,7 @@
 </head>
 <body class="bg-[#050505] text-white md:flex md:h-screen">
     <script>
-        if (!localStorage.getItem('admin_token')) window.location.href = '/login.html';
+        if (!localStorage.getItem('admin_token')) window.location.href = '/login';
     </script>
 
     <!-- Main -->
@@ -190,7 +190,7 @@
                 const res  = await fetch('/api/account', { headers: HEADERS });
                 if (res.status === 401) {
                     localStorage.removeItem('admin_token');
-                    window.location.href = '/login.html';
+                    window.location.href = '/login';
                     return;
                 }
                 const data = await res.json();

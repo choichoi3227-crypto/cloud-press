@@ -1,50 +1,35 @@
-# CloudPress — _headers
+# CloudPress _headers
+# Cloudflare Pages 정적 자산 캐시 설정
 
-# ── 전체 페이지 기본 보안 헤더 ──────────────────────────────────────────────
-/*
+# Service Worker
+/sw.js
+  Cache-Control: no-cache, no-store, must-revalidate
+  Service-Worker-Allowed: /
+
+# HTML 파일: 항상 최신 버전 확인하되 오프라인 캐시 허용
+/*.html
+  Cache-Control: public, max-age=0, must-revalidate
   X-Frame-Options: DENY
   X-Content-Type-Options: nosniff
   Referrer-Policy: strict-origin-when-cross-origin
-  Permissions-Policy: camera=(), microphone=(), geolocation=()
-  X-XSS-Protection: 1; mode=block
 
-# ── 정적 에셋 장기 캐시 ─────────────────────────────────────────────────────
-/style.css
+/
+  Cache-Control: public, max-age=0, must-revalidate
+
+# CSS/JS 파일: 해시 기반 장기 캐시 (파일명 변경 시 갱신)
+/*.css
   Cache-Control: public, max-age=31536000, immutable
 
-/src/*.js
-  Cache-Control: public, max-age=86400
+/*.js
+  Cache-Control: public, max-age=86400, stale-while-revalidate=604800
 
-# ── HTML 페이지 캐시 없음 ─────────────────────────────────────────────────
-/*.html
-  Cache-Control: no-cache, no-store, must-revalidate
+# 이미지/폰트: 장기 캐시
+/*.png
+  Cache-Control: public, max-age=2592000, stale-while-revalidate=86400
+*.ico
+  Cache-Control: public, max-age=2592000
+
+# API 응답: 캐시 없음
+/api/*
+  Cache-Control: no-store, no-cache
   Pragma: no-cache
-
-# ── 인증 필요 페이지 (검색엔진 색인 제외) ───────────────────────────────────
-/dashboard.html
-  Cache-Control: no-cache, no-store, must-revalidate
-  X-Robots-Tag: noindex
-
-/account.html
-  Cache-Control: no-cache, no-store, must-revalidate
-  X-Robots-Tag: noindex
-
-/admin.html
-  Cache-Control: no-cache, no-store, must-revalidate
-  X-Robots-Tag: noindex
-
-/hosting.html
-  Cache-Control: no-cache, no-store, must-revalidate
-  X-Robots-Tag: noindex
-
-/editor.html
-  Cache-Control: no-cache, no-store, must-revalidate
-  X-Robots-Tag: noindex
-
-/traffic.html
-  Cache-Control: no-cache, no-store, must-revalidate
-  X-Robots-Tag: noindex
-
-/storage.html
-  Cache-Control: no-cache, no-store, must-revalidate
-  X-Robots-Tag: noindex

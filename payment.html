@@ -202,10 +202,26 @@
 
         async function loadCards() {
             try {
+                const TOKEN_CHECK = localStorage.getItem('admin_token');
+                if (!TOKEN_CHECK) {
+                    document.getElementById('card-list').innerHTML = `<div class="text-center py-12 text-gray-600 text-sm">로그인이 필요합니다. <a href="/login.html" class="text-blue-400 underline">로그인하기</a></div>`;
+                    return;
+                }
                 const res = await fetch('/api/payment/cards', { headers: H });
-                const data = await res.json();
+                const text = await res.text();
+                let data;
+                try { data = JSON.parse(text); } catch {
+                    console.error('카드 API 응답 파싱 실패:', text.slice(0, 200));
+                    document.getElementById('card-list').innerHTML = `<div class="text-center py-12 text-gray-600 text-sm">카드 정보를 불러올 수 없습니다 (서버 응답 오류)</div>`;
+                    return;
+                }
+                if (!res.ok) {
+                    document.getElementById('card-list').innerHTML = `<div class="text-center py-12 text-gray-600 text-sm">${data.error || '카드 정보를 불러올 수 없습니다'}</div>`;
+                    return;
+                }
                 renderCards(data.cards || []);
-            } catch {
+            } catch (err) {
+                console.error('카드 로드 오류:', err);
                 document.getElementById('card-list').innerHTML = `<div class="text-center py-12 text-gray-600 text-sm">카드 정보를 불러올 수 없습니다</div>`;
             }
         }
@@ -394,7 +410,9 @@
                         exp_year:  '20' + expY,
                     }),
                 });
-                const data = await res.json();
+                const resText = await res.text();
+                let data;
+                try { data = JSON.parse(resText); } catch { data = { success: false, error: '서버 응답 오류' }; }
                 if (data.success) {
                     cardAlert('카드가 추가되었습니다!', 'success');
                     setTimeout(() => { closeAddCard(); loadCards(); }, 1200);

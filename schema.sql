@@ -47,6 +47,10 @@ CREATE TABLE IF NOT EXISTS sites (
     cf_d1_id          TEXT,                  -- D1 데이터베이스 UUID
     cf_kv_id          TEXT,                  -- KV 네임스페이스 ID
 
+    -- GitHub 저장소 (wp-content 전용)
+    github_repo_owner TEXT,
+    github_repo_name  TEXT,
+
     -- WP-CLI 설치 스크립트 (레거시 서버 에이전트용)
     wp_install_script TEXT,
 
@@ -119,3 +123,14 @@ CREATE INDEX IF NOT EXISTS idx_php_logs_read   ON php_logs(site_id, is_read);
 -- ALTER TABLE sites ADD COLUMN cf_kv_id TEXT;
 -- ALTER TABLE domain_aliases ADD COLUMN cf_zone_id TEXT;
 -- ALTER TABLE domain_aliases ADD COLUMN cf_nameservers TEXT;
+
+-- ── GitHub 토큰 풀 ─────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS github_tokens (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  token        TEXT NOT NULL,
+  masked_token TEXT NOT NULL DEFAULT '',
+  label        TEXT NOT NULL DEFAULT '',
+  active       INTEGER NOT NULL DEFAULT 1,
+  created_at   TEXT DEFAULT CURRENT_TIMESTAMP,
+  last_used_at TEXT DEFAULT CURRENT_TIMESTAMP
+);

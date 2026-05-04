@@ -151,7 +151,7 @@
                 <div class="flex items-center gap-2 mb-3">
                     <i class="fas fa-server text-xs text-gray-600"></i>
                     <span class="text-sm font-semibold text-gray-400">${escHtml(group.siteName)}</span>
-                    <a href="/hosting-detail.html?id=${siteId}" class="text-xs text-blue-400 hover:underline ml-1">호스팅 관리 →</a>
+                    <a href="/hosting-detail?id=${siteId}" class="text-xs text-blue-400 hover:underline ml-1">호스팅 관리 →</a>
                 </div>
                 <div class="space-y-3">
                     ${group.domains.map(d => `

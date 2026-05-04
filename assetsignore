@@ -1,0 +1,28 @@
+# Cloudflare Workers assets 업로드 제외 목록
+# node_modules는 Worker 번들에 포함되어 있으므로 정적 자산에서 제외
+node_modules/
+
+# Worker 소스 코드 (빌드/런타임 파일)
+src/
+functions/
+worker.js
+php-runner.js
+setup.mjs
+
+# WordPress 런타임 (별도 Worker에서 처리)
+wp-content/
+
+# 설정 및 스키마 파일
+*.toml
+*.sql
+
+# 패키지 관련
+package.json
+package-lock.json
+bun.lockb
+bun.lock
+
+# 기타
+.git/
+Readme.md
+README.md

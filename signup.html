@@ -96,7 +96,9 @@
                 try {
                     data = await res.json();
                 } catch {
-                    throw new Error('서버 응답을 처리할 수 없습니다.');
+                    // JSON 파싱 실패 - 실제 서버 오류 텍스트 표시
+                    const raw = await res.clone().text().catch(() => '');
+                    throw new Error('서버 오류 (' + res.status + '): ' + (raw.slice(0, 200) || '응답 없음'));
                 }
 
                 if (res.ok && data.success) {

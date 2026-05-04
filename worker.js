@@ -650,12 +650,29 @@ export default {
       return handleApiRequest(request, env, ctx);
     }
 
+    // ── 플랫폼 정적 파일 (대시보드 HTML/CSS/JS) — WordPress보다 우선
+    const platformPaths = [
+      '/dashboard', '/hosting', '/hosting-create', '/hosting-detail',
+      '/domains', '/dns', '/traffic', '/storage', '/editor',
+      '/account', '/payment', '/payment-success', '/pricing',
+      '/login', '/signup', '/admin', '/admin-users', '/admin-sites',
+      '/admin-inquiries', '/admin-settings', '/about', '/contact',
+      '/features', '/faq', '/',
+    ];
+    const isPlatform =
+      platformPaths.includes(url.pathname) ||
+      url.pathname.endsWith('.html') ||
+      url.pathname.endsWith('.css') ||
+      url.pathname.startsWith('/src/') ||
+      url.pathname.startsWith('/favicon');
+    if (isPlatform && env.ASSETS) return env.ASSETS.fetch(request);
+
     // ── WordPress 사이트 서빙
     if (env.GITHUB_OWNER && env.GITHUB_REPO) {
       return handleWordPressRequest(request, env);
     }
 
-    // ── 플랫폼 정적 파일
+    // ── 플랫폼 정적 파일 (폴백)
     if (env.ASSETS) return env.ASSETS.fetch(request);
 
     return new Response("CloudPress WordPress Hosting Platform v4.0", {

@@ -6,7 +6,7 @@
   const path = window.location.pathname;
 
   function isActive(href) {
-    if (href === '/dashboard') return path === '/dashboard' || path === '/';
+    if (href === '/dashboard.html') return path === '/dashboard' || path === '/';
     return path.startsWith(href);
   }
 

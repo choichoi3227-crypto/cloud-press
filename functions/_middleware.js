@@ -53,28 +53,10 @@ export async function onRequest(context) {
   }
 
   // 다음 핸들러로
-  let response;
-  try {
-    response = await next();
-  } catch (err) {
-    // Cloudflare Worker 내부 오류 → JSON Fallback
-    console.error('[CloudPress] Worker 오류:', err?.message || err);
-    return jsonErr('서비스 일시 오류. 잠시 후 다시 시도해주세요.', 503);
-  }
+  const response = await next();
 
-  // 응답이 HTML인데 API 경로면 Worker 라우팅 실패 → JSON 반환
-  const ct = response.headers.get('Content-Type') || '';
-  if (url.pathname.startsWith('/api/') && ct.includes('text/html') && response.status !== 200) {
-    console.error('[CloudPress] API 경로에서 HTML 응답 감지:', url.pathname, response.status);
-    return jsonErr('API 라우팅 오류. 관리자에게 문의하세요.', 502);
-  }
-
-  // 모든 응답에 CORS 헤더 + 보안 헤더 추가
+  // 모든 응답에 CORS 헤더 추가
   const newHeaders = new Headers(response.headers);
   for (const [k, v] of Object.entries(corsHeaders())) newHeaders.set(k, v);
-  // 보안 헤더
-  newHeaders.set('X-Content-Type-Options', 'nosniff');
-  newHeaders.set('X-Frame-Options', 'DENY');
-  newHeaders.set('Referrer-Policy', 'strict-origin-when-cross-origin');
   return new Response(response.body, { status: response.status, headers: newHeaders });
 }

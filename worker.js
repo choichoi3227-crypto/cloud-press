@@ -651,21 +651,30 @@ export default {
     }
 
     // ── 플랫폼 정적 파일 (대시보드 HTML/CSS/JS) — WordPress보다 우선
-    const platformPaths = [
+    const platformPages = [
       '/dashboard', '/hosting', '/hosting-create', '/hosting-detail',
       '/domains', '/dns', '/traffic', '/storage', '/editor',
       '/account', '/payment', '/payment-success', '/pricing',
       '/login', '/signup', '/admin', '/admin-users', '/admin-sites',
       '/admin-inquiries', '/admin-settings', '/about', '/contact',
-      '/features', '/faq', '/',
+      '/features', '/faq',
     ];
-    const isPlatform =
-      platformPaths.includes(url.pathname) ||
+    // .html/.css/.js/정적파일은 그대로 ASSETS
+    const isStaticAsset =
       url.pathname.endsWith('.html') ||
       url.pathname.endsWith('.css') ||
+      url.pathname.endsWith('.js') ||
       url.pathname.startsWith('/src/') ||
-      url.pathname.startsWith('/favicon');
-    if (isPlatform && env.ASSETS) return env.ASSETS.fetch(request);
+      url.pathname.startsWith('/favicon') ||
+      url.pathname === '/';
+    if (isStaticAsset && env.ASSETS) return env.ASSETS.fetch(request);
+
+    // .html 없는 플랫폼 경로 → .html 붙여서 ASSETS로 서빙 (리디렉션 없이)
+    if (platformPages.includes(url.pathname) && env.ASSETS) {
+      const htmlUrl = new URL(request.url);
+      htmlUrl.pathname = url.pathname + '.html';
+      return env.ASSETS.fetch(new Request(htmlUrl.toString(), request));
+    }
 
     // ── WordPress 사이트 서빙
     if (env.GITHUB_OWNER && env.GITHUB_REPO) {

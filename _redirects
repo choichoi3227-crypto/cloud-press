@@ -1,0 +1,5 @@
+# API 및 Functions는 리디렉션 없이 그대로 통과
+/api/*  /api/:splat  200
+
+# 없는 경로는 404 처리 (루프 방지)
+/*  /index.html  404

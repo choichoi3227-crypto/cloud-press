@@ -216,6 +216,228 @@ async function isWpInstalled(env) {
   return false;
 }
 
+// ─── WordPress DB 자동 초기화 ────────────────────────────────────────────────
+// DB가 연결돼 있지만 테이블이 없을 때 자동으로 스키마+기본 데이터를 삽입합니다.
+
+async function autoInstallWordPress(env, url) {
+  const d = db(env);
+  if (!d) return false; // DB 바인딩 자체가 없으면 불가
+
+  const siteUrl  = `${url.protocol}//${url.host}`;
+  const sid      = siteId(env);
+  const now      = new Date().toISOString().replace("T", " ").slice(0, 19);
+  const adminPass = crypto.randomUUID().slice(0, 12); // 임시 비밀번호 (나중에 변경 가능)
+
+  try {
+    // ── 1. 테이블 생성 ───────────────────────────────────────────────────────
+    const schema = [
+      `CREATE TABLE IF NOT EXISTS wp_options (
+        option_id   INTEGER PRIMARY KEY AUTOINCREMENT,
+        option_name TEXT UNIQUE NOT NULL,
+        option_value TEXT NOT NULL DEFAULT '',
+        autoload    TEXT NOT NULL DEFAULT 'yes'
+      )`,
+      `CREATE TABLE IF NOT EXISTS wp_users (
+        ID            INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_login    TEXT NOT NULL DEFAULT '',
+        user_pass     TEXT NOT NULL DEFAULT '',
+        user_nicename TEXT NOT NULL DEFAULT '',
+        user_email    TEXT NOT NULL DEFAULT '',
+        user_url      TEXT NOT NULL DEFAULT '',
+        user_registered TEXT NOT NULL DEFAULT '',
+        user_activation_key TEXT NOT NULL DEFAULT '',
+        user_status   INTEGER NOT NULL DEFAULT 0,
+        display_name  TEXT NOT NULL DEFAULT ''
+      )`,
+      `CREATE TABLE IF NOT EXISTS wp_usermeta (
+        umeta_id  INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id   INTEGER NOT NULL DEFAULT 0,
+        meta_key  TEXT,
+        meta_value TEXT
+      )`,
+      `CREATE TABLE IF NOT EXISTS wp_posts (
+        ID                    INTEGER PRIMARY KEY AUTOINCREMENT,
+        post_author           INTEGER NOT NULL DEFAULT 0,
+        post_date             TEXT NOT NULL DEFAULT '',
+        post_date_gmt         TEXT NOT NULL DEFAULT '',
+        post_content          TEXT NOT NULL DEFAULT '',
+        post_title            TEXT NOT NULL DEFAULT '',
+        post_excerpt          TEXT NOT NULL DEFAULT '',
+        post_status           TEXT NOT NULL DEFAULT 'publish',
+        comment_status        TEXT NOT NULL DEFAULT 'open',
+        ping_status           TEXT NOT NULL DEFAULT 'open',
+        post_password         TEXT NOT NULL DEFAULT '',
+        post_name             TEXT NOT NULL DEFAULT '',
+        to_ping               TEXT NOT NULL DEFAULT '',
+        pinged                TEXT NOT NULL DEFAULT '',
+        post_modified         TEXT NOT NULL DEFAULT '',
+        post_modified_gmt     TEXT NOT NULL DEFAULT '',
+        post_content_filtered TEXT NOT NULL DEFAULT '',
+        post_parent           INTEGER NOT NULL DEFAULT 0,
+        guid                  TEXT NOT NULL DEFAULT '',
+        menu_order            INTEGER NOT NULL DEFAULT 0,
+        post_type             TEXT NOT NULL DEFAULT 'post',
+        post_mime_type        TEXT NOT NULL DEFAULT '',
+        comment_count         INTEGER NOT NULL DEFAULT 0
+      )`,
+      `CREATE TABLE IF NOT EXISTS wp_postmeta (
+        meta_id    INTEGER PRIMARY KEY AUTOINCREMENT,
+        post_id    INTEGER NOT NULL DEFAULT 0,
+        meta_key   TEXT,
+        meta_value TEXT
+      )`,
+      `CREATE TABLE IF NOT EXISTS wp_terms (
+        term_id    INTEGER PRIMARY KEY AUTOINCREMENT,
+        name       TEXT NOT NULL DEFAULT '',
+        slug       TEXT NOT NULL DEFAULT '',
+        term_group INTEGER NOT NULL DEFAULT 0
+      )`,
+      `CREATE TABLE IF NOT EXISTS wp_term_taxonomy (
+        term_taxonomy_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        term_id          INTEGER NOT NULL DEFAULT 0,
+        taxonomy         TEXT NOT NULL DEFAULT '',
+        description      TEXT NOT NULL DEFAULT '',
+        parent           INTEGER NOT NULL DEFAULT 0,
+        count            INTEGER NOT NULL DEFAULT 0
+      )`,
+      `CREATE TABLE IF NOT EXISTS wp_term_relationships (
+        object_id        INTEGER NOT NULL DEFAULT 0,
+        term_taxonomy_id INTEGER NOT NULL DEFAULT 0,
+        term_order       INTEGER NOT NULL DEFAULT 0,
+        PRIMARY KEY (object_id, term_taxonomy_id)
+      )`,
+      `CREATE TABLE IF NOT EXISTS wp_comments (
+        comment_ID           INTEGER PRIMARY KEY AUTOINCREMENT,
+        comment_post_ID      INTEGER NOT NULL DEFAULT 0,
+        comment_author       TEXT NOT NULL DEFAULT '',
+        comment_author_email TEXT NOT NULL DEFAULT '',
+        comment_author_url   TEXT NOT NULL DEFAULT '',
+        comment_author_IP    TEXT NOT NULL DEFAULT '',
+        comment_date         TEXT NOT NULL DEFAULT '',
+        comment_date_gmt     TEXT NOT NULL DEFAULT '',
+        comment_content      TEXT NOT NULL DEFAULT '',
+        comment_karma        INTEGER NOT NULL DEFAULT 0,
+        comment_approved     TEXT NOT NULL DEFAULT '1',
+        comment_agent        TEXT NOT NULL DEFAULT '',
+        comment_type         TEXT NOT NULL DEFAULT 'comment',
+        comment_parent       INTEGER NOT NULL DEFAULT 0,
+        user_id              INTEGER NOT NULL DEFAULT 0
+      )`,
+      `CREATE TABLE IF NOT EXISTS wp_commentmeta (
+        meta_id    INTEGER PRIMARY KEY AUTOINCREMENT,
+        comment_id INTEGER NOT NULL DEFAULT 0,
+        meta_key   TEXT,
+        meta_value TEXT
+      )`,
+    ];
+
+    for (const sql of schema) {
+      await d.prepare(sql).run();
+    }
+
+    // ── 2. 관리자 사용자 생성 ────────────────────────────────────────────────
+    const hashedPass = `$P$B${btoa(adminPass).slice(0, 22)}`; // 간단한 임시 해시 (로그인은 wp-login.php로)
+    await d.prepare(
+      `INSERT OR IGNORE INTO wp_users
+        (user_login, user_pass, user_nicename, user_email, user_url, user_registered, user_status, display_name)
+       VALUES (?,?,?,?,?,?,0,?)`
+    ).bind("admin", hashedPass, "admin", `admin@${url.host}`, siteUrl, now, "관리자").run();
+
+    const adminRow = await d.prepare("SELECT ID FROM wp_users WHERE user_login='admin' LIMIT 1").first();
+    const adminId  = adminRow?.ID || 1;
+
+    // 사용자 메타 (역할)
+    await d.prepare(`INSERT OR IGNORE INTO wp_usermeta (user_id, meta_key, meta_value) VALUES (?,?,?)`).bind(adminId, "wp_capabilities", `a:1:{s:13:"administrator";b:1;}`).run();
+    await d.prepare(`INSERT OR IGNORE INTO wp_usermeta (user_id, meta_key, meta_value) VALUES (?,?,?)`).bind(adminId, "wp_user_level", "10").run();
+    await d.prepare(`INSERT OR IGNORE INTO wp_usermeta (user_id, meta_key, meta_value) VALUES (?,?,?)`).bind(adminId, "admin_color", "fresh").run();
+
+    // ── 3. WordPress 기본 옵션 삽입 ──────────────────────────────────────────
+    const options = [
+      ["siteurl",          siteUrl],
+      ["blogname",         "내 WordPress 사이트"],
+      ["blogdescription",  "CloudPress로 만든 WordPress"],
+      ["admin_email",      `admin@${url.host}`],
+      ["blogpublic",       "1"],
+      ["blog_charset",     "UTF-8"],
+      ["date_format",      "Y년 n월 j일"],
+      ["time_format",      "A g:i"],
+      ["start_of_week",    "0"],
+      ["timezone_string",  "Asia/Seoul"],
+      ["permalink_structure", "/%postname%/"],
+      ["template",         "twentytwentyfour"],
+      ["stylesheet",       "twentytwentyfour"],
+      ["current_theme",    "Twenty Twenty-Four"],
+      ["active_plugins",   "a:0:{}"],
+      ["wp_user_roles",    `a:1:{s:13:"administrator";a:2:{s:4:"name";s:13:"Administrator";s:12:"capabilities";a:1:{s:13:"administrator";b:1;}}}`],
+      ["wp_installed_version", "6.7.2"],
+      ["db_version",       "57155"],
+      ["initial_db_version", "57155"],
+      ["_site_transient_update_core", ""],
+      ["cp_auto_installed", "1"],
+      ["cp_installed_at",  now],
+      ["cp_admin_pass",    adminPass], // 대시보드에서 조회 가능하도록
+    ];
+
+    for (const [k, v] of options) {
+      await d.prepare(
+        `INSERT OR IGNORE INTO wp_options (option_name, option_value, autoload) VALUES (?,?,'yes')`
+      ).bind(k, v).run();
+    }
+
+    // ── 4. 기본 게시물/페이지 생성 ───────────────────────────────────────────
+    const helloPostId = await d.prepare(
+      `INSERT OR IGNORE INTO wp_posts
+        (post_author, post_date, post_date_gmt, post_content, post_title, post_status,
+         post_name, post_modified, post_modified_gmt, post_type, guid, comment_status, ping_status)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`
+    ).bind(
+      adminId, now, now,
+      "WordPress에 오신 것을 환영합니다! CloudPress로 구동되는 이 사이트를 자유롭게 수정하고 꾸며보세요.",
+      "안녕하세요!", "publish", "hello-world", now, now, "post",
+      `${siteUrl}/?p=1`, "open", "open"
+    ).run();
+
+    await d.prepare(
+      `INSERT OR IGNORE INTO wp_posts
+        (post_author, post_date, post_date_gmt, post_content, post_title, post_status,
+         post_name, post_modified, post_modified_gmt, post_type, guid, comment_status, ping_status)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`
+    ).bind(
+      adminId, now, now,
+      "이 페이지는 샘플 페이지입니다. CloudPress 관리자 패널에서 자유롭게 수정하세요.",
+      "샘플 페이지", "publish", "sample-page", now, now, "page",
+      `${siteUrl}/?page_id=2`, "closed", "open"
+    ).run();
+
+    // ── 5. 기본 카테고리 ─────────────────────────────────────────────────────
+    await d.prepare(`INSERT OR IGNORE INTO wp_terms (term_id, name, slug, term_group) VALUES (1,'미분류','uncategorized',0)`).run();
+    await d.prepare(`INSERT OR IGNORE INTO wp_term_taxonomy (term_taxonomy_id, term_id, taxonomy, description, parent, count) VALUES (1,1,'category','',0,1)`).run();
+    await d.prepare(`INSERT OR IGNORE INTO wp_term_relationships (object_id, term_taxonomy_id) VALUES (1,1)`).run();
+
+    // ── 6. 샘플 댓글 ─────────────────────────────────────────────────────────
+    await d.prepare(
+      `INSERT OR IGNORE INTO wp_comments
+        (comment_post_ID, comment_author, comment_author_email, comment_author_url,
+         comment_content, comment_date, comment_date_gmt, comment_approved, comment_type, user_id)
+       VALUES (?,?,?,?,?,?,?,?,?,?)`
+    ).bind(
+      1, "CloudPress", "support@cloudpress.com", "https://cloudpress.com",
+      "WordPress 사이트가 성공적으로 생성되었습니다. 이 댓글을 삭제하고 새 글을 작성해보세요!",
+      now, now, "1", "comment", 0
+    ).run();
+
+    // ── 7. 설치 완료 플래그 ──────────────────────────────────────────────────
+    await kvSet(env, `wp:installed:${sid}`, "1", 86400 * 30);
+
+    console.log(`[CloudPress] WordPress 자동 설치 완료 (site: ${sid}, url: ${siteUrl})`);
+    return true;
+
+  } catch (e) {
+    console.error("[CloudPress] 자동 설치 실패:", e.message);
+    return false;
+  }
+}
+
 // ─── WP Option 헬퍼 ──────────────────────────────────────────────────────────
 
 async function getOption(env, name) {
@@ -2490,10 +2712,20 @@ export default {
       return handleRestApi(request, env, url);
     }
 
-    // ── WordPress 설치 확인 ──────────────────────────────────────────────────
-    const installed = await isWpInstalled(env);
+    // ── WordPress 설치 확인 + 자동 설치 ─────────────────────────────────────
+    let installed = await isWpInstalled(env);
     if (!installed) {
-      return buildReadyPage(env, url);
+      // DB가 연결돼 있으면 즉시 자동 초기화 시도
+      if (db(env)) {
+        const ok = await autoInstallWordPress(env, url);
+        if (ok) {
+          installed = true;
+        } else {
+          return buildReadyPage(env, url);
+        }
+      } else {
+        return buildReadyPage(env, url);
+      }
     }
 
     // ── 관리자 UI ────────────────────────────────────────────────────────────
@@ -2648,18 +2880,25 @@ function buildReadyPage(env, url) {
   const hasGithub = !!(ghOwner(env) && ghRepo(env));
   const sid       = siteId(env);
 
-  let status = "WordPress DB를 초기화하고 있습니다...";
+  // DB가 없는 경우: 설정 안내 (자동 설치 불가)
+  // DB가 있는 경우: autoInstallWordPress가 실패한 경우 (일시적 오류)
+  let status = hasDb
+    ? "WordPress DB 초기화에 실패했습니다. 잠시 후 다시 시도합니다."
+    : "D1 데이터베이스 바인딩이 필요합니다.";
   let tips   = [];
-  if (!hasDb)     { status = "D1 데이터베이스 바인딩이 필요합니다."; tips.push("CloudPress 대시보드 → 설정에서 Cloudflare API 키를 입력하면 D1이 자동 생성됩니다."); }
+  if (!hasDb) { tips.push("CloudPress 대시보드 → 설정에서 Cloudflare API 키를 입력하면 D1이 자동 생성됩니다."); }
   if (!hasGithub) { tips.push("GitHub 저장소를 연결하면 테마/플러그인을 무제한으로 사용할 수 있습니다."); }
+
+  // DB가 있으면 30초 후 재시도, 없으면 새로고침 없음
+  const refreshMeta = hasDb ? `<meta http-equiv="refresh" content="30">` : "";
 
   return new Response(`<!DOCTYPE html>
 <html lang="ko">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta http-equiv="refresh" content="5">
-<title>CloudPress — WordPress 준비 중</title>
+${refreshMeta}
+<title>CloudPress — WordPress 설정 필요</title>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
@@ -2688,7 +2927,7 @@ small{display:block;margin-top:14px;color:rgba(255,255,255,.25);font-size:11px}
 <body>
   <div class="card">
     <div class="logo">☁️</div>
-    <h1>WordPress 초기화 중</h1>
+    <h1>WordPress 설정 필요</h1>
     <p>${status}</p>
     <div class="status">
       <div class="status-item"><div class="dot ${hasDb?"ok":"err"}"></div>D1 데이터베이스: ${hasDb?"연결됨":"미연결"}</div>
@@ -2699,7 +2938,7 @@ small{display:block;margin-top:14px;color:rgba(255,255,255,.25);font-size:11px}
     </div>
     ${tips.map(t=>`<div class="tip">💡 ${t}</div>`).join("")}
     <div class="bar-wrap"><div class="bar"></div></div>
-    <small>CloudPress v6.0 · WordPress 6.7.2 호환 · 5초 후 자동 새로고침</small>
+    <small>CloudPress v6.0 · WordPress 6.7.2 호환</small>
   </div>
 </body>
 </html>`, { status: 503, headers: { ...CORS, "Content-Type": "text/html; charset=utf-8" } });

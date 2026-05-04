@@ -69,7 +69,7 @@ async function sendEmail(env, to, subject, html) {
 // ── 호스팅 완료 이메일 HTML 템플릿 ─────────────────────────────────────────
 function buildCompletionEmail({ siteName, domain, siteId, platformDomain }) {
   const siteUrl   = `https://${domain}`;
-  const detailUrl = `https://${platformDomain || "cloudpress.app"}/hosting-detail.html?id=${siteId}`;
+  const detailUrl = `https://${platformDomain || "cloudpress.app"}/hosting-detail?id=${siteId}`;
   const wpAdminUrl = `https://${domain}/wp-admin`;
 
   return `<!DOCTYPE html>

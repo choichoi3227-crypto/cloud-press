@@ -70,3 +70,22 @@ CREATE TABLE IF NOT EXISTS github_tokens (
   created_at   TEXT DEFAULT CURRENT_TIMESTAMP,
   last_used_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
+
+-- ── v6 마이그레이션 (CMS 배포 지원) ─────────────────────────────────────────
+-- sites 테이블에 CMS Worker 이름 컬럼 추가
+ALTER TABLE sites ADD COLUMN cms_worker_name TEXT;
+
+-- CMS 설정 테이블 (관리자 설정 페이지에서 관리)
+CREATE TABLE IF NOT EXISTS cms_settings (
+  key   TEXT PRIMARY KEY,
+  value TEXT NOT NULL DEFAULT ''
+);
+
+-- CMS zip 청크 저장 테이블 (D1 blob 한도 ~1MB → 청크 분할 저장)
+CREATE TABLE IF NOT EXISTS cms_zip_chunks (
+  chunk_index INTEGER NOT NULL,
+  data        TEXT    NOT NULL,
+  PRIMARY KEY (chunk_index)
+);
+
+CREATE INDEX IF NOT EXISTS idx_sites_cms_worker ON sites(cms_worker_name);

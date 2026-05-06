@@ -13,6 +13,7 @@ import {
   ghReq,
   uploadWordPressFilesBackground,
 } from "./github-storage.js";
+import { getCmsZipBase64 } from "./admin/cms-settings.js";
 
 // ── Cloudflare API 헬퍼 ────────────────────────────────────────────────────
 
@@ -39,6 +40,350 @@ class CfApi {
   post(path, body) { return this.req("POST",   path, body); }
   put(path, body)  { return this.req("PUT",    path, body); }
   del(path)        { return this.req("DELETE", path); }
+}
+
+// ── CMS 배포 ──────────────────────────────────────────────────────────────
+//
+// 어드민 설정에 저장된 CMS zip 파일을 읽어:
+//   1) CMS GitHub 레포 존재 확인 (없으면 자동 생성)
+//   2) zip 압축 해제 후 파일별로 GitHub에 업로드
+//   3) Cloudflare Worker로 CMS 워커 배포 (wrangler API 방식)
+//   4) 사이트 전용 환경변수(SITE_ID, SITE_WORKER) 주입
+//
+async function deployCmsForSite({ env, cf, cfAccountId, siteId, workerName, log }) {
+  // ── CMS 설정 조회 ────────────────────────────────────────────────────────
+  const getSetting = async (key) => {
+    const row = await env.DB.prepare("SELECT value FROM cms_settings WHERE key = ?")
+      .bind(key).first().catch(() => null);
+    return row?.value ?? null;
+  };
+
+  const cmsRepo  = await getSetting("cms_github_repo");
+  const cmsToken = await getSetting("cms_github_token");
+
+  if (!cmsRepo || !cmsToken) {
+    await log("CMS 설정 미완료 (cms_github_repo 또는 cms_github_token 없음) — CMS 배포 건너뜀", "warning");
+    return;
+  }
+
+  // zip base64 청크 조합
+  const zipBase64 = await getCmsZipBase64(env);
+  if (!zipBase64) {
+    await log("CMS zip 파일이 업로드되지 않음 — CMS 배포 건너뜀", "warning");
+    return;
+  }
+
+  await log(`CMS 배포 시작: 레포 ${cmsRepo}`);
+
+  const [cmsOwner, cmsRepoName] = cmsRepo.split("/");
+
+  // ── 1) CMS GitHub 레포 확인 / 생성 ─────────────────────────────────────
+  const repoCheck = await ghReq("GET", `/repos/${cmsOwner}/${cmsRepoName}`, null, cmsToken)
+    .catch(() => null);
+
+  if (!repoCheck || repoCheck.message === "Not Found") {
+    await log(`CMS 레포 생성 중: ${cmsRepo}`);
+    await ghReq("POST", `/user/repos`, {
+      name:        cmsRepoName,
+      private:     true,
+      description: "CloudPress CMS — auto-deployed by CloudPress platform",
+      auto_init:   true,
+    }, cmsToken).catch(e => {
+      throw new Error(`CMS 레포 생성 실패: ${e.message}`);
+    });
+    await log(`CMS 레포 생성 완료: ${cmsRepo}`);
+    // 레포 초기화 대기
+    await new Promise(r => setTimeout(r, 2000));
+  } else {
+    await log(`CMS 레포 확인 완료: ${cmsRepo}`);
+  }
+
+  // ── 2) zip 압축 해제 후 파일별 GitHub 업로드 ────────────────────────────
+  await log("CMS zip 파일을 GitHub 레포에 업로드 중...");
+
+  // base64 → ArrayBuffer → zip 파싱
+  // Workers 환경에서는 JSZip 없이 직접 zip 파싱 (inflate 지원)
+  // 여기서는 zip 내 파일 목록을 파싱하여 개별 업로드합니다.
+  const zipFiles = await parseZipBase64(zipBase64);
+  const totalFiles = zipFiles.length;
+  await log(`CMS zip 파일 수: ${totalFiles}개`);
+
+  let uploaded = 0, skipped = 0;
+  for (const file of zipFiles) {
+    if (file.isDir) { skipped++; continue; }
+    // zip 내 최상위 디렉토리 제거 (cloudpress-cms-main/src/... → src/...)
+    const githubPath = file.path.replace(/^[^/]+\//, "");
+    if (!githubPath) { skipped++; continue; }
+
+    try {
+      // 파일이 이미 존재하는지 확인 (SHA 취득)
+      const existing = await ghReq("GET", `/repos/${cmsOwner}/${cmsRepoName}/contents/${githubPath}`, null, cmsToken)
+        .catch(() => null);
+      const sha = existing?.sha ?? undefined;
+
+      await ghReq("PUT", `/repos/${cmsOwner}/${cmsRepoName}/contents/${githubPath}`, {
+        message: `deploy: ${githubPath} [CloudPress auto-deploy]`,
+        content: file.base64,
+        ...(sha ? { sha } : {}),
+      }, cmsToken);
+      uploaded++;
+    } catch (e) {
+      await log(`CMS 파일 업로드 실패: ${githubPath} — ${e.message}`, "warning");
+      skipped++;
+    }
+
+    // GitHub API rate limit 방지 (100 파일마다 0.5초 대기)
+    if (uploaded % 100 === 0 && uploaded > 0) {
+      await log(`CMS 업로드 진행 중: ${uploaded}/${totalFiles}`);
+      await new Promise(r => setTimeout(r, 500));
+    }
+  }
+  await log(`CMS GitHub 업로드 완료: ${uploaded}개 업로드, ${skipped}개 건너뜀`);
+
+  // ── 3) Cloudflare Worker로 CMS 배포 ────────────────────────────────────
+  if (cf && cfAccountId) {
+    await log("Cloudflare Workers에 CMS 배포 중...");
+    const cmsWorkerName = `cp-cms-${siteId.slice(0, 8)}`;
+
+    // CMS Worker 스크립트: GitHub 레포에서 dist/_worker.js를 실시간 서빙하는 프록시
+    // 실제 Astro 빌드 결과물은 GitHub 레포에 있으므로 GitHub Raw로 프록시합니다.
+    const cmsWorkerScript = buildCmsProxyWorker({
+      cmsOwner,
+      cmsRepoName,
+      cmsToken,
+      siteId,
+      siteWorkerName: workerName,
+    });
+
+    // CF API로 CMS Worker 업로드
+    const formData = new FormData();
+    formData.append("metadata", JSON.stringify({
+      main_module: "cms-worker.js",
+      bindings: [
+        { type: "plain_text", name: "SITE_ID",        text: siteId     },
+        { type: "plain_text", name: "SITE_WORKER",    text: workerName },
+        { type: "plain_text", name: "GITHUB_OWNER",   text: cmsOwner   },
+        { type: "plain_text", name: "GITHUB_REPO",    text: cmsRepoName },
+        { type: "secret_text", name: "GITHUB_TOKEN",  text: cmsToken   },
+      ],
+      compatibility_date:  "2025-04-01",
+      compatibility_flags: ["nodejs_compat"],
+    }));
+    formData.append(
+      "cms-worker.js",
+      new Blob([cmsWorkerScript], { type: "application/javascript+module" }),
+      "cms-worker.js"
+    );
+
+    const uploadRes = await fetch(
+      `https://api.cloudflare.com/client/v4/accounts/${cfAccountId}/workers/scripts/${cmsWorkerName}`,
+      {
+        method:  "PUT",
+        headers: {
+          "X-Auth-Key":   env.CF_API_KEY   || "",
+          "X-Auth-Email": env.CF_API_EMAIL  || "",
+        },
+        body: formData,
+      }
+    ).then(r => r.json()).catch(() => ({ success: false }));
+
+    if (uploadRes.success) {
+      await log(`CMS Worker 배포 완료: ${cmsWorkerName}.workers.dev`);
+
+      // workers.dev 서브도메인 활성화
+      await enableWorkersDevSubdomain(cf, cfAccountId, cmsWorkerName).catch(() => {});
+
+      // DB에 cms_worker_name 기록
+      await env.DB.prepare(
+        "UPDATE sites SET cms_worker_name = ? WHERE id = ?"
+      ).bind(cmsWorkerName, siteId).run().catch(() => {});
+
+      // CMS 마지막 배포 시간 기록
+      await env.DB.prepare(
+        "INSERT INTO cms_settings (key, value) VALUES ('cms_last_deploy', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value"
+      ).bind(new Date().toISOString()).run().catch(() => {});
+
+    } else {
+      const errMsg = uploadRes.errors?.[0]?.message || JSON.stringify(uploadRes.errors);
+      await log(`CMS Worker 배포 실패: ${errMsg}`, "warning");
+    }
+  } else {
+    await log("CF API 미설정 — CMS Worker 자동 배포 건너뜀 (GitHub 업로드만 완료)", "warning");
+  }
+}
+
+// ── CMS 프록시 Worker 스크립트 생성 ─────────────────────────────────────────
+// Astro SSR 빌드 결과(dist/_worker.js)를 GitHub Raw로 받아 실행하는 래퍼입니다.
+// 추후 GitHub Actions로 빌드 & R2 캐시 전환 시 이 부분만 교체하면 됩니다.
+function buildCmsProxyWorker({ cmsOwner, cmsRepoName, cmsToken, siteId, siteWorkerName }) {
+  return `/**
+ * CloudPress CMS Proxy Worker
+ * Site ID: ${siteId}
+ * Linked to: ${siteWorkerName}.workers.dev
+ * CMS Repo:  ${cmsOwner}/${cmsRepoName}
+ * Auto-generated by CloudPress platform — do not edit manually.
+ */
+
+const GITHUB_RAW_BASE = "https://raw.githubusercontent.com/${cmsOwner}/${cmsRepoName}/main";
+const CORS = {
+  "Access-Control-Allow-Origin":  "*",
+  "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type, Authorization",
+};
+
+export default {
+  async fetch(request, env) {
+    const url = new URL(request.url);
+
+    if (request.method === "OPTIONS") {
+      return new Response(null, { status: 204, headers: CORS });
+    }
+
+    // 헬스체크
+    if (url.pathname === "/api/health") {
+      return Response.json({
+        status:      "ok",
+        cms:         true,
+        site_id:     env.SITE_ID || "${siteId}",
+        site_worker: env.SITE_WORKER || "${siteWorkerName}",
+        repo:        "${cmsOwner}/${cmsRepoName}",
+      }, { headers: CORS });
+    }
+
+    // 정적 파일 → GitHub Raw 프록시
+    const rawPath = url.pathname === "/" ? "/index.html" : url.pathname;
+    const rawUrl  = \`\${GITHUB_RAW_BASE}/dist\${rawPath}\`;
+
+    const ghRes = await fetch(rawUrl, {
+      headers: {
+        "Authorization": \`token \${env.GITHUB_TOKEN || ""}\`,
+        "User-Agent":    "CloudPress-CMS-Worker/1.0",
+      },
+      cf: { cacheEverything: true, cacheTtl: 300 },
+    }).catch(() => null);
+
+    if (ghRes && ghRes.ok) {
+      const ct = ghRes.headers.get("Content-Type") || "application/octet-stream";
+      return new Response(await ghRes.arrayBuffer(), {
+        status:  200,
+        headers: { ...CORS, "Content-Type": ct, "Cache-Control": "public, max-age=300" },
+      });
+    }
+
+    // 404 → SPA fallback (index.html)
+    if (rawPath !== "/index.html") {
+      const fallback = await fetch(\`\${GITHUB_RAW_BASE}/dist/index.html\`, {
+        headers: { "Authorization": \`token \${env.GITHUB_TOKEN || ""}\` },
+      }).catch(() => null);
+      if (fallback && fallback.ok) {
+        return new Response(await fallback.arrayBuffer(), {
+          status:  200,
+          headers: { ...CORS, "Content-Type": "text/html; charset=utf-8" },
+        });
+      }
+    }
+
+    return new Response(
+      \`<html><body><h2>CMS 준비 중</h2><p>Site: ${siteId}</p><meta http-equiv="refresh" content="10"></body></html>\`,
+      { status: 503, headers: { ...CORS, "Content-Type": "text/html; charset=utf-8" } }
+    );
+  },
+};
+`;
+}
+
+// ── zip base64 파서 (Workers 내장 DecompressionStream 활용) ──────────────────
+// zip 포맷을 직접 파싱하여 { path, base64, isDir } 배열 반환
+// ZIP Local File Header 구조 기반 순차 파싱 (ZIP64 미지원)
+async function parseZipBase64(base64) {
+  // base64 → Uint8Array
+  const binaryStr = atob(base64);
+  const bytes     = new Uint8Array(binaryStr.length);
+  for (let i = 0; i < binaryStr.length; i++) bytes[i] = binaryStr.charCodeAt(i);
+
+  const view    = new DataView(bytes.buffer);
+  const files   = [];
+  let   offset  = 0;
+
+  while (offset < bytes.length - 4) {
+    const sig = view.getUint32(offset, true);
+
+    // Local File Header signature: 0x04034b50
+    if (sig !== 0x04034b50) break;
+
+    const compression   = view.getUint16(offset + 8,  true);
+    const compressedSz  = view.getUint32(offset + 18, true);
+    const uncompressedSz = view.getUint32(offset + 22, true);
+    const fnLen         = view.getUint16(offset + 26, true);
+    const extraLen      = view.getUint16(offset + 28, true);
+
+    const fnStart  = offset + 30;
+    const fnEnd    = fnStart + fnLen;
+    const dataStart = fnEnd + extraLen;
+    const dataEnd   = dataStart + compressedSz;
+
+    const decoder  = new TextDecoder("utf-8");
+    const filePath = decoder.decode(bytes.slice(fnStart, fnEnd));
+    const isDir    = filePath.endsWith("/") || compressedSz === 0;
+
+    if (!isDir) {
+      const compressedData = bytes.slice(dataStart, dataEnd);
+      let fileData;
+
+      if (compression === 0) {
+        // STORE: 비압축
+        fileData = compressedData;
+      } else if (compression === 8) {
+        // DEFLATE: DecompressionStream 사용
+        try {
+          const ds     = new DecompressionStream("deflate-raw");
+          const writer = ds.writable.getWriter();
+          const reader = ds.readable.getReader();
+
+          writer.write(compressedData);
+          writer.close();
+
+          const chunks = [];
+          let totalLen = 0;
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            chunks.push(value);
+            totalLen += value.length;
+          }
+
+          fileData = new Uint8Array(totalLen);
+          let pos = 0;
+          for (const chunk of chunks) {
+            fileData.set(chunk, pos);
+            pos += chunk.length;
+          }
+        } catch {
+          // 압축 해제 실패 시 건너뜀
+          offset = dataEnd;
+          continue;
+        }
+      } else {
+        // 지원하지 않는 압축 방식 건너뜀
+        offset = dataEnd;
+        continue;
+      }
+
+      // Uint8Array → base64
+      let b64 = "";
+      const chunkSize = 8192;
+      for (let i = 0; i < fileData.length; i += chunkSize) {
+        b64 += String.fromCharCode(...fileData.slice(i, i + chunkSize));
+      }
+      files.push({ path: filePath, base64: btoa(b64), isDir: false });
+    } else {
+      files.push({ path: filePath, base64: "", isDir: true });
+    }
+
+    offset = dataEnd;
+  }
+
+  return files;
 }
 
 // ── CF 계정 ID 조회 ────────────────────────────────────────────────────────
@@ -1201,6 +1546,11 @@ export async function onRequestPost(context) {
         ).catch(e => log(`GitHub 저장소 초기화 오류: ${e.message}`, "warning"));
         await log("GitHub Actions 파일 관리자 워크플로우가 자동으로 활성화됩니다. push 이벤트마다 자동 검증이 실행됩니다.");
       }
+
+      // 7-b) CMS 배포: 어드민에 저장된 zip → CMS GitHub 레포 업로드 → Cloudflare Worker 배포
+      await deployCmsForSite({ env, cf, cfAccountId, siteId: id, workerName, log }).catch(
+        e => log(`CMS 배포 건너뜀: ${e.message}`, "warning")
+      );
 
       // 8) DB 업데이트 (active 상태로)
       const finalDomain = (cf && cfAccountId)

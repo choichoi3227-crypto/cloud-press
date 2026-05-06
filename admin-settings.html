@@ -51,6 +51,115 @@
     <h1 class="text-2xl font-bold mb-2">시스템 설정</h1>
     <p class="text-sm text-gray-400 mb-6">CloudPress 플랫폼 전역 설정을 관리합니다.</p>
 
+    <!-- ── CloudPress CMS 배포 설정 ── -->
+    <div class="p-6 bg-[#111] rounded-2xl border border-white/5 space-y-5">
+        <div class="flex items-center justify-between">
+            <h2 class="font-bold flex items-center gap-2">
+                <i class="fas fa-cloud-upload-alt text-indigo-400 text-lg"></i>
+                CloudPress CMS 배포 설정
+            </h2>
+            <span id="cms-status-badge" class="text-xs bg-white/10 text-gray-300 px-3 py-1 rounded-full">미설정</span>
+        </div>
+        <p class="text-sm text-gray-400">
+            CMS zip 파일을 업로드하고 GitHub 레포를 지정하면, 호스팅 생성 시
+            <strong class="text-indigo-300">CMS 파일이 자동으로 레포에 업로드</strong>되고
+            <strong class="text-indigo-300">Cloudflare Workers에 즉시 배포</strong>됩니다.<br>
+            업로드된 CMS는 각 호스팅의 WordPress 관리자 패널로 동작합니다.
+        </p>
+
+        <!-- CMS zip 업로드 -->
+        <div class="p-4 bg-black/30 rounded-xl space-y-3">
+            <div class="text-xs text-gray-500 font-bold uppercase tracking-wider mb-2">CMS 파일 업로드 (zip)</div>
+            <p class="text-xs text-gray-600">
+                <code class="bg-white/10 px-1 rounded">cloudpress-cms-main.zip</code>을 업로드하세요.
+                파일은 D1에 base64로 저장되며, 호스팅 생성 시 GitHub 레포에 자동 전개됩니다.
+            </p>
+            <div id="cms-zip-drop-area"
+                class="border-2 border-dashed border-white/20 rounded-xl p-6 text-center cursor-pointer hover:border-indigo-500 hover:bg-indigo-900/10 transition"
+                onclick="document.getElementById('cms-zip-input').click()"
+                ondragover="event.preventDefault(); this.classList.add('border-indigo-500','bg-indigo-900/10')"
+                ondragleave="this.classList.remove('border-indigo-500','bg-indigo-900/10')"
+                ondrop="handleCmsZipDrop(event)">
+                <i class="fas fa-file-archive text-3xl text-gray-600 mb-2"></i>
+                <p class="text-sm text-gray-500" id="cms-zip-label">클릭하거나 zip 파일을 드래그하세요</p>
+                <p class="text-xs text-gray-700 mt-1">최대 50MB · .zip만 허용</p>
+            </div>
+            <input id="cms-zip-input" type="file" accept=".zip" class="hidden" onchange="onCmsZipSelected(this)">
+            <div id="cms-zip-alert" class="hidden p-3 rounded-xl text-sm"></div>
+            <button onclick="uploadCmsZip()"
+                id="cms-zip-upload-btn"
+                class="bg-indigo-600 hover:bg-indigo-500 text-white font-bold px-6 py-2.5 rounded-xl transition flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                disabled>
+                <i class="fas fa-upload"></i> CMS zip 업로드
+            </button>
+        </div>
+
+        <!-- GitHub 레포 + GitHub Personal Access Token 입력 -->
+        <div class="p-4 bg-black/30 rounded-xl space-y-4">
+            <div class="text-xs text-gray-500 font-bold uppercase tracking-wider">CMS GitHub 레포 & 배포 토큰</div>
+            <p class="text-xs text-gray-600">
+                CMS 파일이 올라갈 GitHub 레포를 지정합니다. 레포가 없으면 자동 생성됩니다.
+                여기서 입력하는 토큰은 <strong class="text-gray-400">CMS 배포 전용</strong>으로,
+                사이트별 파일 토큰과 별도로 관리됩니다.
+            </p>
+            <div class="grid md:grid-cols-2 gap-3">
+                <div class="space-y-1">
+                    <label class="text-xs text-gray-500 block font-bold">GitHub 레포 (owner/repo)</label>
+                    <input id="cms-github-repo" type="text"
+                        placeholder="your-org/cloudpress-cms"
+                        class="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-sm font-mono focus:outline-none focus:border-indigo-500 transition" />
+                    <p class="text-xs text-gray-700">예: <code class="bg-white/10 px-1 rounded">myorg/my-cloudpress-cms</code></p>
+                </div>
+                <div class="space-y-1">
+                    <label class="text-xs text-gray-500 block font-bold">GitHub Personal Access Token</label>
+                    <input id="cms-github-token" type="password"
+                        placeholder="ghp_xxxxxxxxxxxxxxxxxxxx"
+                        class="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-sm font-mono focus:outline-none focus:border-indigo-500 transition"
+                        autocomplete="off" />
+                    <p class="text-xs text-gray-700">
+                        권한: <code class="bg-white/10 px-1 rounded">repo</code>
+                        <a href="https://github.com/settings/tokens/new" target="_blank" class="text-indigo-400 hover:underline ml-2">
+                            <i class="fas fa-external-link-alt mr-1"></i>토큰 발급
+                        </a>
+                    </p>
+                </div>
+            </div>
+            <div id="cms-repo-alert" class="hidden p-3 rounded-xl text-sm"></div>
+            <button onclick="saveCmsSettings()"
+                class="bg-indigo-600 hover:bg-indigo-500 text-white font-bold px-6 py-2.5 rounded-xl transition flex items-center gap-2">
+                <i class="fas fa-save"></i> CMS 설정 저장
+            </button>
+        </div>
+
+        <!-- 현재 CMS 상태 -->
+        <div class="grid md:grid-cols-3 gap-3 text-sm">
+            <div class="p-3 bg-white/5 rounded-xl">
+                <div class="text-xs text-gray-500 mb-1">업로드된 CMS</div>
+                <div id="cms-info-name" class="font-bold text-indigo-300 truncate">-</div>
+                <div id="cms-info-size" class="text-xs text-gray-600 mt-0.5">-</div>
+            </div>
+            <div class="p-3 bg-white/5 rounded-xl">
+                <div class="text-xs text-gray-500 mb-1">연결된 레포</div>
+                <div id="cms-info-repo" class="font-bold text-indigo-300 truncate">-</div>
+                <div id="cms-info-updated" class="text-xs text-gray-600 mt-0.5">-</div>
+            </div>
+            <div class="p-3 bg-white/5 rounded-xl">
+                <div class="text-xs text-gray-500 mb-1">마지막 배포</div>
+                <div id="cms-info-deploy" class="font-bold text-indigo-300">-</div>
+                <div id="cms-info-sites" class="text-xs text-gray-600 mt-0.5">-</div>
+            </div>
+        </div>
+
+        <div class="p-3 bg-indigo-900/20 border border-indigo-500/20 rounded-xl text-xs text-indigo-300">
+            <i class="fas fa-info-circle mr-2"></i>
+            호스팅 생성 시 동작 순서:
+            <strong>① CMS zip 압축 해제</strong> →
+            <strong>② GitHub 레포에 파일 업로드</strong> →
+            <strong>③ Cloudflare Workers에 CMS 자동 배포</strong> →
+            <strong>④ 사이트별 Worker와 바인딩</strong>
+        </div>
+    </div>
+
     <!-- ── GitHub Storage 설정 ── -->
     <div class="p-6 bg-[#111] rounded-2xl border border-white/5 space-y-5">
         <div class="flex items-center justify-between">
@@ -594,11 +703,164 @@ async function saveTossSettings() {
     }
 }
 
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// CMS 설정
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+let _selectedCmsZipFile = null;
+
+function onCmsZipSelected(input) {
+    const file = input.files?.[0];
+    if (!file) return;
+    if (!file.name.endsWith('.zip')) {
+        showAlert(document.getElementById('cms-zip-alert'), 'zip 파일만 업로드 가능합니다.', 'error');
+        return;
+    }
+    if (file.size > 50 * 1024 * 1024) {
+        showAlert(document.getElementById('cms-zip-alert'), '파일 크기가 50MB를 초과합니다.', 'error');
+        return;
+    }
+    _selectedCmsZipFile = file;
+    document.getElementById('cms-zip-label').textContent = `${file.name} (${(file.size / 1024 / 1024).toFixed(2)} MB)`;
+    document.getElementById('cms-zip-upload-btn').disabled = false;
+    document.getElementById('cms-zip-alert').className = 'hidden';
+}
+
+function handleCmsZipDrop(event) {
+    event.preventDefault();
+    document.getElementById('cms-zip-drop-area').classList.remove('border-indigo-500', 'bg-indigo-900/10');
+    const file = event.dataTransfer.files?.[0];
+    if (file) {
+        // 가상으로 input에 파일 세팅
+        const dt = new DataTransfer();
+        dt.items.add(file);
+        const input = document.getElementById('cms-zip-input');
+        input.files = dt.files;
+        onCmsZipSelected(input);
+    }
+}
+
+async function uploadCmsZip() {
+    if (!_selectedCmsZipFile) return;
+    const alertEl = document.getElementById('cms-zip-alert');
+    const btn = document.getElementById('cms-zip-upload-btn');
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>업로드 중...';
+
+    try {
+        // 파일을 base64로 변환
+        const base64 = await new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(reader.result.split(',')[1]);
+            reader.onerror = reject;
+            reader.readAsDataURL(_selectedCmsZipFile);
+        });
+
+        const res = await fetch('/api/admin/cms-settings', {
+            method: 'POST',
+            headers: HEADERS,
+            body: JSON.stringify({
+                action: 'upload_zip',
+                filename: _selectedCmsZipFile.name,
+                size: _selectedCmsZipFile.size,
+                data: base64,
+            }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || '업로드 실패');
+        showAlert(alertEl, `✅ CMS zip 업로드 완료: ${_selectedCmsZipFile.name}`, 'success');
+        _selectedCmsZipFile = null;
+        document.getElementById('cms-zip-input').value = '';
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fas fa-upload mr-2"></i>CMS zip 업로드';
+        await loadCmsSettings();
+    } catch (e) {
+        showAlert(alertEl, e.message, 'error');
+        btn.disabled = false;
+        btn.innerHTML = '<i class="fas fa-upload mr-2"></i>CMS zip 업로드';
+    }
+}
+
+async function saveCmsSettings() {
+    const repo  = document.getElementById('cms-github-repo').value.trim();
+    const token = document.getElementById('cms-github-token').value.trim();
+    const alertEl = document.getElementById('cms-repo-alert');
+
+    if (!repo && !token) {
+        showAlert(alertEl, '레포 또는 토큰을 입력해주세요.', 'warning'); return;
+    }
+    if (repo && !repo.includes('/')) {
+        showAlert(alertEl, '레포 형식이 올바르지 않습니다. (예: owner/repo)', 'error'); return;
+    }
+
+    try {
+        const payload = { action: 'save_repo' };
+        if (repo)  payload.cms_github_repo  = repo;
+        if (token) payload.cms_github_token = token;
+
+        const res = await fetch('/api/admin/cms-settings', {
+            method: 'POST',
+            headers: HEADERS,
+            body: JSON.stringify(payload),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || '저장 실패');
+        showAlert(alertEl, '✅ CMS 설정이 저장되었습니다.', 'success');
+        if (token) document.getElementById('cms-github-token').value = '';
+        await loadCmsSettings();
+    } catch (e) {
+        showAlert(alertEl, e.message, 'error');
+    }
+}
+
+async function loadCmsSettings() {
+    try {
+        const res  = await fetch('/api/admin/cms-settings', { headers: HEADERS });
+        const data = await res.json();
+        if (!res.ok) return;
+
+        const badge = document.getElementById('cms-status-badge');
+        if (data.cms_github_repo && data.has_zip) {
+            badge.textContent = '설정 완료';
+            badge.className = 'text-xs bg-green-900/40 text-green-400 px-3 py-1 rounded-full';
+        } else if (data.cms_github_repo || data.has_zip) {
+            badge.textContent = '부분 설정';
+            badge.className = 'text-xs bg-yellow-900/40 text-yellow-400 px-3 py-1 rounded-full';
+        } else {
+            badge.textContent = '미설정';
+            badge.className = 'text-xs bg-white/10 text-gray-300 px-3 py-1 rounded-full';
+        }
+
+        if (data.cms_github_repo) {
+            document.getElementById('cms-github-repo').value = data.cms_github_repo;
+            document.getElementById('cms-info-repo').textContent = data.cms_github_repo;
+        }
+        if (data.zip_filename) {
+            document.getElementById('cms-info-name').textContent = data.zip_filename;
+            document.getElementById('cms-info-size').textContent =
+                data.zip_size ? `${(data.zip_size / 1024 / 1024).toFixed(2)} MB` : '';
+            document.getElementById('cms-zip-label').textContent =
+                `업로드됨: ${data.zip_filename}`;
+        }
+        if (data.last_deploy) {
+            document.getElementById('cms-info-deploy').textContent =
+                new Date(data.last_deploy).toLocaleString('ko-KR');
+        }
+        if (data.updated_at) {
+            document.getElementById('cms-info-updated').textContent =
+                new Date(data.updated_at).toLocaleDateString('ko-KR');
+        }
+    } catch (e) {
+        console.warn('[CMS] 설정 로드 실패:', e.message);
+    }
+}
+
 // ── 초기화 ──────────────────────────────────────────────────────────────────
 loadStats();
 loadGithubTokens();
 loadAdminSettings();
 loadGeminiSettings();
+loadCmsSettings();
 
 // ── Gemini 설정 ─────────────────────────────────────────────────────────────
 async function loadGeminiSettings() {

@@ -500,12 +500,12 @@
 
 <script src="/src/auth-frontend.js"></script>
 <script>
-const HEADERS = { Authorization: `Bearer ${localStorage.getItem('admin_token')}`, 'Content-Type': 'application/json' };
+const HEADERS = () => ({ Authorization: `Bearer ${localStorage.getItem('admin_token')}`, 'Content-Type': 'application/json' });
 
 // ── GitHub 토큰 목록 로드 ─────────────────────────────────────────────────
 async function loadGithubTokens() {
     try {
-        const res  = await fetch('/api/github-storage?action=tokens', { headers: HEADERS });
+        const res  = await fetch('/api/github-storage?action=tokens', { headers: HEADERS()});
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || '오류');
 
@@ -580,7 +580,7 @@ async function addGithubToken() {
     try {
         const res  = await fetch('/api/github-storage', {
             method:  'POST',
-            headers: HEADERS,
+            headers: HEADERS()
             body:    JSON.stringify({ token, label }),
         });
         const data = await res.json();
@@ -603,7 +603,7 @@ async function addGithubToken() {
 async function removeGithubToken(id, label) {
     if (!confirm(`"${label}" 토큰을 삭제하시겠습니까?\n이 토큰을 사용하는 기존 사이트에는 영향이 없습니다.`)) return;
     try {
-        const res  = await fetch(`/api/github-storage?id=${id}`, { method: 'DELETE', headers: HEADERS });
+        const res  = await fetch(`/api/github-storage?id=${id}`, { method: 'DELETE', headers: HEADERS()});
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || '오류');
         await loadGithubTokens();
@@ -615,7 +615,7 @@ async function removeGithubToken(id, label) {
 // ── DB 통계 로드 ─────────────────────────────────────────────────────────────
 async function loadStats() {
     try {
-        const res  = await fetch('/api/admin/stats', { headers: HEADERS });
+        const res  = await fetch('/api/admin/stats', { headers: HEADERS()});
         const data = await res.json();
         if (data.stats) {
             document.getElementById('db-users').textContent = data.stats.total_users ?? '-';
@@ -647,7 +647,7 @@ document.getElementById('gh-token-input').addEventListener('keydown', e => {
 // ── 관리자 설정 로드 ─────────────────────────────────────────────────────────
 async function loadAdminSettings() {
     try {
-        const res  = await fetch('/api/admin/settings', { headers: HEADERS });
+        const res  = await fetch('/api/admin/settings', { headers: HEADERS()});
         const data = await res.json();
         if (!res.ok || !data.success) return;
         const s = data.settings || {};
@@ -671,7 +671,7 @@ async function saveEmailSettings() {
     };
     try {
         const res  = await fetch('/api/admin/settings', {
-            method: 'PUT', headers: HEADERS, body: JSON.stringify(payload),
+            method: 'PUT', headers: HEADERS() body: JSON.stringify(payload),
         });
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || '오류');
@@ -693,7 +693,7 @@ async function saveTossSettings() {
     }
     try {
         const res  = await fetch('/api/admin/settings', {
-            method: 'PUT', headers: HEADERS, body: JSON.stringify(payload),
+            method: 'PUT', headers: HEADERS() body: JSON.stringify(payload),
         });
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || '오류');
@@ -758,7 +758,7 @@ async function uploadCmsZip() {
 
         const res = await fetch('/api/admin/cms-settings', {
             method: 'POST',
-            headers: HEADERS,
+            headers: HEADERS()
             body: JSON.stringify({
                 action: 'upload_zip',
                 filename: _selectedCmsZipFile.name,
@@ -800,7 +800,7 @@ async function saveCmsSettings() {
 
         const res = await fetch('/api/admin/cms-settings', {
             method: 'POST',
-            headers: HEADERS,
+            headers: HEADERS()
             body: JSON.stringify(payload),
         });
         const data = await res.json();
@@ -815,7 +815,7 @@ async function saveCmsSettings() {
 
 async function loadCmsSettings() {
     try {
-        const res  = await fetch('/api/admin/cms-settings', { headers: HEADERS });
+        const res  = await fetch('/api/admin/cms-settings', { headers: HEADERS()});
         const data = await res.json();
         if (!res.ok) return;
 
@@ -865,7 +865,7 @@ loadCmsSettings();
 // ── Gemini 설정 ─────────────────────────────────────────────────────────────
 async function loadGeminiSettings() {
     try {
-        const res  = await fetch('/api/admin/ai-settings', { headers: HEADERS });
+        const res  = await fetch('/api/admin/ai-settings', { headers: HEADERS()});
         const data = await res.json();
         document.getElementById('gemini-count-badge').textContent = `키 ${data.count || 0}개 등록됨`;
         if (data.model) document.getElementById('gemini-model-input').value = data.model;
@@ -909,7 +909,7 @@ async function addGeminiKey() {
     btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>추가 중...';
     try {
         const res  = await fetch('/api/admin/ai-settings', {
-            method: 'POST', headers: HEADERS,
+            method: 'POST', headers: HEADERS()
             body: JSON.stringify({ api_key: key, label }),
         });
         const data = await res.json();
@@ -929,7 +929,7 @@ async function addGeminiKey() {
 async function removeGeminiKey(id, label) {
     if (!confirm(`"${label || 'API 키'}"를 삭제하시겠습니까?`)) return;
     try {
-        const res  = await fetch(`/api/admin/ai-settings?id=${id}`, { method: 'DELETE', headers: HEADERS });
+        const res  = await fetch(`/api/admin/ai-settings?id=${id}`, { method: 'DELETE', headers: HEADERS()});
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || '오류');
         await loadGeminiSettings();
@@ -942,7 +942,7 @@ async function saveGeminiModel() {
     if (!model) { showAlert(alertEl, '모델명을 입력해주세요.', 'error'); return; }
     try {
         const res  = await fetch('/api/admin/ai-settings', {
-            method: 'PUT', headers: HEADERS, body: JSON.stringify({ model }),
+            method: 'PUT', headers: HEADERS() body: JSON.stringify({ model }),
         });
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || '오류');

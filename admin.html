@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>CloudPress Admin</title>
+    <title>어드민</title>
     <link rel="stylesheet" href="/style.css">
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
@@ -140,11 +140,14 @@
                     </div>`).join('');
         } catch {}
 
-        // 서버 IP
+        // 서버 상태
         try {
-            const r = await fetch(`/api/domains?site_id=ping`, { headers: HEADERS });
+            const r = await fetch(`/api/health`, { headers: HEADERS });
             const d = await r.json();
-            if (d.server_ip) document.getElementById('stat-ip').textContent = d.server_ip;
+            if (d.ok) {
+                const ipEl = document.getElementById('stat-ip');
+                if (ipEl) ipEl.textContent = '정상';
+            }
         } catch {}
     }
 

@@ -28,7 +28,7 @@
             <header class="flex justify-between items-center mb-8">
                 <div>
                     <h1 class="text-3xl font-bold">도메인 관리</h1>
-                    <p class="text-gray-500 text-sm mt-1">호스팅에 연결된 도메인을 관리합니다</p>
+                    <p class="text-gray-500 text-sm mt-1">계정에 도메인을 추가하고 호스팅에 연결하세요</p>
                 </div>
                 <button onclick="openAddModal()" class="bg-blue-600 px-5 py-2.5 rounded-xl text-white font-bold hover:bg-blue-500 transition flex items-center gap-2 text-sm">
                     <i class="fas fa-plus"></i> 도메인 추가
@@ -36,6 +36,15 @@
             </header>
 
             <div id="alertMsg" class="hidden mb-6 p-3 rounded-xl text-sm text-center"></div>
+
+            <!-- 안내 배너 -->
+            <div class="mb-6 p-4 rounded-xl bg-blue-900/20 border border-blue-500/30 text-sm text-blue-300 flex gap-3">
+                <i class="fas fa-info-circle mt-0.5 flex-shrink-0"></i>
+                <div>
+                    <strong>계정 단위 도메인 관리</strong> — 도메인을 계정에 먼저 추가한 뒤, 원하는 호스팅에 연결할 수 있습니다.
+                    호스팅을 변경해도 도메인은 계정에 유지됩니다.
+                </div>
+            </div>
 
             <!-- 도메인 목록 -->
             <div id="domain-list">
@@ -55,20 +64,19 @@
                 <button onclick="closeAddModal()" class="text-gray-500 hover:text-white transition text-xl">&times;</button>
             </div>
 
-            <div class="mb-4">
-                <label class="text-sm text-gray-400 mb-2 block">연결할 호스팅 선택</label>
-                <select id="modal-site-select" class="w-full p-3 bg-white/5 border border-white/10 rounded-xl outline-none focus:border-blue-500 transition text-sm">
-                    <option value="">호스팅 선택...</option>
-                </select>
+            <div class="mb-4 p-3 rounded-xl bg-white/5 text-xs text-gray-400">
+                <i class="fas fa-info-circle mr-1 text-blue-400"></i>
+                도메인을 계정에 추가합니다. 추가 후 원하는 호스팅에 연결할 수 있습니다.
             </div>
 
             <div class="mb-6">
                 <label class="text-sm text-gray-400 mb-2 block">도메인 주소</label>
-                <input id="modal-domain-input" type="text" placeholder="example.com 또는 www.example.com"
-                    class="w-full p-3 bg-white/5 border border-white/10 rounded-xl outline-none focus:border-blue-500 transition text-sm">
+                <input id="modal-domain-input" type="text" placeholder="example.com"
+                    class="w-full p-3 bg-white/5 border border-white/10 rounded-xl outline-none focus:border-blue-500 transition text-sm"
+                    onkeydown="if(event.key==='Enter') addDomain()">
                 <p class="text-xs text-gray-600 mt-2">
                     <i class="fas fa-info-circle mr-1"></i>
-                    이미 Cloudflare 네임서버를 사용 중이면 자동으로 감지하여 즉시 연결됩니다
+                    Cloudflare API 키가 등록되어 있으면 DNS Zone이 자동 생성됩니다
                 </p>
             </div>
 
@@ -83,15 +91,36 @@
         </div>
     </div>
 
-    <!-- NS 안내 모달 -->
-    <div id="nsModal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm">
+    <!-- 호스팅 연결 모달 -->
+    <div id="connectModal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm">
         <div class="bg-[#111] border border-white/10 rounded-2xl p-8 w-full max-w-lg mx-4 shadow-2xl">
             <div class="flex items-center justify-between mb-6">
-                <h2 class="text-xl font-bold">네임서버 설정 안내</h2>
-                <button onclick="closeNsModal()" class="text-gray-500 hover:text-white transition text-xl">&times;</button>
+                <h2 class="text-xl font-bold">호스팅 연결</h2>
+                <button onclick="closeConnectModal()" class="text-gray-500 hover:text-white transition text-xl">&times;</button>
             </div>
-            <div id="ns-content"></div>
-            <button onclick="closeNsModal()" class="w-full mt-6 bg-blue-600 py-3 rounded-xl font-bold hover:bg-blue-500 transition text-sm">확인</button>
+
+            <div class="mb-4">
+                <p class="text-sm text-gray-400 mb-1">연결할 도메인</p>
+                <p id="connect-domain-label" class="font-semibold text-blue-300 text-lg"></p>
+            </div>
+
+            <div class="mb-6">
+                <label class="text-sm text-gray-400 mb-2 block">호스팅 선택</label>
+                <select id="connect-site-select" class="w-full p-3 bg-white/5 border border-white/10 rounded-xl outline-none focus:border-blue-500 transition text-sm">
+                    <option value="">연결 해제 (계정에만 보관)</option>
+                </select>
+                <p class="text-xs text-gray-600 mt-2">
+                    <i class="fas fa-info-circle mr-1"></i>
+                    연결 시 GitHub Pages DNS 레코드가 자동으로 설정됩니다
+                </p>
+            </div>
+
+            <div class="flex gap-3">
+                <button onclick="closeConnectModal()" class="flex-1 border border-white/20 py-3 rounded-xl font-bold hover:bg-white/5 transition text-sm">취소</button>
+                <button onclick="confirmConnect()" id="connectBtn" class="flex-1 bg-green-600 py-3 rounded-xl font-bold hover:bg-green-500 transition text-sm">
+                    <i class="fas fa-link mr-2"></i> 연결
+                </button>
+            </div>
         </div>
     </div>
 
@@ -102,13 +131,14 @@
         const H = { 'Authorization': `Bearer ${TOKEN}`, 'Content-Type': 'application/json' };
         let allSites = [];
         let allDomains = [];
+        let connectingDomainId = null;
 
         function showAlert(msg, type = 'error') {
             const el = document.getElementById('alertMsg');
             el.className = `mb-6 p-3 rounded-xl text-sm text-center ${type === 'error' ? 'bg-red-900/30 text-red-400 border border-red-500/30' : 'bg-green-900/30 text-green-400 border border-green-500/30'}`;
             el.textContent = msg;
             el.classList.remove('hidden');
-            setTimeout(() => el.classList.add('hidden'), 5000);
+            setTimeout(() => el.classList.add('hidden'), 6000);
         }
 
         function statusBadge(status) {
@@ -130,7 +160,7 @@
                 <div class="text-center py-24 text-gray-500">
                     <div class="text-6xl mb-6 opacity-20"><i class="fas fa-globe"></i></div>
                     <p class="text-xl font-bold mb-2">등록된 도메인이 없습니다</p>
-                    <p class="text-sm mb-6">호스팅에 커스텀 도메인을 연결하세요</p>
+                    <p class="text-sm mb-6">도메인을 계정에 추가하세요</p>
                     <button onclick="openAddModal()" class="bg-blue-600 px-6 py-3 rounded-full font-bold hover:bg-blue-500 transition">
                         <i class="fas fa-plus mr-2"></i> 도메인 추가하기
                     </button>
@@ -138,80 +168,64 @@
                 return;
             }
 
-            // 사이트별 그룹화
-            const grouped = {};
-            allDomains.forEach(d => {
-                const siteName = allSites.find(s => s.id === d.site_id)?.site_name || `사이트 #${d.site_id}`;
-                if (!grouped[d.site_id]) grouped[d.site_id] = { siteName, domains: [] };
-                grouped[d.site_id].domains.push(d);
-            });
-
-            el.innerHTML = Object.entries(grouped).map(([siteId, group]) => `
-            <div class="mb-8">
-                <div class="flex items-center gap-2 mb-3">
-                    <i class="fas fa-server text-xs text-gray-600"></i>
-                    <span class="text-sm font-semibold text-gray-400">${escHtml(group.siteName)}</span>
-                    <a href="/hosting-detail?id=${siteId}" class="text-xs text-blue-400 hover:underline ml-1">호스팅 관리 →</a>
-                </div>
-                <div class="space-y-3">
-                    ${group.domains.map(d => `
-                    <div class="domain-card bg-[#0f0f0f] border border-white/10 rounded-2xl p-5">
-                        <div class="flex items-center justify-between">
-                            <div class="flex items-center gap-3">
-                                <div class="w-10 h-10 bg-white/5 rounded-xl flex items-center justify-center">
-                                    <i class="fas fa-globe text-gray-500 text-sm"></i>
-                                </div>
-                                <div>
-                                    <div class="font-semibold flex items-center gap-2">
-                                        ${escHtml(d.domain)}
-                                        ${d.is_primary ? '<span class="text-xs bg-blue-900/40 border border-blue-500/30 text-blue-300 px-2 py-0.5 rounded-lg">기본</span>' : ''}
-                                    </div>
-                                    <div class="text-xs text-gray-600 mt-0.5">
-                                        ${d.cf_zone_id ? `Zone: ${d.cf_zone_id.substring(0,8)}...` : 'Zone 없음'}
-                                    </div>
-                                </div>
+            el.innerHTML = allDomains.map(d => {
+                const siteName = d.site_id
+                    ? (allSites.find(s => s.id === d.site_id)?.site_name || `호스팅 #${d.site_id}`)
+                    : null;
+                return `
+                <div class="domain-card bg-[#0f0f0f] border border-white/10 rounded-2xl p-5 mb-4">
+                    <div class="flex items-center justify-between flex-wrap gap-3">
+                        <div class="flex items-center gap-3">
+                            <div class="w-10 h-10 bg-white/5 rounded-xl flex items-center justify-center flex-shrink-0">
+                                <i class="fas fa-globe text-gray-500 text-sm"></i>
                             </div>
-                            <div class="flex items-center gap-3">
-                                ${statusBadge(d.cf_ssl_status || 'pending')}
-                                <button onclick="openDns('${escHtml(d.domain)}', '${siteId}')" class="text-xs border border-white/10 px-3 py-1.5 rounded-lg hover:bg-white/5 transition text-gray-400 hover:text-white">
-                                    <i class="fas fa-dns mr-1"></i> DNS 관리
-                                </button>
-                                ${d.cf_ssl_status !== 'active' ? `
-                                <button onclick="verifyDomain('${siteId}', '${escHtml(d.domain)}')" class="text-xs bg-yellow-600/20 border border-yellow-500/30 text-yellow-400 px-3 py-1.5 rounded-lg hover:bg-yellow-600/30 transition">
-                                    <i class="fas fa-sync mr-1"></i> 확인
-                                </button>` : ''}
-                                <button onclick="deleteDomain(${d.id})" class="text-xs text-gray-600 hover:text-red-400 transition px-1">
-                                    <i class="fas fa-trash"></i>
-                                </button>
+                            <div>
+                                <div class="font-semibold flex items-center gap-2 flex-wrap">
+                                    ${escHtml(d.domain)}
+                                    ${statusBadge(d.cf_ssl_status || 'pending')}
+                                </div>
+                                <div class="text-xs text-gray-500 mt-0.5 flex items-center gap-2">
+                                    ${siteName
+                                        ? `<span class="text-green-400"><i class="fas fa-link mr-1"></i>${escHtml(siteName)} 연결됨</span>`
+                                        : `<span class="text-gray-500"><i class="fas fa-unlink mr-1"></i>호스팅 미연결</span>`
+                                    }
+                                    ${d.cf_zone_id ? `<span>· Zone: ${d.cf_zone_id.substring(0,8)}...</span>` : ''}
+                                </div>
                             </div>
                         </div>
-                        ${d.cf_ssl_status !== 'active' && d.cf_nameservers ? `
-                        <div class="mt-4 p-3 ns-box rounded-xl text-xs">
-                            <div class="text-gray-500 mb-2 font-sans">⚠️ 아래 네임서버로 변경해주세요:</div>
-                            ${d.cf_nameservers.split(',').map(ns => `<div class="text-green-400 py-0.5">${ns}</div>`).join('')}
-                        </div>` : ''}
-                    </div>`).join('')}
-                </div>
-            </div>`).join('');
+                        <div class="flex items-center gap-2 flex-wrap">
+                            ${d.cf_ssl_status !== 'active' ? `
+                            <button onclick="verifyDomain(${d.id})" class="text-xs bg-yellow-600/20 border border-yellow-500/30 text-yellow-400 px-3 py-1.5 rounded-lg hover:bg-yellow-600/30 transition">
+                                <i class="fas fa-sync mr-1"></i> NS 확인
+                            </button>` : ''}
+                            <button onclick="openConnectModal(${d.id}, '${escHtml(d.domain)}', '${d.site_id || ''}')"
+                                class="text-xs ${d.site_id ? 'bg-green-900/20 border-green-500/30 text-green-400' : 'border border-white/10 text-gray-400'} border px-3 py-1.5 rounded-lg hover:bg-white/5 transition">
+                                <i class="fas fa-link mr-1"></i> ${d.site_id ? '연결 변경' : '호스팅 연결'}
+                            </button>
+                            <button onclick="deleteDomain(${d.id})" class="text-xs text-gray-600 hover:text-red-400 transition px-2 py-1.5">
+                                <i class="fas fa-trash"></i>
+                            </button>
+                        </div>
+                    </div>
+                    ${d.cf_ssl_status !== 'active' && d.cf_nameservers ? `
+                    <div class="mt-4 p-3 ns-box rounded-xl text-xs">
+                        <div class="text-gray-500 mb-2 font-sans">⚠️ 아래 Cloudflare 네임서버로 변경해주세요:</div>
+                        ${d.cf_nameservers.split(',').map(ns => `<div class="text-green-400 py-0.5">${escHtml(ns)}</div>`).join('')}
+                    </div>` : ''}
+                </div>`;
+            }).join('');
         }
 
         async function loadAll() {
             try {
-                const [sitesRes, _] = await Promise.all([
+                const [domainsRes, sitesRes] = await Promise.all([
+                    fetch('/api/account-domains', { headers: H }),
                     fetch('/api/sites', { headers: H }),
                 ]);
-                const sitesData = await sitesRes.json();
-                allSites = sitesData.sites || [];
-
-                // 각 사이트의 도메인 로드
-                const domainPromises = allSites.map(s =>
-                    fetch(`/api/domains?site_id=${s.id}`, { headers: H })
-                        .then(r => r.json())
-                        .then(d => (d.domains || []))
-                        .catch(() => [])
-                );
-                const results = await Promise.all(domainPromises);
-                allDomains = results.flat();
+                const domainsData = await domainsRes.json();
+                const sitesData   = await sitesRes.json();
+                allDomains = domainsData.domains || [];
+                allSites   = sitesData.sites || [];
                 renderDomains();
             } catch (e) {
                 document.getElementById('domain-list').innerHTML = `<div class="text-center py-16 text-red-400"><i class="fas fa-exclamation-circle text-3xl mb-3"></i><p>로드 실패</p></div>`;
@@ -220,23 +234,27 @@
 
         function openAddModal() {
             document.getElementById('addModal').classList.remove('hidden');
-            const sel = document.getElementById('modal-site-select');
-            sel.innerHTML = '<option value="">호스팅 선택...</option>' +
-                allSites.map(s => `<option value="${s.id}">${escHtml(s.site_name)} (${escHtml(s.primary_domain)})</option>`).join('');
             document.getElementById('modal-domain-input').value = '';
             document.getElementById('modal-result').classList.add('hidden');
+            setTimeout(() => document.getElementById('modal-domain-input').focus(), 100);
         }
         function closeAddModal() { document.getElementById('addModal').classList.add('hidden'); }
-        function closeNsModal() { document.getElementById('nsModal').classList.add('hidden'); }
 
-        function openDns(domain, siteId) {
-            window.location.href = `/dns?domain=${encodeURIComponent(domain)}&site_id=${siteId}`;
+        function openConnectModal(domainId, domain, currentSiteId) {
+            connectingDomainId = domainId;
+            document.getElementById('connect-domain-label').textContent = domain;
+            const sel = document.getElementById('connect-site-select');
+            sel.innerHTML = '<option value="">연결 해제 (계정에만 보관)</option>' +
+                allSites.map(s => `<option value="${s.id}" ${s.id === currentSiteId ? 'selected' : ''}>${escHtml(s.site_name)} (${escHtml(s.primary_domain || '도메인 없음')})</option>`).join('');
+            document.getElementById('connectModal').classList.remove('hidden');
+        }
+        function closeConnectModal() {
+            document.getElementById('connectModal').classList.add('hidden');
+            connectingDomainId = null;
         }
 
         async function addDomain() {
-            const siteId = document.getElementById('modal-site-select').value;
             const domain = document.getElementById('modal-domain-input').value.trim();
-            if (!siteId) return alert('호스팅을 선택해주세요.');
             if (!domain) return alert('도메인을 입력해주세요.');
 
             const btn = document.getElementById('addBtn');
@@ -244,17 +262,23 @@
             btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i> 처리 중...';
 
             try {
-                const res = await fetch('/api/domains', {
+                const res  = await fetch('/api/account-domains', {
                     method: 'POST', headers: H,
-                    body: JSON.stringify({ site_id: siteId, domain })
+                    body: JSON.stringify({ domain }),
                 });
                 const data = await res.json();
 
                 const resultEl = document.getElementById('modal-result');
                 if (res.ok && data.success) {
                     resultEl.className = 'mb-4 p-4 rounded-xl text-sm border bg-green-900/20 border-green-500/30 text-green-400';
-                    resultEl.innerHTML = `<div class="font-semibold mb-2">✅ ${data.message}</div>` +
-                        (data.nameservers?.length ? `<div class="mt-2 space-y-1">${data.nameservers.map(ns => `<div class="font-mono text-xs bg-black/30 px-2 py-1 rounded">${ns}</div>`).join('')}</div>` : '');
+                    let html = `<div class="font-semibold mb-2">✅ ${escHtml(data.message)}</div>`;
+                    if (data.nameservers?.length) {
+                        html += `<div class="mt-2 space-y-1">${data.nameservers.map(ns => `<div class="font-mono text-xs bg-black/30 px-2 py-1 rounded">${escHtml(ns)}</div>`).join('')}</div>`;
+                    }
+                    if (data.instructions?.length) {
+                        html += `<ul class="mt-3 text-xs space-y-1 text-green-300 list-none">${data.instructions.map(i => `<li>${escHtml(i)}</li>`).join('')}</ul>`;
+                    }
+                    resultEl.innerHTML = html;
                     resultEl.classList.remove('hidden');
                     await loadAll();
                 } else {
@@ -270,23 +294,51 @@
             }
         }
 
-        async function verifyDomain(siteId, domain) {
+        async function confirmConnect() {
+            if (!connectingDomainId) return;
+            const siteId = document.getElementById('connect-site-select').value;
+            const btn = document.getElementById('connectBtn');
+            btn.disabled = true;
+            btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i> 처리 중...';
+
             try {
-                const res = await fetch(`/api/domains?site_id=${siteId}&domain=${encodeURIComponent(domain)}&verify=1`, { headers: H });
+                const res  = await fetch(`/api/account-domains?id=${connectingDomainId}`, {
+                    method: 'PUT', headers: H,
+                    body: JSON.stringify({ site_id: siteId || null }),
+                });
+                const data = await res.json();
+                if (res.ok && data.success) {
+                    showAlert(data.message, 'success');
+                    closeConnectModal();
+                    await loadAll();
+                } else {
+                    showAlert(data.error || '연결에 실패했습니다.');
+                }
+            } catch {
+                showAlert('오류가 발생했습니다.');
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = '<i class="fas fa-link mr-2"></i> 연결';
+            }
+        }
+
+        async function verifyDomain(id) {
+            try {
+                const res  = await fetch(`/api/account-domains?id=${id}&verify=1`, { headers: H });
                 const data = await res.json();
                 if (data.verified) {
                     showAlert('✅ ' + data.message, 'success');
                     await loadAll();
                 } else {
-                    showAlert('⏳ ' + data.message, 'error');
+                    showAlert('⏳ ' + data.message);
                 }
             } catch { showAlert('확인 중 오류가 발생했습니다.'); }
         }
 
         async function deleteDomain(id) {
-            if (!confirm('이 도메인을 삭제하시겠습니까?')) return;
+            if (!confirm('이 도메인을 계정에서 삭제하시겠습니까?')) return;
             try {
-                const res = await fetch(`/api/domains?id=${id}`, { method: 'DELETE', headers: H });
+                const res  = await fetch(`/api/account-domains?id=${id}`, { method: 'DELETE', headers: H });
                 const data = await res.json();
                 if (res.ok) { showAlert('도메인이 삭제되었습니다.', 'success'); await loadAll(); }
                 else showAlert(data.error || '삭제 실패');
@@ -294,7 +346,7 @@
         }
 
         function escHtml(str) {
-            return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+            return String(str || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
         }
 
         loadAll();

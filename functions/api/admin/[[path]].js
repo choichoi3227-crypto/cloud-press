@@ -1,12 +1,15 @@
 // functions/api/admin/[[path]].js
 // Cloudflare Pages Functions catch-all router for /api/admin/*
 // /api/admin/stats, /api/admin/users, /api/admin/sites 등 모든 서브경로를
-// admin.js 핸들러로 위임합니다. (Unexpected token '<' 오류 수정)
+// admin.js 핸들러로 위임합니다.
+// 주의: 같은 디렉토리의 구체적인 파일(ai-settings.js, cms-settings.js, inquiries.js)은
+// CF Pages Functions에서 [[path]].js보다 우선순위가 높으므로 충돌 없음.
 
 import {
   onRequestGet,
   onRequestPut,
   onRequestDelete,
+  onRequestPost as adminPost,
 } from "../admin.js";
 
 export { onRequestGet, onRequestPut, onRequestDelete };
@@ -23,9 +26,11 @@ export async function onRequestOptions() {
   });
 }
 
-// POST 도 필요한 경우를 위해
+// POST → admin.js로 위임 (정의되어 있으면 사용, 없으면 405)
 export async function onRequestPost(context) {
-  // admin.js에 POST 핸들러가 없으므로 405 반환
+  if (typeof adminPost === "function") {
+    return adminPost(context);
+  }
   return new Response(JSON.stringify({ error: "Method Not Allowed" }), {
     status: 405,
     headers: { "Content-Type": "application/json" },

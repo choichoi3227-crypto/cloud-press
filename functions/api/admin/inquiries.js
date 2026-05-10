@@ -62,13 +62,17 @@ export async function onRequestGet(context) {
       status ? "SELECT COUNT(*) as cnt FROM support_inquiries WHERE status = ?" : "SELECT COUNT(*) as cnt FROM support_inquiries"
     ).bind(...(status ? [status] : [])).first();
 
-    const openRow = await env.DB.prepare("SELECT COUNT(*) as cnt FROM support_inquiries WHERE status='open'").first();
+    const openRow    = await env.DB.prepare("SELECT COUNT(*) as cnt FROM support_inquiries WHERE status='open'").first();
+    const repliedRow = await env.DB.prepare("SELECT COUNT(*) as cnt FROM support_inquiries WHERE status='replied'").first();
+    const closedRow  = await env.DB.prepare("SELECT COUNT(*) as cnt FROM support_inquiries WHERE status='closed'").first();
 
     return jsonOk({
       success: true,
       inquiries: results || [],
       total: totalRow?.cnt || 0,
-      open_count: openRow?.cnt || 0,
+      open_count:    openRow?.cnt    || 0,
+      replied_count: repliedRow?.cnt || 0,
+      closed_count:  closedRow?.cnt  || 0,
       page,
       limit,
     });

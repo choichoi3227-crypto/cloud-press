@@ -6,7 +6,7 @@ export async function onRequest(context) {
     { slug: 'cloudflare-pages-guide', date: '2023-10-28' },
   ];
 
-  const baseUrl = "https://your-site.com";
+  const baseUrl = "https://cloud-press.co.kr";
 
   // 2. XML 생성
   const sitemap = `<?xml version="1.0" encoding="UTF-8"?>

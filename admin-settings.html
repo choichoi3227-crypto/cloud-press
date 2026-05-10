@@ -580,7 +580,7 @@ async function addGithubToken() {
     try {
         const res  = await fetch('/api/github-storage', {
             method:  'POST',
-            headers: HEADERS()
+            headers: HEADERS(),
             body:    JSON.stringify({ token, label }),
         });
         const data = await res.json();
@@ -671,7 +671,8 @@ async function saveEmailSettings() {
     };
     try {
         const res  = await fetch('/api/admin/settings', {
-            method: 'PUT', headers: HEADERS() body: JSON.stringify(payload),
+            method: 'PUT', headers: HEADERS(),
+            body: JSON.stringify(payload),
         });
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || '오류');
@@ -693,7 +694,8 @@ async function saveTossSettings() {
     }
     try {
         const res  = await fetch('/api/admin/settings', {
-            method: 'PUT', headers: HEADERS() body: JSON.stringify(payload),
+            method: 'PUT', headers: HEADERS(),
+            body: JSON.stringify(payload),
         });
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || '오류');
@@ -758,7 +760,7 @@ async function uploadCmsZip() {
 
         const res = await fetch('/api/admin/cms-settings', {
             method: 'POST',
-            headers: HEADERS()
+            headers: HEADERS(),
             body: JSON.stringify({
                 action: 'upload_zip',
                 filename: _selectedCmsZipFile.name,
@@ -800,7 +802,7 @@ async function saveCmsSettings() {
 
         const res = await fetch('/api/admin/cms-settings', {
             method: 'POST',
-            headers: HEADERS()
+            headers: HEADERS(),
             body: JSON.stringify(payload),
         });
         const data = await res.json();
@@ -909,7 +911,7 @@ async function addGeminiKey() {
     btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>추가 중...';
     try {
         const res  = await fetch('/api/admin/ai-settings', {
-            method: 'POST', headers: HEADERS()
+            method: 'POST', headers: HEADERS(),
             body: JSON.stringify({ api_key: key, label }),
         });
         const data = await res.json();
@@ -942,7 +944,8 @@ async function saveGeminiModel() {
     if (!model) { showAlert(alertEl, '모델명을 입력해주세요.', 'error'); return; }
     try {
         const res  = await fetch('/api/admin/ai-settings', {
-            method: 'PUT', headers: HEADERS() body: JSON.stringify({ model }),
+            method: 'PUT', headers: HEADERS(),
+            body: JSON.stringify({ model }),
         });
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || '오류');

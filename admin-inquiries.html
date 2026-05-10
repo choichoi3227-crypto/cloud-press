@@ -136,22 +136,17 @@ async function loadInquiries(page = 1) {
 }
 
 function updateStats(data) {
-    document.getElementById('stat-total').textContent = data.total ?? '-';
-    document.getElementById('stat-open').textContent = data.open_count ?? '-';
-    // 별도 집계가 없으므로 open_count 기반 추정
+    document.getElementById('stat-total').textContent   = data.total         ?? '-';
+    document.getElementById('stat-open').textContent    = data.open_count    ?? '-';
+    document.getElementById('stat-replied').textContent = data.replied_count ?? '-';
+    document.getElementById('stat-closed').textContent  = data.closed_count  ?? '-';
 }
 
 async function loadAllStats() {
     try {
-        const [all, replied, closed] = await Promise.all([
-            fetch(`/api/admin/inquiries?page=1`, { headers: HEADERS() }).then(r=>r.json()),
-            fetch(`/api/admin/inquiries?page=1&status=replied`, { headers: HEADERS() }).then(r=>r.json()),
-            fetch(`/api/admin/inquiries?page=1&status=closed`, { headers: HEADERS() }).then(r=>r.json()),
-        ]);
-        document.getElementById('stat-total').textContent   = all.total ?? 0;
-        document.getElementById('stat-open').textContent    = all.open_count ?? 0;
-        document.getElementById('stat-replied').textContent = replied.total ?? 0;
-        document.getElementById('stat-closed').textContent  = closed.total ?? 0;
+        const res  = await fetch(`/api/admin/inquiries?page=1`, { headers: HEADERS() });
+        const data = await res.json();
+        if (data.success) updateStats(data);
     } catch {}
 }
 

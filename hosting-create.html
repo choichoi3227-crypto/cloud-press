@@ -206,40 +206,40 @@
                         <div id="ps-github" class="provision-step wait flex items-center gap-3 p-3 bg-white/3 rounded-xl">
                             <span id="ps-github-ico" class="text-lg w-6 text-center">⏳</span>
                             <div class="flex-1">
-                                <div class="font-medium text-sm">GitHub 저장소 생성</div>
-                                <div class="text-xs text-gray-500">WordPress 파일 저장소 초기화</div>
+                                <div class="font-medium text-sm">GitHub 레포 생성</div>
+                                <div class="text-xs text-gray-500">블로그 DB + 스토리지 레포 초기화</div>
                             </div>
                         </div>
 
                         <div id="ps-d1" class="provision-step wait flex items-center gap-3 p-3 bg-white/3 rounded-xl">
                             <span id="ps-d1-ico" class="text-lg w-6 text-center">⏳</span>
                             <div class="flex-1">
-                                <div class="font-medium text-sm">D1 데이터베이스 생성</div>
-                                <div class="text-xs text-gray-500">WordPress 전용 D1 DB 프로비저닝</div>
+                                <div class="font-medium text-sm">Astro 소스 + DB 파일 생성</div>
+                                <div class="text-xs text-gray-500">_db/*.json, _content/, src/ 초기화</div>
                             </div>
                         </div>
 
                         <div id="ps-worker" class="provision-step wait flex items-center gap-3 p-3 bg-white/3 rounded-xl">
                             <span id="ps-worker-ico" class="text-lg w-6 text-center">⏳</span>
                             <div class="flex-1">
-                                <div class="font-medium text-sm">Cloudflare Worker 배포</div>
-                                <div class="text-xs text-gray-500">D1 / KV 바인딩 연결 + 코드 업로드</div>
+                                <div class="font-medium text-sm">GitHub Actions 설정</div>
+                                <div class="text-xs text-gray-500">Astro 빌드 + GitHub Pages 자동 배포 워크플로우</div>
                             </div>
                         </div>
 
                         <div id="ps-wp_init" class="provision-step wait flex items-center gap-3 p-3 bg-white/3 rounded-xl">
                             <span id="ps-wp_init-ico" class="text-lg w-6 text-center">⏳</span>
                             <div class="flex-1">
-                                <div class="font-medium text-sm">WordPress DB 초기화</div>
-                                <div class="text-xs text-gray-500">테이블·기본 데이터 생성</div>
+                                <div class="font-medium text-sm">GitHub Pages 활성화</div>
+                                <div class="text-xs text-gray-500">첫 빌드 트리거 — 완료 후 도메인 설정 필요</div>
                             </div>
                         </div>
 
                         <div id="ps-wp_files" class="provision-step wait flex items-center gap-3 p-3 bg-white/3 rounded-xl">
                             <span id="ps-wp_files-ico" class="text-lg w-6 text-center">⏳</span>
                             <div class="flex-1">
-                                <div class="font-medium text-sm">WordPress 파일 업로드</div>
-                                <div class="text-xs text-gray-500">GitHub에 핵심 파일 배포 (가장 오래 걸림)</div>
+                                <div class="font-medium text-sm">첫 빌드 트리거</div>
+                                <div class="text-xs text-gray-500">GitHub Actions 빌드 시작 (약 2~3분 소요)</div>
                             </div>
                             <div id="ps-wp_files-bar" class="w-16 h-1 bg-white/10 rounded-full overflow-hidden hidden">
                                 <div class="h-full bg-blue-500 progress-bar-anim" style="width:60%"></div>
@@ -271,27 +271,50 @@
 
             <!-- ── 생성 완료 화면 ── -->
             <div id="step-done" class="hidden">
-                <div class="text-center py-10">
-                    <div class="text-6xl text-green-400 mb-6 animate-bounce">🎉</div>
-                    <h2 class="text-2xl font-black mb-3">호스팅 생성 완료!</h2>
-                    <p class="text-gray-400 mb-2" id="done-domain"></p>
-                    <p class="text-gray-500 text-sm mb-2">총 소요 시간: <span id="done-elapsed" class="text-white font-mono">-</span></p>
-                    <p class="text-gray-500 text-sm mb-8">완료 이메일이 발송되었습니다. 📧</p>
+                <div class="text-center py-8">
+                    <div class="text-6xl mb-5 animate-bounce">🎉</div>
+                    <h2 class="text-2xl font-black mb-2">GitHub Pages 호스팅 생성 완료!</h2>
+                    <p class="text-gray-500 text-sm mb-1">총 소요 시간: <span id="done-elapsed" class="text-white font-mono">-</span></p>
+                </div>
+
+                <!-- 도메인 필수 안내 -->
+                <div class="mb-5 p-4 rounded-xl bg-yellow-900/30 border border-yellow-500/40 text-sm text-yellow-300">
+                    <div class="font-bold mb-2 flex items-center gap-2">
+                        <i class="fas fa-exclamation-triangle"></i> 도메인 설정이 필요합니다
+                    </div>
+                    <p class="text-yellow-200/80 mb-2">
+                        GitHub Pages 호스팅은 <strong>커스텀 도메인</strong>을 추가해야 접속 가능합니다.<br>
+                        도메인 관리에서 도메인을 계정에 추가한 뒤 이 호스팅에 연결해주세요.
+                    </p>
+                    <ol class="list-decimal ml-4 space-y-1 text-yellow-200/70">
+                        <li>도메인 관리 → 도메인 추가 (Cloudflare DNS 자동 설정)</li>
+                        <li>추가한 도메인 → 이 호스팅에 연결</li>
+                        <li>GitHub Actions 빌드 완료 후 접속 가능 (약 2~3분)</li>
+                    </ol>
+                </div>
+
+                <!-- GitHub 레포 정보 -->
+                <div class="mb-5 p-4 rounded-xl bg-white/5 border border-white/10 text-sm">
+                    <div class="font-bold mb-2 flex items-center gap-2 text-gray-300">
+                        <i class="fab fa-github"></i> GitHub 레포 (DB + 스토리지)
+                    </div>
+                    <p id="done-repo-url" class="font-mono text-blue-400 text-xs break-all"></p>
+                    <p class="text-gray-600 text-xs mt-1">이 레포가 블로그 데이터베이스 역할을 합니다</p>
                 </div>
 
                 <!-- 바로가기 버튼 -->
                 <div class="grid grid-cols-1 gap-3 mb-6">
-                    <a id="done-site-link" href="#"
+                    <a href="/domains"
                         class="flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-500 py-4 rounded-xl font-bold text-lg transition">
-                        <i class="fas fa-globe"></i> 사이트 방문하기
+                        <i class="fas fa-globe"></i> 도메인 추가하러 가기
                     </a>
                     <a id="done-detail-link" href="/hosting"
                         class="flex items-center justify-center gap-2 bg-[#111] border border-white/10 hover:bg-white/5 py-4 rounded-xl font-bold transition">
-                        <i class="fas fa-cog"></i> 호스팅 관리 콘솔
+                        <i class="fas fa-server"></i> 호스팅 관리 콘솔
                     </a>
-                    <a id="done-wp-link" href="#"
+                    <a id="done-gh-link" href="#" target="_blank"
                         class="flex items-center justify-center gap-2 border border-white/10 hover:bg-white/5 py-3 rounded-xl font-medium text-gray-300 transition">
-                        <i class="fab fa-wordpress mr-1"></i> WordPress 관리자 (wp-admin)
+                        <i class="fab fa-github mr-1"></i> GitHub 레포 보기
                     </a>
                 </div>
 
@@ -504,18 +527,21 @@
         const domain  = data.domain || '';
         const siteUrl = `https://${domain}`;
 
-        document.getElementById('done-domain').textContent = domain
-            ? `🌐 ${domain}`
-            : '도메인이 준비 중입니다.';
         document.getElementById('done-elapsed').textContent = (() => {
             const m = Math.floor(elapsedSec / 60);
             const s = elapsedSec % 60;
             return `${m}분 ${s}초`;
         })();
 
-        if (domain) {
-            document.getElementById('done-site-link').href   = siteUrl;
-            document.getElementById('done-wp-link').href     = `${siteUrl}/wp-admin`;
+        // GitHub 레포 정보 표시
+        const repoOwner = data.github_repo_owner || '';
+        const repoName  = data.github_repo_name  || '';
+        if (repoOwner && repoName) {
+            const repoUrl = `https://github.com/${repoOwner}/${repoName}`;
+            const repoEl  = document.getElementById('done-repo-url');
+            if (repoEl) repoEl.textContent = repoUrl;
+            const ghLink = document.getElementById('done-gh-link');
+            if (ghLink) ghLink.href = repoUrl;
         }
         document.getElementById('done-detail-link').href = `/hosting-detail.html?id=${createdSiteId}`;
 

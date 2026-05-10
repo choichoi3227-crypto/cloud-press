@@ -511,6 +511,46 @@ import {
   onRequestGet    as paymentGet,
   onRequestPost   as paymentPost,
 } from "./functions/api/payment.js";
+import {
+  onRequestGet    as cardsGet,
+  onRequestPost   as cardsPost,
+  onRequestPatch  as cardsPatch,
+  onRequestDelete as cardsDelete,
+} from "./functions/api/payment/cards.js";
+import { onRequestGet as tossKeyGet } from "./functions/api/payment/toss-key.js";
+import {
+  onRequestGet    as githubStorageGet,
+  onRequestPost   as githubStoragePost,
+  onRequestDelete as githubStorageDelete,
+} from "./functions/api/github-storage.js";
+import {
+  onRequestGet    as accountDomainsGet,
+  onRequestPost   as accountDomainsPost,
+  onRequestPut    as accountDomainsPut,
+  onRequestDelete as accountDomainsDelete,
+} from "./functions/api/account-domains.js";
+import {
+  onRequestPost as accountPost,
+} from "./functions/api/account.js";
+import {
+  onRequestGet    as adminInquiriesGet,
+  onRequestPut    as adminInquiriesPut,
+  onRequestDelete as adminInquiriesDelete,
+} from "./functions/api/admin/inquiries.js";
+import {
+  onRequestGet    as adminAiGet,
+  onRequestPost   as adminAiPost,
+  onRequestPut    as adminAiPut,
+  onRequestDelete as adminAiDelete,
+} from "./functions/api/admin/ai-settings.js";
+import {
+  onRequestGet  as adminCmsGet,
+  onRequestPost as adminCmsPost,
+} from "./functions/api/admin/cms-settings.js";
+import {
+  onRequestGet    as editorGet,
+  onRequestPost   as editorPost,
+} from "./functions/api/editor.js";
 import { onRequest as middlewareHandler } from "./functions/_middleware.js";
 
 // Pages-Functions 스타일의 context 객체 생성
@@ -640,8 +680,63 @@ async function handleApiRequest(request, env, _workerCtx = null) {
 
   // ── 결제
   if (path === "/api/payment" || path.startsWith("/api/payment/")) {
+    // cards 서브경로
+    if (path === "/api/payment/cards") {
+      if (method === "GET")    return runWithMiddleware(cardsGet);
+      if (method === "POST")   return runWithMiddleware(cardsPost);
+      if (method === "PATCH")  return runWithMiddleware(cardsPatch);
+      if (method === "DELETE") return runWithMiddleware(cardsDelete);
+    }
+    // toss-key
+    if (path === "/api/payment/toss-key") {
+      if (method === "GET") return runWithMiddleware(tossKeyGet);
+    }
+    // 나머지 결제 (history, site-plan, client-key, request, confirm)
     if (method === "GET")  return runWithMiddleware(paymentGet);
     if (method === "POST") return runWithMiddleware(paymentPost);
+  }
+
+  // ── GitHub 스토리지
+  if (path === "/api/github-storage" || path.startsWith("/api/github-storage/")) {
+    if (method === "GET")    return runWithMiddleware(githubStorageGet);
+    if (method === "POST")   return runWithMiddleware(githubStoragePost);
+    if (method === "DELETE") return runWithMiddleware(githubStorageDelete);
+  }
+
+  // ── 계정 도메인
+  if (path === "/api/account-domains" || path.startsWith("/api/account-domains/")) {
+    if (method === "GET")    return runWithMiddleware(accountDomainsGet);
+    if (method === "POST")   return runWithMiddleware(accountDomainsPost);
+    if (method === "PUT")    return runWithMiddleware(accountDomainsPut);
+    if (method === "DELETE") return runWithMiddleware(accountDomainsDelete);
+  }
+
+  // ── 계정 비밀번호 변경 (POST)
+  if (path === "/api/account/password" || (path === "/api/account" && method === "POST")) {
+    return runWithMiddleware(accountPost);
+  }
+
+  // ── 관리자 서브경로 (ai-settings, cms-settings, inquiries)
+  if (path === "/api/admin/inquiries" || path.startsWith("/api/admin/inquiries/")) {
+    if (method === "GET")    return runWithMiddleware(adminInquiriesGet);
+    if (method === "PUT")    return runWithMiddleware(adminInquiriesPut);
+    if (method === "DELETE") return runWithMiddleware(adminInquiriesDelete);
+  }
+  if (path === "/api/admin/ai-settings") {
+    if (method === "GET")    return runWithMiddleware(adminAiGet);
+    if (method === "POST")   return runWithMiddleware(adminAiPost);
+    if (method === "PUT")    return runWithMiddleware(adminAiPut);
+    if (method === "DELETE") return runWithMiddleware(adminAiDelete);
+  }
+  if (path === "/api/admin/cms-settings") {
+    if (method === "GET")  return runWithMiddleware(adminCmsGet);
+    if (method === "POST") return runWithMiddleware(adminCmsPost);
+  }
+
+  // ── 코드 에디터
+  if (path.startsWith("/api/editor/")) {
+    if (method === "GET")  return runWithMiddleware(editorGet);
+    if (method === "POST") return runWithMiddleware(editorPost);
   }
 
   return jsonErr("API 경로를 찾을 수 없습니다.", 404);

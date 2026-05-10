@@ -612,7 +612,24 @@ async function handleApiRequest(request, env, _workerCtx = null) {
     if (method === "PUT") return runWithMiddleware(accountPut);
   }
 
-  // ── 관리자
+  // ── 관리자 서브경로 (구체적인 경로 먼저, startsWith보다 앞에 위치해야 함)
+  if (path === "/api/admin/inquiries" || path.startsWith("/api/admin/inquiries/")) {
+    if (method === "GET")    return runWithMiddleware(adminInquiriesGet);
+    if (method === "PUT")    return runWithMiddleware(adminInquiriesPut);
+    if (method === "DELETE") return runWithMiddleware(adminInquiriesDelete);
+  }
+  if (path === "/api/admin/ai-settings") {
+    if (method === "GET")    return runWithMiddleware(adminAiGet);
+    if (method === "POST")   return runWithMiddleware(adminAiPost);
+    if (method === "PUT")    return runWithMiddleware(adminAiPut);
+    if (method === "DELETE") return runWithMiddleware(adminAiDelete);
+  }
+  if (path === "/api/admin/cms-settings") {
+    if (method === "GET")  return runWithMiddleware(adminCmsGet);
+    if (method === "POST") return runWithMiddleware(adminCmsPost);
+  }
+
+  // ── 관리자 (stats, users, sites, settings, quota-stats)
   if (path.startsWith("/api/admin")) {
     if (method === "GET")    return runWithMiddleware(adminGet);
     if (method === "PUT")    return runWithMiddleware(adminPut);
@@ -714,23 +731,6 @@ async function handleApiRequest(request, env, _workerCtx = null) {
   // ── 계정 비밀번호 변경 (POST)
   if (path === "/api/account/password" || (path === "/api/account" && method === "POST")) {
     return runWithMiddleware(accountPost);
-  }
-
-  // ── 관리자 서브경로 (ai-settings, cms-settings, inquiries)
-  if (path === "/api/admin/inquiries" || path.startsWith("/api/admin/inquiries/")) {
-    if (method === "GET")    return runWithMiddleware(adminInquiriesGet);
-    if (method === "PUT")    return runWithMiddleware(adminInquiriesPut);
-    if (method === "DELETE") return runWithMiddleware(adminInquiriesDelete);
-  }
-  if (path === "/api/admin/ai-settings") {
-    if (method === "GET")    return runWithMiddleware(adminAiGet);
-    if (method === "POST")   return runWithMiddleware(adminAiPost);
-    if (method === "PUT")    return runWithMiddleware(adminAiPut);
-    if (method === "DELETE") return runWithMiddleware(adminAiDelete);
-  }
-  if (path === "/api/admin/cms-settings") {
-    if (method === "GET")  return runWithMiddleware(adminCmsGet);
-    if (method === "POST") return runWithMiddleware(adminCmsPost);
   }
 
   // ── 코드 에디터

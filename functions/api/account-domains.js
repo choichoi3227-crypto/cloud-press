@@ -8,6 +8,11 @@
 // GET    /api/account-domains?id=&verify=1 → 네임서버 전환 확인
 
 import { jsonOk, jsonErr, requireAuth } from "../_shared.js";
+import {
+  setupGithubPagesDns,
+  configureGithubPagesCustomDomainWithToken,
+} from "./github-pages-hosting.js";
+import { pickGithubToken } from "./github-storage.js";
 
 // ── Cloudflare API 헬퍼 ───────────────────────────────────────────────────────
 async function cfReq(method, path, apiKey, email, body) {
@@ -404,15 +409,39 @@ export async function onRequestPut(context) {
         ).bind(ud.domain, site_id).run();
       }
 
-      // GitHub Pages DNS 레코드 설정
+      // GitHub Pages DNS + 커스텀 도메인 설정
       const user = await env.DB.prepare(
         "SELECT cf_global_api_key, cf_email FROM users WHERE id = ?"
       ).bind(payload.id).first();
-      if (user?.cf_global_api_key && user?.cf_email) {
-        await setupGithubPagesDnsRecords(
-          user.cf_global_api_key, user.cf_email, ud.cf_zone_id, ud.domain
-        ).catch(e => console.warn("[account-domains/put] dns:", e.message));
+
+      if (user?.cf_global_api_key && user?.cf_email && ud.cf_zone_id) {
+        await setupGithubPagesDns({
+          cfApiKey: user.cf_global_api_key,
+          cfEmail:  user.cf_email,
+          zoneId:   ud.cf_zone_id,
+          domain:   ud.domain,
+          owner:    site.github_repo_owner || '',
+          repoName: site.github_repo_name  || '',
+        }).catch(e => console.warn("[account-domains/put] dns:", e.message));
       }
+
+      // GitHub Pages 커스텀 도메인 등록 (CNAME 파일 + Pages API)
+      if (site.github_repo_owner && site.github_repo_name) {
+        const ghToken = await pickGithubToken(env).catch(() => null);
+        if (ghToken) {
+          await configureGithubPagesCustomDomainWithToken({
+            token:    ghToken,
+            owner:    site.github_repo_owner,
+            repoName: site.github_repo_name,
+            domain:   ud.domain,
+          }).catch(e => console.warn("[account-domains/put] gh-pages custom domain:", e.message));
+        }
+      }
+
+      // 호스팅의 primary_domain 업데이트
+      await env.DB.prepare(
+        "UPDATE sites SET primary_domain = ?, status = 'active' WHERE id = ?"
+      ).bind(ud.domain, site_id).run().catch(() => {});
     }
 
     return jsonOk({ success: true, message: `도메인이 호스팅에 연결되었습니다.` });

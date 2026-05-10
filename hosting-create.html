@@ -8,379 +8,902 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <style>
+        /* ── 스텝 인디케이터 ── */
         .step-active   { border-color: #3b82f6; background: #1e3a5f33; }
         .step-done     { border-color: #16a34a; background: #14532d22; }
         .step-inactive { border-color: rgba(255,255,255,0.1); }
-        .php-card      { transition: all 0.2s; cursor: pointer; }
-        .php-card:hover     { border-color: #6366f1; }
-        .php-card.selected  { border-color: #6366f1; background: #1e1b4b44; }
-        .php-card.eol       { opacity: 0.5; }
 
-        /* 프로비저닝 진행 표시 */
-        @keyframes pulse-bar {
-            0%,100% { opacity:1; } 50% { opacity:.5; }
-        }
-        .progress-bar-anim { animation: pulse-bar 1.5s ease-in-out infinite; }
+        /* ── PHP 카드 ── */
+        .php-card            { transition: all 0.2s; cursor: pointer; }
+        .php-card:hover      { border-color: #6366f1; }
+        .php-card.selected   { border-color: #6366f1; background: #1e1b4b44; }
+        .php-card.eol        { opacity: 0.5; }
 
+        /* ── 플랜 카드 ── */
+        .plan-card           { transition: all 0.25s; cursor: pointer; }
+        .plan-card:hover     { border-color: #3b82f6; transform: translateY(-2px); }
+        .plan-card.selected  { border-color: #2563eb; background: #1e3a5f55; }
+        .plan-card.popular   { border-color: #8b5cf6; }
+
+        /* ── 프로비저닝 단계 ── */
+        @keyframes pulse-bar { 0%,100%{opacity:1} 50%{opacity:.45} }
+        @keyframes spin-slow { to{transform:rotate(360deg)} }
+        .progress-bar-anim { animation: pulse-bar 1.8s ease-in-out infinite; }
         .provision-step { transition: all .3s; }
         .provision-step.done  { color: #34d399; }
         .provision-step.doing { color: #60a5fa; }
-        .provision-step.wait  { color: #4b5563; }
+        .provision-step.wait  { color: #374151; }
         .provision-step.error { color: #f87171; }
+
+        /* ── 토글 패스워드 ── */
+        .input-wrap { position: relative; }
+        .input-wrap .eye-btn {
+            position:absolute; right:14px; top:50%;
+            transform:translateY(-50%); background:none; border:none;
+            color:#6b7280; cursor:pointer;
+        }
+        .input-wrap .eye-btn:hover { color:#fff; }
+
+        /* ── 폼 입력 공통 ── */
+        .cp-input {
+            width:100%; padding:14px 16px;
+            background:rgba(255,255,255,.05);
+            border:1px solid rgba(255,255,255,.1);
+            border-radius:12px; outline:none; color:#fff;
+            font-size:14px; transition: border-color .2s;
+        }
+        .cp-input:focus { border-color:#3b82f6; }
+        .cp-input::placeholder { color:#4b5563; }
+        .cp-label { display:block; font-size:13px; color:#9ca3af; margin-bottom:7px; font-weight:500; }
+        .cp-label .req { color:#f87171; margin-left:3px; }
+
+        /* ── 섹션 카드 ── */
+        .section-card {
+            padding:24px; background:rgba(255,255,255,.03);
+            border:1px solid rgba(255,255,255,.08); border-radius:16px;
+        }
+        .section-title {
+            font-size:15px; font-weight:700; margin-bottom:18px;
+            display:flex; align-items:center; gap:8px;
+        }
+
+        /* ── 타이머 ── */
+        .timer-ring { transform-origin: center; transition: stroke-dashoffset .5s linear; }
     </style>
 </head>
-<body class="bg-[#050505] text-white md:flex md:h-screen">
+<body class="bg-[#050505] text-white">
     <script>
         if (!localStorage.getItem('admin_token')) window.location.href = '/login';
     </script>
 
-    
+    <main class="max-w-2xl mx-auto px-4 py-10">
 
-    
+        <!-- 헤더 -->
+        <div class="flex items-center gap-4 mb-8">
+            <a href="/hosting" class="text-gray-500 hover:text-white transition w-9 h-9 flex items-center justify-center rounded-xl border border-white/10 hover:border-white/30">
+                <i class="fas fa-arrow-left"></i>
+            </a>
+            <div>
+                <h1 class="text-2xl font-black">새 호스팅 생성</h1>
+                <p class="text-gray-500 text-sm mt-0.5">GitHub Pages 기반 블로그 사이트 · 구축 시간 5~8분</p>
+            </div>
+        </div>
 
-    <!-- Main -->
-    <main class="flex-1 w-full overflow-y-auto p-8">
-        <div class="max-w-2xl mx-auto">
-            <!-- 헤더 -->
-            <div class="flex items-center gap-4 mb-8">
-                <a href="/hosting" class="text-gray-500 hover:text-white transition">
-                    <i class="fas fa-arrow-left text-lg"></i>
-                </a>
+        <!-- 스텝 인디케이터 -->
+        <div class="flex gap-2 mb-8" id="step-indicators">
+            <div id="ind-1" class="step-active flex-1 p-2.5 border rounded-xl text-center text-xs font-bold"><span class="text-blue-400">1</span> 기본 정보</div>
+            <div id="ind-2" class="step-inactive flex-1 p-2.5 border rounded-xl text-center text-xs font-bold text-gray-600"><span>2</span> 플랜 선택</div>
+            <div id="ind-3" class="step-inactive flex-1 p-2.5 border rounded-xl text-center text-xs font-bold text-gray-600"><span>3</span> Cloudflare</div>
+            <div id="ind-4" class="step-inactive flex-1 p-2.5 border rounded-xl text-center text-xs font-bold text-gray-600"><span>4</span> 도메인</div>
+            <div id="ind-5" class="step-inactive flex-1 p-2.5 border rounded-xl text-center text-xs font-bold text-gray-600"><span>5</span> 관리자</div>
+        </div>
+
+        <!-- 알림 -->
+        <div id="alertMsg" class="hidden mb-5 p-3 rounded-xl text-sm text-center"></div>
+
+        <!-- ══════════════════════════════════════════════
+             STEP 1 — 기본 정보
+        ══════════════════════════════════════════════ -->
+        <div id="step-1" class="space-y-5">
+            <div class="section-card space-y-5">
+                <div class="section-title"><i class="fas fa-info-circle text-blue-400"></i> 기본 정보</div>
+
                 <div>
-                    <h1 class="text-3xl font-bold">새 호스팅 생성</h1>
-                    <p class="text-gray-500 text-sm mt-1">WordPress 사이트를 즉시 배포합니다</p>
+                    <label class="cp-label">사이트 이름 <span class="req">*</span></label>
+                    <input id="site_name" type="text" class="cp-input" placeholder="예: 내 기술 블로그">
+                </div>
+
+                <div class="p-4 bg-blue-950/40 border border-blue-500/25 rounded-xl text-sm text-blue-300 space-y-1.5">
+                    <div class="font-bold flex items-center gap-2"><i class="fas fa-cloud"></i> GitHub Pages 호스팅이란?</div>
+                    <ul class="text-blue-200/75 space-y-1 text-xs ml-4 list-disc">
+                        <li>GitHub 레포지토리 = 데이터베이스 + 스토리지</li>
+                        <li>Astro 자동 빌드 → GitHub Pages 정적 서빙</li>
+                        <li>Cloudflare = DNS·도메인 관리만 담당 (Workers·D1·KV 없음)</li>
+                        <li>구축 시간: <strong class="text-blue-300">5~8분</strong></li>
+                    </ul>
                 </div>
             </div>
 
-            <!-- 스텝 인디케이터 -->
-            <div class="flex gap-3 mb-8">
-                <div id="step-1-ind" class="step-active flex-1 p-3 border rounded-xl text-center text-sm font-bold">
-                    <span class="text-blue-400">1</span> 기본 정보
+            <button onclick="goStep(2)"
+                class="w-full bg-blue-600 hover:bg-blue-500 py-4 rounded-xl font-bold text-base transition flex items-center justify-center gap-2">
+                다음 단계 <i class="fas fa-arrow-right"></i>
+            </button>
+        </div>
+
+        <!-- ══════════════════════════════════════════════
+             STEP 2 — 플랜 선택
+        ══════════════════════════════════════════════ -->
+        <div id="step-2" class="hidden space-y-5">
+            <div class="section-card">
+                <div class="section-title"><i class="fas fa-layer-group text-purple-400"></i> 플랜 선택</div>
+                <p class="text-gray-500 text-sm mb-5">플랜별 스토리지·트래픽·기능이 즉시 반영됩니다. 초과 시 자동 추가 청구됩니다.</p>
+
+                <div class="grid gap-3">
+                    <!-- FREE -->
+                    <div class="plan-card selected border border-white/10 rounded-2xl p-5" onclick="selectPlan('free', this)">
+                        <div class="flex justify-between items-start mb-3">
+                            <div>
+                                <div class="font-black text-lg">Free</div>
+                                <div class="text-gray-400 text-xs mt-0.5">개인 프로젝트</div>
+                            </div>
+                            <div class="text-right">
+                                <div class="text-2xl font-black text-green-400">무료</div>
+                            </div>
+                        </div>
+                        <div class="grid grid-cols-2 gap-2 text-xs">
+                            <div class="flex items-center gap-1.5 text-gray-300"><i class="fas fa-server text-gray-500 w-3"></i> 사이트 1개</div>
+                            <div class="flex items-center gap-1.5 text-gray-300"><i class="fas fa-database text-gray-500 w-3"></i> 스토리지 5GB</div>
+                            <div class="flex items-center gap-1.5 text-gray-300"><i class="fas fa-chart-line text-gray-500 w-3"></i> 트래픽 100GB/월</div>
+                            <div class="flex items-center gap-1.5 text-red-400/70"><i class="fas fa-times w-3"></i> 커스텀 도메인 불가</div>
+                            <div class="flex items-center gap-1.5 text-red-400/70"><i class="fas fa-times w-3"></i> 자동 백업 불가</div>
+                        </div>
+                        <div class="mt-3 text-xs text-gray-600">초과: 스토리지 1GB당 ₩1,900 / 트래픽 70% 초과당 ₩2,300 (다음달 청구)</div>
+                    </div>
+
+                    <!-- STARTER -->
+                    <div class="plan-card border border-white/10 rounded-2xl p-5" onclick="selectPlan('starter', this)">
+                        <div class="flex justify-between items-start mb-3">
+                            <div>
+                                <div class="font-black text-lg">Starter</div>
+                                <div class="text-gray-400 text-xs mt-0.5">소규모 팀·블로거</div>
+                            </div>
+                            <div class="text-right">
+                                <div class="text-2xl font-black text-blue-400">₩9,900<span class="text-sm text-gray-500">/월</span></div>
+                            </div>
+                        </div>
+                        <div class="grid grid-cols-2 gap-2 text-xs">
+                            <div class="flex items-center gap-1.5 text-gray-300"><i class="fas fa-server text-blue-400 w-3"></i> 사이트 5개</div>
+                            <div class="flex items-center gap-1.5 text-gray-300"><i class="fas fa-database text-blue-400 w-3"></i> 스토리지 18GB</div>
+                            <div class="flex items-center gap-1.5 text-gray-300"><i class="fas fa-chart-line text-blue-400 w-3"></i> 트래픽 1TB/월</div>
+                            <div class="flex items-center gap-1.5 text-green-400"><i class="fas fa-check w-3"></i> 커스텀 도메인</div>
+                            <div class="flex items-center gap-1.5 text-green-400"><i class="fas fa-check w-3"></i> 자동 백업</div>
+                        </div>
+                        <div class="mt-3 text-xs text-gray-600">초과: 스토리지 1GB당 ₩1,900 / 트래픽 70% 초과당 ₩2,300 (다음달 청구)</div>
+                    </div>
+
+                    <!-- PRO -->
+                    <div class="plan-card popular border rounded-2xl p-5" onclick="selectPlan('pro', this)">
+                        <div class="flex justify-between items-start mb-3">
+                            <div>
+                                <div class="font-black text-lg flex items-center gap-2">
+                                    Pro
+                                    <span class="text-xs bg-purple-600 text-white px-2 py-0.5 rounded-full">추천</span>
+                                </div>
+                                <div class="text-gray-400 text-xs mt-0.5">전문가·기업</div>
+                            </div>
+                            <div class="text-right">
+                                <div class="text-2xl font-black text-purple-400">₩29,900<span class="text-sm text-gray-500">/월</span></div>
+                            </div>
+                        </div>
+                        <div class="grid grid-cols-2 gap-2 text-xs">
+                            <div class="flex items-center gap-1.5 text-gray-300"><i class="fas fa-infinity text-purple-400 w-3"></i> 무제한 사이트</div>
+                            <div class="flex items-center gap-1.5 text-gray-300"><i class="fas fa-database text-purple-400 w-3"></i> 스토리지 36GB</div>
+                            <div class="flex items-center gap-1.5 text-gray-300"><i class="fas fa-chart-line text-purple-400 w-3"></i> 트래픽 무제한</div>
+                            <div class="flex items-center gap-1.5 text-green-400"><i class="fas fa-check w-3"></i> 커스텀 도메인</div>
+                            <div class="flex items-center gap-1.5 text-green-400"><i class="fas fa-check w-3"></i> 자동 백업</div>
+                            <div class="flex items-center gap-1.5 text-green-400"><i class="fas fa-check w-3"></i> SSH 접근</div>
+                        </div>
+                        <div class="mt-3 text-xs text-gray-600">초과: 스토리지 1GB당 ₩1,900 / 트래픽은 무제한 (초과 요금 없음)</div>
+                    </div>
                 </div>
-                <div id="step-2-ind" class="step-inactive flex-1 p-3 border rounded-xl text-center text-sm font-bold text-gray-600">
-                    <span>2</span> PHP 버전
-                </div>
-                <div id="step-3-ind" class="step-inactive flex-1 p-3 border rounded-xl text-center text-sm font-bold text-gray-600">
-                    <span>3</span> WordPress 설정
+
+                <!-- 유료 플랜 결제수단 섹션 (선택 시 표시) -->
+                <div id="payment-section" class="hidden mt-5 pt-5 border-t border-white/10">
+                    <div class="text-sm font-bold text-gray-300 mb-4 flex items-center gap-2">
+                        <i class="fas fa-credit-card text-yellow-400"></i> 결제수단 등록
+                        <span class="text-red-400 text-xs ml-1">* 유료 플랜 필수</span>
+                    </div>
+
+                    <!-- 저장된 카드 목록 -->
+                    <div id="saved-cards" class="space-y-2 mb-4"></div>
+
+                    <!-- 새 카드 입력 -->
+                    <div id="new-card-form" class="space-y-3">
+                        <div class="grid grid-cols-2 gap-3">
+                            <div class="col-span-2">
+                                <label class="cp-label">카드 번호</label>
+                                <input id="card_number" type="text" class="cp-input font-mono" placeholder="0000 0000 0000 0000"
+                                    maxlength="19" oninput="formatCardNumber(this)">
+                            </div>
+                            <div>
+                                <label class="cp-label">유효기간</label>
+                                <input id="card_expiry" type="text" class="cp-input font-mono" placeholder="MM/YY"
+                                    maxlength="5" oninput="formatExpiry(this)">
+                            </div>
+                            <div>
+                                <label class="cp-label">CVC</label>
+                                <input id="card_cvc" type="text" class="cp-input font-mono" placeholder="000" maxlength="4">
+                            </div>
+                            <div class="col-span-2">
+                                <label class="cp-label">카드 소유자 이름</label>
+                                <input id="card_name" type="text" class="cp-input" placeholder="홍길동">
+                            </div>
+                        </div>
+                        <div class="flex items-center gap-2 text-xs text-gray-600">
+                            <i class="fas fa-lock text-green-500"></i>
+                            카드 정보는 TossPayments로 안전하게 전송되며 서버에 저장되지 않습니다.
+                        </div>
+                    </div>
+
+                    <div id="payment-notice" class="mt-3 p-3 bg-yellow-950/30 border border-yellow-500/25 rounded-xl text-xs text-yellow-300">
+                        <i class="fas fa-info-circle mr-1"></i>
+                        선택 플랜의 첫 월 요금은 호스팅 생성 완료 후 청구됩니다.
+                        스토리지·트래픽 초과분은 다음 달 청구서에 반영됩니다.
+                    </div>
                 </div>
             </div>
 
-            <!-- 알림 -->
-            <div id="alertMsg" class="hidden mb-6 p-3 rounded-xl text-sm text-center"></div>
-
-            <!-- ── STEP 1: 기본 정보 ── -->
-            <div id="step-1" class="space-y-5">
-                <div class="p-6 bg-white/5 border border-white/10 rounded-2xl space-y-5">
-                    <h2 class="text-lg font-bold flex items-center gap-2">
-                        <i class="fas fa-info-circle text-blue-400"></i> 기본 정보
-                    </h2>
-                    <div class="space-y-2">
-                        <label class="text-sm text-gray-400">사이트 이름 <span class="text-red-400">*</span></label>
-                        <input id="site_name" type="text" placeholder="예: 내 블로그"
-                            class="w-full p-4 bg-white/5 border border-white/10 rounded-xl outline-none focus:border-blue-500 transition">
-                    </div>
-                    <div class="p-4 bg-blue-900/20 border border-blue-500/30 rounded-xl text-sm text-blue-300">
-                        <i class="fas fa-info-circle mr-2"></i>
-                        도메인은 호스팅 생성 후 <strong>호스팅 상세 &gt; 도메인 탭</strong>에서 추가할 수 있습니다.
-                    </div>
-                </div>
-                <button onclick="goStep(2)"
-                    class="w-full bg-blue-600 py-4 rounded-xl font-bold text-lg hover:bg-blue-500 transition flex items-center justify-center gap-2">
-                    다음 단계 <i class="fas fa-arrow-right"></i>
+            <div class="flex gap-3">
+                <button onclick="goStep(1)" class="flex-1 border border-white/20 py-4 rounded-xl font-bold hover:bg-white/5 transition">
+                    <i class="fas fa-arrow-left mr-2"></i> 이전
+                </button>
+                <button onclick="goStep(3)" class="flex-1 bg-blue-600 hover:bg-blue-500 py-4 rounded-xl font-bold transition">
+                    다음 단계 <i class="fas fa-arrow-right ml-2"></i>
                 </button>
             </div>
+        </div>
 
-            <!-- ── STEP 2: PHP 버전 ── -->
-            <div id="step-2" class="hidden space-y-5">
-                <div class="p-6 bg-white/5 border border-white/10 rounded-2xl">
-                    <div class="flex justify-between items-center mb-4">
-                        <h2 class="text-lg font-bold flex items-center gap-2">
-                            <i class="fas fa-code text-indigo-400"></i> PHP 버전 선택
-                        </h2>
-                        <div id="php-source" class="text-xs text-gray-600"></div>
-                    </div>
-                    <p class="text-sm text-gray-500 mb-5">
-                        PHP 버전은 나중에도 무중단으로 변경할 수 있습니다.
-                        <span class="text-green-400">보안 릴리스</span>는 최신 보안 패치가 적용된 버전입니다.
+        <!-- ══════════════════════════════════════════════
+             STEP 3 — Cloudflare API
+        ══════════════════════════════════════════════ -->
+        <div id="step-3" class="hidden space-y-5">
+            <div class="section-card space-y-5">
+                <div class="section-title"><i class="fas fa-cloud text-orange-400"></i> Cloudflare API 설정</div>
+
+                <div class="p-4 bg-orange-950/30 border border-orange-500/25 rounded-xl text-sm text-orange-200 space-y-2">
+                    <div class="font-bold">⚠️ DNS·도메인 관리 전용</div>
+                    <p class="text-orange-200/75 text-xs">
+                        Cloudflare API는 <strong>DNS 레코드 자동 설정·커스텀 도메인 연결</strong>에만 사용됩니다.
+                        Workers·D1·KV 같은 Cloudflare 리소스는 생성되지 않습니다.
                     </p>
-                    <div id="php-loading" class="text-center py-8 text-gray-500">
-                        <i class="fas fa-spinner fa-spin text-2xl mb-3"></i>
-                        <p class="text-sm">php.net에서 최신 버전을 불러오는 중...</p>
-                    </div>
-                    <div id="php-versions" class="hidden grid grid-cols-1 gap-3"></div>
-                </div>
-                <div class="flex gap-3">
-                    <button onclick="goStep(1)"
-                        class="flex-1 border border-white/20 py-4 rounded-xl font-bold hover:bg-white/5 transition">
-                        <i class="fas fa-arrow-left mr-2"></i> 이전
-                    </button>
-                    <button onclick="goStep(3)"
-                        class="flex-1 bg-blue-600 py-4 rounded-xl font-bold hover:bg-blue-500 transition">
-                        다음 단계 <i class="fas fa-arrow-right ml-2"></i>
-                    </button>
-                </div>
-            </div>
-
-            <!-- ── STEP 3: WordPress 설정 ── -->
-            <div id="step-3" class="hidden space-y-5">
-                <div class="p-6 bg-white/5 border border-white/10 rounded-2xl space-y-5">
-                    <h2 class="text-lg font-bold flex items-center gap-2">
-                        <i class="fab fa-wordpress text-blue-400"></i> WordPress 관리자 설정
-                    </h2>
-                    <div class="space-y-2">
-                        <label class="text-sm text-gray-400">관리자 아이디 <span class="text-red-400">*</span></label>
-                        <input id="wp_admin_user" type="text" placeholder="예: admin"
-                            class="w-full p-4 bg-white/5 border border-white/10 rounded-xl outline-none focus:border-blue-500 transition font-mono">
-                    </div>
-                    <div class="space-y-2">
-                        <label class="text-sm text-gray-400">관리자 비밀번호 <span class="text-red-400">*</span></label>
-                        <div class="relative">
-                            <input id="wp_admin_pass" type="password" placeholder="8자 이상"
-                                class="w-full p-4 bg-white/5 border border-white/10 rounded-xl outline-none focus:border-blue-500 transition pr-12">
-                            <button type="button" onclick="toggleWpPass()"
-                                class="absolute right-4 top-1/2 -translate-y-1/2 text-gray-500 hover:text-white">
-                                <i id="wp-eye" class="fas fa-eye"></i>
-                            </button>
-                        </div>
-                    </div>
-                    <div class="space-y-2">
-                        <label class="text-sm text-gray-400">관리자 이메일 <span class="text-red-400">*</span></label>
-                        <input id="wp_admin_email" type="email" placeholder="admin@example.com"
-                            class="w-full p-4 bg-white/5 border border-white/10 rounded-xl outline-none focus:border-blue-500 transition">
-                    </div>
                 </div>
 
-                <!-- 생성 요약 -->
-                <div class="p-5 bg-blue-900/20 border border-blue-500/30 rounded-2xl text-sm space-y-2">
-                    <h3 class="font-bold text-blue-300 mb-3"><i class="fas fa-list-check mr-2"></i>생성 요약</h3>
-                    <div class="flex justify-between"><span class="text-gray-400">사이트 이름</span><span id="sum-name" class="font-mono">-</span></div>
-                    <div class="flex justify-between"><span class="text-gray-400">PHP 버전</span><span id="sum-php" class="font-mono text-indigo-300">-</span></div>
-                    <div class="flex justify-between"><span class="text-gray-400">스토리지</span><span class="text-green-300">자동 할당</span></div>
-                    <div class="flex justify-between"><span class="text-gray-400">SSL</span><span class="text-green-300">자동 발급</span></div>
-                </div>
-
-                <div class="flex gap-3">
-                    <button onclick="goStep(2)"
-                        class="flex-1 border border-white/20 py-4 rounded-xl font-bold hover:bg-white/5 transition">
-                        <i class="fas fa-arrow-left mr-2"></i> 이전
-                    </button>
-                    <button onclick="createHosting()" id="create-btn"
-                        class="flex-1 bg-green-700 py-4 rounded-xl font-bold text-lg hover:bg-green-600 transition flex items-center justify-center gap-2">
-                        <i class="fas fa-rocket"></i> 호스팅 생성
-                    </button>
-                </div>
-            </div>
-
-            <!-- ── 프로비저닝 진행 화면 ── -->
-            <div id="step-provisioning" class="hidden">
-                <div class="p-8 bg-[#111] border border-white/10 rounded-2xl space-y-6">
-                    <!-- 헤더 -->
-                    <div class="text-center">
-                        <div class="text-4xl mb-3">⚙️</div>
-                        <h2 class="text-xl font-bold mb-1">호스팅을 생성하고 있습니다</h2>
-                        <p class="text-sm text-gray-400">Cloudflare 리소스 생성 및 WordPress 초기화 중...<br>
-                            완료까지 <strong class="text-blue-400">13~15분</strong> 소요됩니다. 이 페이지를 닫아도 됩니다.</p>
-                    </div>
-
-                    <!-- 경과 시간 -->
-                    <div class="flex items-center justify-between text-sm text-gray-500 px-2">
-                        <span><i class="fas fa-clock mr-1"></i> 경과: <span id="elapsed-time" class="text-white font-mono">0:00</span></span>
-                        <span class="text-xs">예상 완료: <span id="eta-time" class="text-green-400">약 15분</span></span>
-                    </div>
-
-                    <!-- 전체 진행바 -->
-                    <div class="space-y-2">
-                        <div class="flex justify-between text-xs text-gray-500">
-                            <span>전체 진행</span>
-                            <span id="overall-pct">0%</span>
-                        </div>
-                        <div class="h-2 bg-white/5 rounded-full overflow-hidden">
-                            <div id="overall-bar" class="h-full bg-gradient-to-r from-blue-600 to-indigo-500 rounded-full transition-all duration-700" style="width:0%"></div>
-                        </div>
-                    </div>
-
-                    <!-- 단계별 상태 -->
-                    <div class="space-y-3">
-                        <div class="text-xs text-gray-500 font-bold uppercase tracking-wider mb-2">단계별 진행</div>
-
-                        <div id="ps-github" class="provision-step wait flex items-center gap-3 p-3 bg-white/3 rounded-xl">
-                            <span id="ps-github-ico" class="text-lg w-6 text-center">⏳</span>
-                            <div class="flex-1">
-                                <div class="font-medium text-sm">GitHub 레포 생성</div>
-                                <div class="text-xs text-gray-500">블로그 DB + 스토리지 레포 초기화</div>
-                            </div>
-                        </div>
-
-                        <div id="ps-d1" class="provision-step wait flex items-center gap-3 p-3 bg-white/3 rounded-xl">
-                            <span id="ps-d1-ico" class="text-lg w-6 text-center">⏳</span>
-                            <div class="flex-1">
-                                <div class="font-medium text-sm">Astro 소스 + DB 파일 생성</div>
-                                <div class="text-xs text-gray-500">_db/*.json, _content/, src/ 초기화</div>
-                            </div>
-                        </div>
-
-                        <div id="ps-worker" class="provision-step wait flex items-center gap-3 p-3 bg-white/3 rounded-xl">
-                            <span id="ps-worker-ico" class="text-lg w-6 text-center">⏳</span>
-                            <div class="flex-1">
-                                <div class="font-medium text-sm">GitHub Actions 설정</div>
-                                <div class="text-xs text-gray-500">Astro 빌드 + GitHub Pages 자동 배포 워크플로우</div>
-                            </div>
-                        </div>
-
-                        <div id="ps-wp_init" class="provision-step wait flex items-center gap-3 p-3 bg-white/3 rounded-xl">
-                            <span id="ps-wp_init-ico" class="text-lg w-6 text-center">⏳</span>
-                            <div class="flex-1">
-                                <div class="font-medium text-sm">GitHub Pages 활성화</div>
-                                <div class="text-xs text-gray-500">첫 빌드 트리거 — 완료 후 도메인 설정 필요</div>
-                            </div>
-                        </div>
-
-                        <div id="ps-wp_files" class="provision-step wait flex items-center gap-3 p-3 bg-white/3 rounded-xl">
-                            <span id="ps-wp_files-ico" class="text-lg w-6 text-center">⏳</span>
-                            <div class="flex-1">
-                                <div class="font-medium text-sm">첫 빌드 트리거</div>
-                                <div class="text-xs text-gray-500">GitHub Actions 빌드 시작 (약 2~3분 소요)</div>
-                            </div>
-                            <div id="ps-wp_files-bar" class="w-16 h-1 bg-white/10 rounded-full overflow-hidden hidden">
-                                <div class="h-full bg-blue-500 progress-bar-anim" style="width:60%"></div>
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- 최근 로그 -->
-                    <div>
-                        <div class="text-xs text-gray-500 font-bold uppercase tracking-wider mb-2">최근 로그</div>
-                        <div id="provision-logs" class="bg-black/40 rounded-xl p-4 h-32 overflow-y-auto space-y-1 font-mono text-xs text-gray-400">
-                            <div class="text-blue-400">▶ 프로비저닝 시작...</div>
-                        </div>
-                    </div>
-
-                    <!-- 알림 허용 배너 -->
-                    <div id="notif-banner" class="p-3 bg-indigo-900/30 border border-indigo-500/30 rounded-xl text-xs text-indigo-300 flex items-center gap-3">
-                        <i class="fas fa-bell text-indigo-400"></i>
-                        <span>완료 시 크롬 알림을 받으시겠습니까?</span>
-                        <button onclick="requestNotifPermission()"
-                            class="ml-auto bg-indigo-600 hover:bg-indigo-500 text-white px-3 py-1 rounded-lg font-bold transition">
-                            허용
+                <div>
+                    <label class="cp-label">Cloudflare Global API Key
+                        <span class="text-gray-600 font-normal ml-1">(선택 — 커스텀 도메인 자동 설정 시 필요)</span>
+                    </label>
+                    <div class="input-wrap">
+                        <input id="cf_api_key" type="password" class="cp-input pr-12"
+                            placeholder="Cloudflare 대시보드 → My Profile → API Tokens → Global API Key">
+                        <button class="eye-btn" onclick="toggleVis('cf_api_key', this)">
+                            <i class="fas fa-eye"></i>
                         </button>
-                        <button onclick="document.getElementById('notif-banner').remove()"
-                            class="text-gray-500 hover:text-white px-2">✕</button>
                     </div>
-                </div>
-            </div>
-
-            <!-- ── 생성 완료 화면 ── -->
-            <div id="step-done" class="hidden">
-                <div class="text-center py-8">
-                    <div class="text-6xl mb-5 animate-bounce">🎉</div>
-                    <h2 class="text-2xl font-black mb-2">GitHub Pages 호스팅 생성 완료!</h2>
-                    <p class="text-gray-500 text-sm mb-1">총 소요 시간: <span id="done-elapsed" class="text-white font-mono">-</span></p>
-                </div>
-
-                <!-- 도메인 필수 안내 -->
-                <div class="mb-5 p-4 rounded-xl bg-yellow-900/30 border border-yellow-500/40 text-sm text-yellow-300">
-                    <div class="font-bold mb-2 flex items-center gap-2">
-                        <i class="fas fa-exclamation-triangle"></i> 도메인 설정이 필요합니다
-                    </div>
-                    <p class="text-yellow-200/80 mb-2">
-                        GitHub Pages 호스팅은 <strong>커스텀 도메인</strong>을 추가해야 접속 가능합니다.<br>
-                        도메인 관리에서 도메인을 계정에 추가한 뒤 이 호스팅에 연결해주세요.
+                    <p class="text-xs text-gray-600 mt-2">
+                        <i class="fas fa-external-link-alt mr-1"></i>
+                        <a href="https://dash.cloudflare.com/profile/api-tokens" target="_blank" class="text-blue-400 hover:underline">
+                            Cloudflare 대시보드에서 API 키 확인
+                        </a>
                     </p>
-                    <ol class="list-decimal ml-4 space-y-1 text-yellow-200/70">
-                        <li>도메인 관리 → 도메인 추가 (Cloudflare DNS 자동 설정)</li>
-                        <li>추가한 도메인 → 이 호스팅에 연결</li>
-                        <li>GitHub Actions 빌드 완료 후 접속 가능 (약 2~3분)</li>
-                    </ol>
                 </div>
 
-                <!-- GitHub 레포 정보 -->
-                <div class="mb-5 p-4 rounded-xl bg-white/5 border border-white/10 text-sm">
-                    <div class="font-bold mb-2 flex items-center gap-2 text-gray-300">
-                        <i class="fab fa-github"></i> GitHub 레포 (DB + 스토리지)
-                    </div>
-                    <p id="done-repo-url" class="font-mono text-blue-400 text-xs break-all"></p>
-                    <p class="text-gray-600 text-xs mt-1">이 레포가 블로그 데이터베이스 역할을 합니다</p>
+                <div>
+                    <label class="cp-label">Cloudflare 계정 이메일
+                        <span class="text-gray-600 font-normal ml-1">(API Key 사용 시 필수)</span>
+                    </label>
+                    <input id="cf_email" type="email" class="cp-input" placeholder="cloudflare 계정 이메일">
                 </div>
 
-                <!-- 바로가기 버튼 -->
-                <div class="grid grid-cols-1 gap-3 mb-6">
-                    <a href="/domains"
-                        class="flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-500 py-4 rounded-xl font-bold text-lg transition">
-                        <i class="fas fa-globe"></i> 도메인 추가하러 가기
-                    </a>
-                    <a id="done-detail-link" href="/hosting"
-                        class="flex items-center justify-center gap-2 bg-[#111] border border-white/10 hover:bg-white/5 py-4 rounded-xl font-bold transition">
-                        <i class="fas fa-server"></i> 호스팅 관리 콘솔
-                    </a>
-                    <a id="done-gh-link" href="#" target="_blank"
-                        class="flex items-center justify-center gap-2 border border-white/10 hover:bg-white/5 py-3 rounded-xl font-medium text-gray-300 transition">
-                        <i class="fab fa-github mr-1"></i> GitHub 레포 보기
-                    </a>
-                </div>
+                <div id="cf-validate-result" class="hidden p-3 rounded-xl text-xs"></div>
 
-                <a href="/hosting" class="block text-center text-sm text-gray-500 hover:text-white transition">
-                    ← 내 호스팅 목록으로
-                </a>
+                <button onclick="validateCfApi()" id="cf-validate-btn"
+                    class="w-full border border-orange-500/40 text-orange-300 hover:bg-orange-900/20 py-3 rounded-xl font-bold text-sm transition">
+                    <i class="fas fa-check-circle mr-2"></i> API 키 검증
+                </button>
+
+                <div class="p-3 bg-white/3 border border-white/8 rounded-xl text-xs text-gray-500">
+                    <i class="fas fa-info-circle mr-1 text-gray-600"></i>
+                    CF API 없이도 호스팅 생성 가능합니다. 단, 도메인 DNS는 수동 설정이 필요합니다.
+                </div>
             </div>
 
-            <!-- ── 생성 오류 화면 ── -->
-            <div id="step-error" class="hidden text-center py-12">
-                <div class="text-5xl text-red-400 mb-4">❌</div>
-                <h2 class="text-xl font-bold mb-2">생성 중 오류가 발생했습니다</h2>
-                <p class="text-gray-400 text-sm mb-6" id="error-msg">서버 오류가 발생했습니다.</p>
-                <div class="flex gap-3 justify-center">
-                    <button onclick="location.reload()"
-                        class="bg-blue-600 px-6 py-3 rounded-xl font-bold hover:bg-blue-500 transition">
-                        다시 시도
+            <div class="flex gap-3">
+                <button onclick="goStep(2)" class="flex-1 border border-white/20 py-4 rounded-xl font-bold hover:bg-white/5 transition">
+                    <i class="fas fa-arrow-left mr-2"></i> 이전
+                </button>
+                <button onclick="goStep(4)" class="flex-1 bg-blue-600 hover:bg-blue-500 py-4 rounded-xl font-bold transition">
+                    다음 단계 <i class="fas fa-arrow-right ml-2"></i>
+                </button>
+            </div>
+        </div>
+
+        <!-- ══════════════════════════════════════════════
+             STEP 4 — 도메인
+        ══════════════════════════════════════════════ -->
+        <div id="step-4" class="hidden space-y-5">
+            <div class="section-card space-y-5">
+                <div class="section-title"><i class="fas fa-globe text-green-400"></i> 도메인 설정</div>
+
+                <div id="domain-plan-notice" class="p-4 bg-white/3 border border-white/10 rounded-xl text-sm text-gray-400"></div>
+
+                <div id="domain-input-wrap">
+                    <label class="cp-label">초기 도메인
+                        <span class="text-gray-600 font-normal ml-1">(선택 — 생성 후에도 추가 가능)</span>
+                    </label>
+                    <input id="initial_domain" type="text" class="cp-input"
+                        placeholder="예: myblog.com (www 제외)">
+                    <p class="text-xs text-gray-600 mt-2">
+                        <i class="fas fa-info-circle mr-1"></i>
+                        도메인을 입력하면 Cloudflare API로 DNS 레코드를 자동 설정합니다.
+                    </p>
+
+                    <div id="domain-cf-warning" class="hidden mt-3 p-3 bg-yellow-950/30 border border-yellow-500/25 rounded-xl text-xs text-yellow-300">
+                        <i class="fas fa-exclamation-triangle mr-1"></i>
+                        Cloudflare API 미입력 상태입니다. 도메인 DNS를 입력해도 자동 설정되지 않으며
+                        호스팅 상세 → 도메인 탭에서 수동 설정이 필요합니다.
+                    </div>
+                </div>
+
+                <div class="p-4 bg-blue-950/30 border border-blue-500/25 rounded-xl text-sm space-y-3">
+                    <div class="font-bold text-blue-300">GitHub Pages 기본 URL</div>
+                    <p class="text-gray-400 text-xs">
+                        커스텀 도메인 없이도 아래 URL로 접속 가능합니다. (첫 빌드 완료 후 약 2~3분 소요)
+                    </p>
+                    <div id="pages-url-preview" class="font-mono text-blue-400 text-xs break-all">
+                        https://&lt;github-user&gt;.github.io/cp-&lt;id&gt;
+                    </div>
+                </div>
+            </div>
+
+            <div class="flex gap-3">
+                <button onclick="goStep(3)" class="flex-1 border border-white/20 py-4 rounded-xl font-bold hover:bg-white/5 transition">
+                    <i class="fas fa-arrow-left mr-2"></i> 이전
+                </button>
+                <button onclick="goStep(5)" class="flex-1 bg-blue-600 hover:bg-blue-500 py-4 rounded-xl font-bold transition">
+                    다음 단계 <i class="fas fa-arrow-right ml-2"></i>
+                </button>
+            </div>
+        </div>
+
+        <!-- ══════════════════════════════════════════════
+             STEP 5 — 관리자 설정 + 최종 확인
+        ══════════════════════════════════════════════ -->
+        <div id="step-5" class="hidden space-y-5">
+            <div class="section-card space-y-5">
+                <div class="section-title"><i class="fas fa-user-shield text-indigo-400"></i> 관리자 계정 설정</div>
+
+                <div>
+                    <label class="cp-label">관리자 아이디 <span class="req">*</span></label>
+                    <input id="wp_admin_user" type="text" class="cp-input font-mono" placeholder="admin">
+                </div>
+
+                <div>
+                    <label class="cp-label">관리자 비밀번호 <span class="req">*</span></label>
+                    <div class="input-wrap">
+                        <input id="wp_admin_pass" type="password" class="cp-input pr-12" placeholder="8자 이상">
+                        <button class="eye-btn" onclick="toggleVis('wp_admin_pass', this)">
+                            <i class="fas fa-eye"></i>
+                        </button>
+                    </div>
+                    <div id="pass-strength" class="mt-2 flex gap-1.5 h-1">
+                        <div class="flex-1 rounded-full bg-white/10" id="ps-1"></div>
+                        <div class="flex-1 rounded-full bg-white/10" id="ps-2"></div>
+                        <div class="flex-1 rounded-full bg-white/10" id="ps-3"></div>
+                        <div class="flex-1 rounded-full bg-white/10" id="ps-4"></div>
+                    </div>
+                </div>
+
+                <div>
+                    <label class="cp-label">관리자 이메일 <span class="req">*</span></label>
+                    <input id="wp_admin_email" type="email" class="cp-input" placeholder="admin@example.com">
+                </div>
+            </div>
+
+            <!-- 생성 요약 -->
+            <div class="section-card">
+                <div class="section-title"><i class="fas fa-list-check text-gray-400"></i> 생성 요약</div>
+                <div class="space-y-2 text-sm">
+                    <div class="flex justify-between py-1.5 border-b border-white/5">
+                        <span class="text-gray-500">사이트 이름</span>
+                        <span id="sum-name" class="font-mono text-white">-</span>
+                    </div>
+                    <div class="flex justify-between py-1.5 border-b border-white/5">
+                        <span class="text-gray-500">플랜</span>
+                        <span id="sum-plan" class="font-bold">-</span>
+                    </div>
+                    <div class="flex justify-between py-1.5 border-b border-white/5">
+                        <span class="text-gray-500">스토리지</span>
+                        <span id="sum-storage" class="text-green-300">-</span>
+                    </div>
+                    <div class="flex justify-between py-1.5 border-b border-white/5">
+                        <span class="text-gray-500">트래픽</span>
+                        <span id="sum-traffic" class="text-green-300">-</span>
+                    </div>
+                    <div class="flex justify-between py-1.5 border-b border-white/5">
+                        <span class="text-gray-500">Cloudflare API</span>
+                        <span id="sum-cf" class="text-gray-300">-</span>
+                    </div>
+                    <div class="flex justify-between py-1.5 border-b border-white/5">
+                        <span class="text-gray-500">초기 도메인</span>
+                        <span id="sum-domain" class="font-mono text-gray-300">-</span>
+                    </div>
+                    <div class="flex justify-between py-1.5">
+                        <span class="text-gray-500">호스팅 타입</span>
+                        <span class="text-blue-300">GitHub Pages 정적</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="p-4 bg-green-950/30 border border-green-500/25 rounded-xl text-xs text-green-300">
+                <i class="fas fa-clock mr-1"></i>
+                구축 완료까지 <strong>5~8분</strong>이 소요됩니다. 시작 즉시 이 페이지에서 실시간 진행 상황을 확인할 수 있습니다.
+            </div>
+
+            <div class="flex gap-3">
+                <button onclick="goStep(4)" class="flex-1 border border-white/20 py-4 rounded-xl font-bold hover:bg-white/5 transition">
+                    <i class="fas fa-arrow-left mr-2"></i> 이전
+                </button>
+                <button onclick="createHosting()" id="create-btn"
+                    class="flex-1 bg-green-700 hover:bg-green-600 py-4 rounded-xl font-bold text-base transition flex items-center justify-center gap-2">
+                    <i class="fas fa-rocket"></i> 호스팅 생성 시작
+                </button>
+            </div>
+        </div>
+
+        <!-- ══════════════════════════════════════════════
+             프로비저닝 진행 화면
+        ══════════════════════════════════════════════ -->
+        <div id="step-provisioning" class="hidden">
+            <div class="bg-[#0d0d0d] border border-white/10 rounded-2xl overflow-hidden">
+
+                <!-- 상단 헤더 + 타이머 -->
+                <div class="p-6 border-b border-white/10 flex items-center gap-5">
+                    <div class="relative flex-shrink-0">
+                        <!-- SVG 링 타이머 -->
+                        <svg width="72" height="72" viewBox="0 0 72 72">
+                            <circle cx="36" cy="36" r="30" fill="none" stroke="#1f2937" stroke-width="5"/>
+                            <circle id="timer-ring" cx="36" cy="36" r="30" fill="none"
+                                stroke="#3b82f6" stroke-width="5"
+                                stroke-dasharray="188.5" stroke-dashoffset="188.5"
+                                stroke-linecap="round"
+                                transform="rotate(-90 36 36)"
+                                class="timer-ring"/>
+                        </svg>
+                        <div class="absolute inset-0 flex flex-col items-center justify-center">
+                            <span id="elapsed-min" class="text-white font-black text-lg leading-none">0</span>
+                            <span class="text-gray-600 text-[9px] leading-none mt-0.5">분</span>
+                        </div>
+                    </div>
+                    <div class="flex-1 min-w-0">
+                        <h2 class="text-lg font-black">호스팅 구축 중</h2>
+                        <p class="text-gray-500 text-xs mt-1">GitHub 레포 생성 → DB 초기화 → Astro 소스 업로드 → 빌드 트리거</p>
+                        <div class="mt-2 flex items-center gap-3 text-xs text-gray-600">
+                            <span>경과: <span id="elapsed-time" class="text-gray-300 font-mono">0:00</span></span>
+                            <span class="text-gray-700">|</span>
+                            <span>예상: <span id="eta-time" class="text-green-400">약 6분</span></span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 전체 진행바 -->
+                <div class="px-6 pt-5">
+                    <div class="flex justify-between text-xs text-gray-500 mb-1.5">
+                        <span>전체 진행</span>
+                        <span id="overall-pct" class="font-mono">0%</span>
+                    </div>
+                    <div class="h-1.5 bg-white/5 rounded-full overflow-hidden">
+                        <div id="overall-bar"
+                            class="h-full bg-gradient-to-r from-blue-600 to-indigo-500 rounded-full transition-all duration-700"
+                            style="width:0%"></div>
+                    </div>
+                </div>
+
+                <!-- 단계별 진행 -->
+                <div class="p-6 space-y-2">
+                    <div class="text-[10px] text-gray-600 font-bold uppercase tracking-widest mb-3">단계별 진행</div>
+
+                    <div id="ps-github" class="provision-step wait flex items-center gap-3 p-3 bg-white/2 rounded-xl">
+                        <span id="ps-github-ico" class="text-base w-5 text-center flex-shrink-0">⏳</span>
+                        <div class="flex-1 min-w-0">
+                            <div class="font-semibold text-sm">GitHub 저장소 생성</div>
+                            <div class="text-xs text-gray-600">DB + 스토리지 레포 초기화</div>
+                        </div>
+                    </div>
+
+                    <div id="ps-d1" class="provision-step wait flex items-center gap-3 p-3 bg-white/2 rounded-xl">
+                        <span id="ps-d1-ico" class="text-base w-5 text-center flex-shrink-0">⏳</span>
+                        <div class="flex-1 min-w-0">
+                            <div class="font-semibold text-sm">DB 데이터 + Astro 소스 생성</div>
+                            <div class="text-xs text-gray-600">_db/*.json, _content/, src/ + package.json 업로드</div>
+                        </div>
+                    </div>
+
+                    <div id="ps-worker" class="provision-step wait flex items-center gap-3 p-3 bg-white/2 rounded-xl">
+                        <span id="ps-worker-ico" class="text-base w-5 text-center flex-shrink-0">⏳</span>
+                        <div class="flex-1 min-w-0">
+                            <div class="font-semibold text-sm">GitHub Actions 워크플로우</div>
+                            <div class="text-xs text-gray-600">npm install → astro build → gh-pages 자동 배포</div>
+                        </div>
+                    </div>
+
+                    <div id="ps-wp_init" class="provision-step wait flex items-center gap-3 p-3 bg-white/2 rounded-xl">
+                        <span id="ps-wp_init-ico" class="text-base w-5 text-center flex-shrink-0">⏳</span>
+                        <div class="flex-1 min-w-0">
+                            <div class="font-semibold text-sm">플랜 설정 + 자동 점검</div>
+                            <div class="text-xs text-gray-600">리소스 제한 적용 · 코드 자동 검증 및 수정</div>
+                        </div>
+                    </div>
+
+                    <div id="ps-wp_files" class="provision-step wait flex items-center gap-3 p-3 bg-white/2 rounded-xl">
+                        <span id="ps-wp_files-ico" class="text-base w-5 text-center flex-shrink-0">⏳</span>
+                        <div class="flex-1 min-w-0">
+                            <div class="font-semibold text-sm">Cloudflare DNS + 빌드 트리거</div>
+                            <div class="text-xs text-gray-600">DNS 레코드 설정 · GitHub Actions 빌드 시작</div>
+                        </div>
+                        <div id="ps-wp_files-bar" class="w-14 h-1 bg-white/10 rounded-full overflow-hidden hidden flex-shrink-0">
+                            <div class="h-full bg-blue-500 progress-bar-anim" style="width:55%"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 실시간 로그 -->
+                <div class="px-6 pb-6">
+                    <div class="text-[10px] text-gray-600 font-bold uppercase tracking-widest mb-2">실시간 로그</div>
+                    <div id="provision-logs"
+                        class="bg-black/50 border border-white/5 rounded-xl p-4 h-36 overflow-y-auto space-y-1 font-mono text-xs text-gray-500">
+                        <div class="text-blue-400">▶ 프로비저닝 준비 중...</div>
+                    </div>
+                </div>
+
+                <!-- 알림 허용 배너 -->
+                <div id="notif-banner" class="mx-6 mb-6 p-3 bg-indigo-950/40 border border-indigo-500/30 rounded-xl text-xs text-indigo-300 flex items-center gap-3">
+                    <i class="fas fa-bell text-indigo-400"></i>
+                    <span>완료 시 브라우저 알림을 받으시겠습니까?</span>
+                    <button onclick="requestNotifPermission()"
+                        class="ml-auto bg-indigo-600 hover:bg-indigo-500 text-white px-3 py-1.5 rounded-lg font-bold transition text-xs">
+                        허용
                     </button>
-                    <a href="/hosting" class="border border-white/20 px-6 py-3 rounded-xl font-bold hover:bg-white/5 transition text-gray-300">
-                        목록으로
-                    </a>
+                    <button onclick="document.getElementById('notif-banner').remove()" class="text-gray-600 hover:text-white px-1">✕</button>
                 </div>
             </div>
         </div>
-    </main>
+
+        <!-- ══════════════════════════════════════════════
+             완료 화면
+        ══════════════════════════════════════════════ -->
+        <div id="step-done" class="hidden">
+            <div class="text-center py-8">
+                <div class="text-6xl mb-4 animate-bounce">🎉</div>
+                <h2 class="text-2xl font-black mb-1">GitHub Pages 호스팅 생성 완료!</h2>
+                <p class="text-gray-500 text-sm">총 소요 시간: <span id="done-elapsed" class="text-white font-mono">-</span></p>
+            </div>
+
+            <!-- 도메인 상태 -->
+            <div id="done-domain-section" class="mb-4 p-4 rounded-2xl bg-yellow-950/30 border border-yellow-500/35 text-sm">
+                <div class="font-bold mb-2 flex items-center gap-2 text-yellow-300">
+                    <i class="fas fa-exclamation-triangle"></i> 도메인 설정 필요
+                </div>
+                <p class="text-yellow-200/70 text-xs mb-3">
+                    커스텀 도메인을 추가하면 Cloudflare DNS가 자동 설정됩니다.
+                    지금 바로 추가하거나 나중에 호스팅 상세에서 추가할 수 있습니다.
+                </p>
+                <ol class="text-yellow-200/60 text-xs space-y-1 list-decimal ml-4">
+                    <li>도메인 관리 → 도메인 추가 (Cloudflare DNS 자동 설정)</li>
+                    <li>이 호스팅에 도메인 연결</li>
+                    <li>빌드 완료 후 접속 가능 (약 2~3분)</li>
+                </ol>
+            </div>
+
+            <!-- GitHub 레포 정보 -->
+            <div class="mb-4 p-4 rounded-2xl bg-white/4 border border-white/10 text-sm">
+                <div class="font-bold mb-2 flex items-center gap-2 text-gray-300">
+                    <i class="fab fa-github"></i> GitHub 저장소 (DB + 스토리지)
+                </div>
+                <p id="done-repo-url" class="font-mono text-blue-400 text-xs break-all"></p>
+                <p class="text-gray-600 text-xs mt-1">이 저장소가 블로그 데이터베이스입니다. _db/*.json, _content/**</p>
+            </div>
+
+            <!-- 플랜 정보 -->
+            <div class="mb-4 p-4 rounded-2xl bg-white/4 border border-white/10 text-sm">
+                <div class="font-bold mb-2 flex items-center gap-2 text-gray-300">
+                    <i class="fas fa-layer-group text-purple-400"></i> 적용 플랜
+                </div>
+                <div id="done-plan-info" class="text-xs text-gray-400 space-y-1"></div>
+            </div>
+
+            <!-- 바로가기 -->
+            <div class="grid gap-3 mb-6">
+                <a href="/domains"
+                    class="flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-500 py-4 rounded-xl font-bold text-base transition">
+                    <i class="fas fa-globe"></i> 도메인 추가하러 가기
+                </a>
+                <a id="done-detail-link" href="/hosting"
+                    class="flex items-center justify-center gap-2 bg-[#111] border border-white/10 hover:bg-white/5 py-4 rounded-xl font-bold transition">
+                    <i class="fas fa-server"></i> 호스팅 관리 콘솔
+                </a>
+                <a id="done-gh-link" href="#" target="_blank"
+                    class="flex items-center justify-center gap-2 border border-white/10 hover:bg-white/5 py-3 rounded-xl font-medium text-gray-400 transition text-sm">
+                    <i class="fab fa-github mr-1"></i> GitHub 저장소 보기
+                </a>
+            </div>
+
+            <a href="/hosting" class="block text-center text-sm text-gray-600 hover:text-white transition">
+                ← 내 호스팅 목록으로
+            </a>
+        </div>
+
+        <!-- ══════════════════════════════════════════════
+             오류 화면
+        ══════════════════════════════════════════════ -->
+        <div id="step-error" class="hidden text-center py-14">
+            <div class="text-5xl text-red-400 mb-4">❌</div>
+            <h2 class="text-xl font-bold mb-2">생성 중 오류가 발생했습니다</h2>
+            <p class="text-gray-500 text-sm mb-6" id="error-msg">서버 오류가 발생했습니다.</p>
+            <div class="flex gap-3 justify-center">
+                <button onclick="location.reload()"
+                    class="bg-blue-600 hover:bg-blue-500 px-6 py-3 rounded-xl font-bold transition">
+                    다시 시도
+                </button>
+                <a href="/hosting" class="border border-white/20 px-6 py-3 rounded-xl font-bold hover:bg-white/5 transition text-gray-400">
+                    목록으로
+                </a>
+            </div>
+        </div>
+
+    </main><!-- /main -->
 
     <script src="/src/auth-frontend.js"></script>
     <script src="/src/sidebar.js"></script>
     <script>
+    // ─────────────────────────────────────────────────────────────────────────
+    // 전역 상태
+    // ─────────────────────────────────────────────────────────────────────────
     const TOKEN   = localStorage.getItem('admin_token');
     const HEADERS = { 'Authorization': `Bearer ${TOKEN}`, 'Content-Type': 'application/json' };
 
-    let selectedPhp   = '8.2';
-    let currentStep   = 1;
-    let pollInterval  = null;
-    let elapsedSec    = 0;
-    let elapsedTimer  = null;
-    let createdSiteId = null;
+    // 플랜 설정
+    const PLAN_INFO = {
+        free:    { label: 'Free',    price: '무료',      storage: '5GB',  traffic: '100GB/월', color: 'text-green-400' },
+        starter: { label: 'Starter', price: '₩9,900/월', storage: '18GB', traffic: '1TB/월',   color: 'text-blue-400'  },
+        pro:     { label: 'Pro',     price: '₩29,900/월',storage: '36GB', traffic: '무제한',   color: 'text-purple-400'},
+    };
 
-    // ── 알림 허용 ────────────────────────────────────────────────────────────
-    async function requestNotifPermission() {
-        if (!('Notification' in window)) {
-            alert('이 브라우저는 알림을 지원하지 않습니다.');
+    let selectedPlan    = 'free';
+    let cfValidated     = false;
+    let currentStep     = 1;
+    let pollInterval    = null;
+    let elapsedSec      = 0;
+    let elapsedTimer    = null;
+    let createdSiteId   = null;
+    let lastLogCount    = 0;
+
+    // 총 목표 시간: 6분(360초) 기준으로 타이머 링 회전
+    const TARGET_SEC = 360;
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // 유틸
+    // ─────────────────────────────────────────────────────────────────────────
+    function showAlert(msg, type = 'error') {
+        const el = document.getElementById('alertMsg');
+        el.textContent = msg;
+        el.className = type === 'success'
+            ? 'mb-5 p-3 rounded-xl text-sm text-center bg-green-950/50 border border-green-500/40 text-green-400'
+            : 'mb-5 p-3 rounded-xl text-sm text-center bg-red-950/50 border border-red-500/40 text-red-400';
+        el.classList.remove('hidden');
+        setTimeout(() => el.classList.add('hidden'), 5000);
+    }
+
+    function toggleVis(id, btn) {
+        const inp = document.getElementById(id);
+        const ico = btn.querySelector('i');
+        inp.type = inp.type === 'password' ? 'text' : 'password';
+        ico.classList.toggle('fa-eye');
+        ico.classList.toggle('fa-eye-slash');
+    }
+
+    function formatCardNumber(el) {
+        let v = el.value.replace(/\D/g,'').slice(0,16);
+        el.value = v.replace(/(.{4})/g,'$1 ').trim();
+    }
+    function formatExpiry(el) {
+        let v = el.value.replace(/\D/g,'').slice(0,4);
+        if (v.length >= 2) v = v.slice(0,2) + '/' + v.slice(2);
+        el.value = v;
+    }
+
+    // 비밀번호 강도
+    document.addEventListener('input', e => {
+        if (e.target.id !== 'wp_admin_pass') return;
+        const v = e.target.value;
+        const bars = [1,2,3,4].map(i => document.getElementById(`ps-${i}`));
+        const colors = ['bg-red-500','bg-orange-500','bg-yellow-500','bg-green-500'];
+        let score = 0;
+        if (v.length >= 8)  score++;
+        if (/[A-Z]/.test(v))score++;
+        if (/[0-9]/.test(v))score++;
+        if (/[^A-Za-z0-9]/.test(v)) score++;
+        bars.forEach((b,i) => {
+            b.className = `flex-1 rounded-full ${i < score ? colors[Math.min(score-1,3)] : 'bg-white/10'}`;
+        });
+    });
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // 플랜 선택
+    // ─────────────────────────────────────────────────────────────────────────
+    function selectPlan(plan, el) {
+        selectedPlan = plan;
+        document.querySelectorAll('.plan-card').forEach(c => c.classList.remove('selected'));
+        el.classList.add('selected');
+
+        const paySection = document.getElementById('payment-section');
+        if (plan !== 'free') {
+            paySection.classList.remove('hidden');
+            loadSavedCards();
+        } else {
+            paySection.classList.add('hidden');
+        }
+    }
+
+    async function loadSavedCards() {
+        const container = document.getElementById('saved-cards');
+        try {
+            const res  = await fetch('/api/payment/cards', { headers: HEADERS });
+            const data = await res.json();
+            if (data.cards?.length) {
+                container.innerHTML = data.cards.map(c => `
+                    <label class="flex items-center gap-3 p-3 border border-white/10 rounded-xl cursor-pointer hover:border-blue-500/40 transition">
+                        <input type="radio" name="saved_card" value="${c.id}" class="accent-blue-500">
+                        <span class="text-sm">${c.brand} •••• ${c.last4}</span>
+                        <span class="text-xs text-gray-500 ml-auto">${c.expiry}</span>
+                    </label>`).join('');
+                container.innerHTML += `
+                    <label class="flex items-center gap-3 p-3 border border-white/10 rounded-xl cursor-pointer hover:border-blue-500/40 transition">
+                        <input type="radio" name="saved_card" value="new" class="accent-blue-500" checked>
+                        <span class="text-sm text-gray-400">+ 새 카드 등록</span>
+                    </label>`;
+                // 새 카드 폼 표시 제어
+                container.querySelectorAll('input[name=saved_card]').forEach(r => {
+                    r.addEventListener('change', () => {
+                        document.getElementById('new-card-form').classList.toggle('hidden', r.value !== 'new');
+                    });
+                });
+                // 첫 번째 저장 카드 선택 시 새 카드 폼 숨기기
+                container.querySelector('input[name=saved_card]').checked = true;
+                document.getElementById('new-card-form').classList.add('hidden');
+            }
+        } catch { /* 카드 없음 — 새 카드 폼 표시 */ }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // CF API 검증
+    // ─────────────────────────────────────────────────────────────────────────
+    async function validateCfApi() {
+        const apiKey = document.getElementById('cf_api_key').value.trim();
+        const email  = document.getElementById('cf_email').value.trim();
+        const result = document.getElementById('cf-validate-result');
+        const btn    = document.getElementById('cf-validate-btn');
+
+        if (!apiKey || !email) {
+            showAlert('API 키와 이메일을 모두 입력해주세요.');
             return;
         }
-        const perm = await Notification.requestPermission();
-        if (perm === 'granted') {
-            document.getElementById('notif-banner').innerHTML =
-                '<i class="fas fa-check-circle text-green-400 mr-2"></i><span class="text-green-300">알림이 허용되었습니다. 완료 시 알려드립니다!</span>';
-        }
-    }
 
-    function sendChromeNotif(title, body, url) {
-        if (Notification.permission === 'granted') {
-            const n = new Notification(title, {
-                body,
-                icon: '/favicon-192x192.png',
-                badge: '/favicon-32x32.png',
-                tag: 'cloudpress-hosting',
-                requireInteraction: true,
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i> 검증 중...';
+        result.classList.add('hidden');
+
+        try {
+            const res  = await fetch('/api/account', {
+                method:  'PUT',
+                headers: HEADERS,
+                body:    JSON.stringify({ cf_global_api_key: apiKey, cf_email: email }),
             });
-            if (url) n.onclick = () => { window.focus(); window.open(url, '_blank'); n.close(); };
+            const data = await res.json();
+            if (data.success) {
+                cfValidated = true;
+                result.className = 'p-3 rounded-xl text-xs bg-green-950/40 border border-green-500/30 text-green-400';
+                result.textContent = '✅ Cloudflare API 검증 완료. DNS 자동 설정이 활성화됩니다.';
+            } else {
+                result.className = 'p-3 rounded-xl text-xs bg-red-950/40 border border-red-500/30 text-red-400';
+                result.textContent = '❌ 검증 실패: ' + (data.error || '올바른 API 키가 아닙니다.');
+            }
+        } catch {
+            result.className = 'p-3 rounded-xl text-xs bg-red-950/40 border border-red-500/30 text-red-400';
+            result.textContent = '❌ 네트워크 오류';
         }
+        result.classList.remove('hidden');
+        btn.disabled = false;
+        btn.innerHTML = '<i class="fas fa-check-circle mr-2"></i> API 키 검증';
     }
 
-    // ── 경과 시간 타이머 ─────────────────────────────────────────────────────
+    // ─────────────────────────────────────────────────────────────────────────
+    // 스텝 이동
+    // ─────────────────────────────────────────────────────────────────────────
+    const STEP_LABELS = {1:'기본 정보', 2:'플랜 선택', 3:'Cloudflare', 4:'도메인', 5:'관리자'};
+
+    function goStep(n) {
+        // 유효성 검사
+        if (n > 1) {
+            const name = document.getElementById('site_name').value.trim();
+            if (!name) { showAlert('사이트 이름을 입력해주세요.'); return; }
+        }
+        if (n > 2 && selectedPlan !== 'free') {
+            const savedCard = document.querySelector('input[name=saved_card]:checked');
+            const isNew = !savedCard || savedCard.value === 'new';
+            if (isNew) {
+                const num = document.getElementById('card_number').value.replace(/\s/g,'');
+                const exp = document.getElementById('card_expiry').value;
+                const cvc = document.getElementById('card_cvc').value;
+                if (num.length < 16 || !exp.includes('/') || cvc.length < 3) {
+                    showAlert('카드 정보를 올바르게 입력해주세요.'); return;
+                }
+            }
+        }
+        if (n === 4) {
+            // 도메인 단계 — CF API 없으면 경고 표시
+            const apiKey = document.getElementById('cf_api_key').value.trim();
+            document.getElementById('domain-cf-warning').classList.toggle('hidden', !!apiKey);
+
+            // 플랜별 도메인 안내 업데이트
+            const planNotice = document.getElementById('domain-plan-notice');
+            if (selectedPlan === 'free') {
+                planNotice.innerHTML = '<i class="fas fa-info-circle text-yellow-400 mr-2"></i><span class="text-yellow-300 text-sm">Free 플랜은 커스텀 도메인을 지원하지 않습니다. 도메인 입력 시 호스팅 생성 후 <strong>Starter 이상</strong>으로 업그레이드 후 연결됩니다.</span>';
+            } else {
+                planNotice.innerHTML = `<i class="fas fa-check-circle text-green-400 mr-2"></i><span class="text-green-300 text-sm">${PLAN_INFO[selectedPlan].label} 플랜은 커스텀 도메인을 지원합니다. 도메인 입력 시 Cloudflare DNS가 자동 설정됩니다.</span>`;
+            }
+        }
+        if (n === 5) {
+            // 요약 업데이트
+            const plan = PLAN_INFO[selectedPlan];
+            document.getElementById('sum-name').textContent    = document.getElementById('site_name').value.trim() || '-';
+            document.getElementById('sum-plan').textContent    = plan.label;
+            document.getElementById('sum-plan').className      = `font-bold ${plan.color}`;
+            document.getElementById('sum-storage').textContent = plan.storage;
+            document.getElementById('sum-traffic').textContent = plan.traffic;
+
+            const cfKey = document.getElementById('cf_api_key').value.trim();
+            document.getElementById('sum-cf').textContent = cfKey ? '✅ 입력됨 (DNS 자동 설정)' : '미입력 (수동 설정 필요)';
+            document.getElementById('sum-cf').className   = cfKey ? 'text-green-400' : 'text-gray-600';
+
+            const domain = document.getElementById('initial_domain').value.trim();
+            document.getElementById('sum-domain').textContent = domain || '미설정 (나중에 추가 가능)';
+        }
+
+        // 인디케이터 업데이트
+        for (let i = 1; i <= 5; i++) {
+            const ind = document.getElementById(`ind-${i}`);
+            document.getElementById(`step-${i}`)?.classList.add('hidden');
+            if (i < n) {
+                ind.className = 'step-done flex-1 p-2.5 border rounded-xl text-center text-xs font-bold text-green-400';
+                ind.innerHTML = `<span>✓</span> ${STEP_LABELS[i]}`;
+            } else if (i === n) {
+                ind.className = 'step-active flex-1 p-2.5 border rounded-xl text-center text-xs font-bold';
+                ind.innerHTML = `<span class="text-blue-400">${i}</span> ${STEP_LABELS[i]}`;
+            } else {
+                ind.className = 'step-inactive flex-1 p-2.5 border rounded-xl text-center text-xs font-bold text-gray-600';
+                ind.innerHTML = `<span>${i}</span> ${STEP_LABELS[i]}`;
+            }
+        }
+
+        document.getElementById(`step-${n}`)?.classList.remove('hidden');
+        currentStep = n;
+        document.getElementById('alertMsg').classList.add('hidden');
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // 타이머 + 링 애니메이션 (목표: 6분 = 360초)
+    // ─────────────────────────────────────────────────────────────────────────
     function startElapsedTimer() {
         elapsedSec = 0;
         elapsedTimer = setInterval(() => {
@@ -388,348 +911,316 @@
             const m = Math.floor(elapsedSec / 60);
             const s = elapsedSec % 60;
             document.getElementById('elapsed-time').textContent = `${m}:${String(s).padStart(2,'0')}`;
+            document.getElementById('elapsed-min').textContent  = m;
 
-            // ETA 업데이트
-            const remaining = Math.max(0, 900 - elapsedSec);
+            // SVG 링 진행 (0→188.5 = 0%→100%, 목표 TARGET_SEC)
+            const pct    = Math.min(elapsedSec / TARGET_SEC, 1);
+            const offset = 188.5 - pct * 188.5;
+            document.getElementById('timer-ring').style.strokeDashoffset = offset;
+
+            // 링 색상: 파랑→초록→노랑→빨강 (7분 초과 시)
+            const ring = document.getElementById('timer-ring');
+            if      (elapsedSec < 300)  ring.style.stroke = '#3b82f6'; // 5분 이내 — 파랑
+            else if (elapsedSec < 420)  ring.style.stroke = '#22c55e'; // 5~7분 — 초록 (정상)
+            else if (elapsedSec < 540)  ring.style.stroke = '#f59e0b'; // 7~9분 — 노랑 (약간 지연)
+            else                        ring.style.stroke = '#ef4444'; // 9분+ — 빨강 (지연)
+
+            // ETA
+            const remaining = Math.max(0, TARGET_SEC - elapsedSec);
             const rm = Math.floor(remaining / 60);
             const rs = remaining % 60;
             document.getElementById('eta-time').textContent = remaining > 0
-                ? `약 ${rm}분 ${rs > 0 ? rs+'초' : ''}`
+                ? `약 ${rm > 0 ? rm+'분 ' : ''}${rs > 0 ? rs+'초' : ''}`
                 : '거의 완료!';
         }, 1000);
     }
+
     function stopElapsedTimer() {
         if (elapsedTimer) { clearInterval(elapsedTimer); elapsedTimer = null; }
     }
 
-    // ── 단계 상태 아이콘 ─────────────────────────────────────────────────────
+    // ─────────────────────────────────────────────────────────────────────────
+    // 프로비저닝 단계 아이콘
+    // ─────────────────────────────────────────────────────────────────────────
     function setStep(key, state) {
         const el  = document.getElementById(`ps-${key}`);
         const ico = document.getElementById(`ps-${key}-ico`);
         if (!el || !ico) return;
         el.classList.remove('done','doing','wait','error');
-        const map = { done:'✅', doing:'🔄', wait:'⏳', error:'❌' };
-        ico.textContent = map[state] || '⏳';
         el.classList.add(state);
-
+        const icons = { done:'✅', doing:'🔄', wait:'⏳', error:'❌' };
+        ico.textContent = icons[state] || '⏳';
         if (key === 'wp_files') {
             const bar = document.getElementById('ps-wp_files-bar');
             if (bar) bar.classList.toggle('hidden', state !== 'doing');
         }
     }
 
-    // ── 전체 진행도 계산 ─────────────────────────────────────────────────────
+    // ─────────────────────────────────────────────────────────────────────────
+    // 전체 진행도
+    // ─────────────────────────────────────────────────────────────────────────
     function updateOverallProgress(steps) {
-        const weights = { github: 10, d1: 15, worker: 20, wp_init: 15, wp_files: 40 };
-        let done = 0, total = 100;
-        for (const [k, w] of Object.entries(weights)) {
-            if (steps[k]) done += w;
-        }
+        const weights = { github: 20, d1: 25, worker: 20, wp_init: 20, wp_files: 15 };
+        let done = 0;
+        for (const [k, w] of Object.entries(weights)) { if (steps[k]) done += w; }
         document.getElementById('overall-pct').textContent = `${done}%`;
         document.getElementById('overall-bar').style.width = `${done}%`;
     }
 
-    // ── 로그 추가 ────────────────────────────────────────────────────────────
+    // ─────────────────────────────────────────────────────────────────────────
+    // 로그
+    // ─────────────────────────────────────────────────────────────────────────
     function addLog(msg, level = 'info') {
         const container = document.getElementById('provision-logs');
-        const colors = { info: 'text-gray-300', warning: 'text-yellow-400', error: 'text-red-400' };
-        const line = document.createElement('div');
-        line.className = colors[level] || colors.info;
-        line.textContent = `▸ ${msg}`;
-        container.appendChild(line);
+        const colors = { info:'text-gray-400', warning:'text-yellow-400', error:'text-red-400' };
+        const el = document.createElement('div');
+        el.className = colors[level] || colors.info;
+        el.textContent = `▸ ${msg}`;
+        container.appendChild(el);
         container.scrollTop = container.scrollHeight;
     }
 
-    // ── 상태 폴링 ─────────────────────────────────────────────────────────
-    let lastLogCount = 0;
+    // ─────────────────────────────────────────────────────────────────────────
+    // 알림 허용
+    // ─────────────────────────────────────────────────────────────────────────
+    async function requestNotifPermission() {
+        if (!('Notification' in window)) { alert('이 브라우저는 알림을 지원하지 않습니다.'); return; }
+        const perm = await Notification.requestPermission();
+        if (perm === 'granted') {
+            const banner = document.getElementById('notif-banner');
+            if (banner) banner.innerHTML = '<i class="fas fa-check-circle text-green-400 mr-2"></i><span class="text-green-300">알림이 허용되었습니다!</span>';
+        }
+    }
 
+    function sendNotif(title, body, url) {
+        if (Notification.permission !== 'granted') return;
+        const n = new Notification(title, {
+            body, icon: '/favicon-192x192.png',
+            badge: '/favicon-32x32.png', tag: 'cp-hosting',
+            requireInteraction: true,
+        });
+        if (url) n.onclick = () => { window.focus(); window.open(url, '_blank'); n.close(); };
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // 상태 폴링
+    // ─────────────────────────────────────────────────────────────────────────
     async function pollStatus() {
         if (!createdSiteId) return;
         try {
             const res  = await fetch(`/api/notify/site-status?id=${createdSiteId}`, { headers: HEADERS });
-
-            // JSON 파싱 실패 대비
             const text = await res.text();
             let data;
             try { data = JSON.parse(text); } catch { return; }
-
             if (!data.success) return;
 
-            // 단계 상태 업데이트
             const s = data.steps || {};
-            const prevSteps = { ...s };
-
             if (data.status === 'provisioning') {
-                // 어떤 단계가 완료됐는지 추론
                 if (s.github)   setStep('github',   'done');  else setStep('github',   'doing');
-                if (s.d1)       setStep('d1',        'done');  else if (s.github)   setStep('d1',     'doing');
-                if (s.worker)   setStep('worker',    'done');  else if (s.d1)       setStep('worker', 'doing');
-                if (s.wp_init)  setStep('wp_init',   'done');  else if (s.worker)   setStep('wp_init','doing');
+                if (s.d1)       setStep('d1',        'done');  else if (s.github)   setStep('d1',      'doing');
+                if (s.worker)   setStep('worker',    'done');  else if (s.d1)       setStep('worker',  'doing');
+                if (s.wp_init)  setStep('wp_init',   'done');  else if (s.worker)   setStep('wp_init', 'doing');
                 if (s.wp_files) setStep('wp_files',  'done');  else if (s.wp_init)  setStep('wp_files','doing');
             }
-
             updateOverallProgress(s);
 
-            // 새 로그 추가
-            const logs = (data.logs || []).slice(lastLogCount);
-            logs.forEach(l => addLog(l.message, l.level));
+            const newLogs = (data.logs || []).slice(lastLogCount);
+            newLogs.forEach(l => addLog(l.message, l.level));
             lastLogCount = data.logs?.length || 0;
 
-            // 완료
             if (data.is_complete) {
                 clearInterval(pollInterval);
                 stopElapsedTimer();
-
-                ['github','d1','worker','wp_init','wp_files'].forEach(k => {
-                    if (s[k]) setStep(k, 'done');
-                });
-                updateOverallProgress({ github:true, d1:true, worker:true, wp_init:true, wp_files: s.wp_files });
-
-                addLog('✅ 호스팅 생성 완료!', 'info');
+                ['github','d1','worker','wp_init','wp_files'].forEach(k => setStep(k, 'done'));
+                updateOverallProgress({ github:true, d1:true, worker:true, wp_init:true, wp_files:true });
+                addLog('✅ 호스팅 생성 완료!');
                 showDoneScreen(data);
-
-                // 크롬 알림
-                sendChromeNotif(
-                    '🎉 CloudPress 호스팅 생성 완료!',
-                    `${data.site_name} 사이트가 준비되었습니다. 클릭하여 방문하세요.`,
-                    `https://${data.domain}`
-                );
-
-                // 완료 이메일 발송 요청
+                sendNotif('🎉 CloudPress 호스팅 생성 완료!',
+                    `${data.site_name} 사이트가 준비되었습니다.`, `/hosting-detail.html?id=${createdSiteId}`);
                 fetch('/api/notify/hosting-complete', {
-                    method: 'POST',
-                    headers: HEADERS,
+                    method: 'POST', headers: HEADERS,
                     body: JSON.stringify({ site_id: createdSiteId }),
                 }).catch(() => {});
             }
-
-            // 오류
             if (data.is_error) {
                 clearInterval(pollInterval);
                 stopElapsedTimer();
                 document.getElementById('step-provisioning').classList.add('hidden');
                 document.getElementById('step-error').classList.remove('hidden');
-                document.getElementById('error-msg').textContent =
-                    '프로비저닝 중 오류가 발생했습니다. 로그를 확인해주세요.';
+                document.getElementById('error-msg').textContent = '프로비저닝 중 오류가 발생했습니다. 로그를 확인해주세요.';
             }
-
         } catch (e) {
-            // 네트워크 오류는 무시하고 계속 폴링
-            console.warn('[poll] error:', e.message);
+            console.warn('[poll]', e.message);
         }
     }
 
-    // ── 완료 화면 표시 ────────────────────────────────────────────────────────
+    // ─────────────────────────────────────────────────────────────────────────
+    // 완료 화면
+    // ─────────────────────────────────────────────────────────────────────────
     function showDoneScreen(data) {
         document.getElementById('step-provisioning').classList.add('hidden');
         document.getElementById('step-done').classList.remove('hidden');
 
-        const domain  = data.domain || '';
-        const siteUrl = `https://${domain}`;
+        const m = Math.floor(elapsedSec / 60);
+        const s = elapsedSec % 60;
+        document.getElementById('done-elapsed').textContent = `${m}분 ${s}초`;
 
-        document.getElementById('done-elapsed').textContent = (() => {
-            const m = Math.floor(elapsedSec / 60);
-            const s = elapsedSec % 60;
-            return `${m}분 ${s}초`;
-        })();
-
-        // GitHub 레포 정보 표시
         const repoOwner = data.github_repo_owner || '';
         const repoName  = data.github_repo_name  || '';
         if (repoOwner && repoName) {
             const repoUrl = `https://github.com/${repoOwner}/${repoName}`;
-            const repoEl  = document.getElementById('done-repo-url');
-            if (repoEl) repoEl.textContent = repoUrl;
+            const el = document.getElementById('done-repo-url');
+            if (el) el.textContent = repoUrl;
             const ghLink = document.getElementById('done-gh-link');
             if (ghLink) ghLink.href = repoUrl;
         }
         document.getElementById('done-detail-link').href = `/hosting-detail.html?id=${createdSiteId}`;
 
-        // 3초 후 자동으로 hosting.html로 이동
-        let countdown = 5;
-        const countEl = document.createElement('p');
-        countEl.className = 'text-xs text-gray-500 text-center mt-4';
-        countEl.textContent = `${countdown}초 후 호스팅 목록으로 이동합니다...`;
-        document.getElementById('step-done').querySelector('.space-y-3')?.appendChild(countEl);
+        // 플랜 정보
+        const plan = PLAN_INFO[selectedPlan] || PLAN_INFO.free;
+        const planEl = document.getElementById('done-plan-info');
+        if (planEl) planEl.innerHTML = `
+            <div class="flex justify-between py-1"><span>플랜</span><span class="${plan.color} font-bold">${plan.label}</span></div>
+            <div class="flex justify-between py-1"><span>스토리지</span><span>${plan.storage}</span></div>
+            <div class="flex justify-between py-1"><span>트래픽</span><span>${plan.traffic}</span></div>
+            <div class="flex justify-between py-1"><span>초과 요금</span><span>스토리지 1GB당 ₩1,900 / 트래픽 ₩2,300 (다음달)</span></div>
+        `;
 
-        const redirectTimer = setInterval(() => {
+        // 커스텀 도메인 설정 여부
+        if (data.primary_domain) {
+            const domSec = document.getElementById('done-domain-section');
+            if (domSec) domSec.innerHTML = `
+                <div class="font-bold mb-2 flex items-center gap-2 text-green-300">
+                    <i class="fas fa-check-circle"></i> 도메인 설정 완료
+                </div>
+                <p class="text-green-200/70 text-xs">
+                    커스텀 도메인 <strong>${data.primary_domain}</strong>이 설정되었습니다.
+                    Cloudflare DNS 반영까지 최대 24시간이 소요될 수 있습니다.
+                </p>`;
+        }
+
+        // 자동 이동
+        let countdown = 8;
+        const countEl = document.createElement('p');
+        countEl.className = 'text-xs text-gray-600 text-center mt-5';
+        countEl.textContent = `${countdown}초 후 호스팅 목록으로 이동합니다...`;
+        document.getElementById('step-done').appendChild(countEl);
+        const t = setInterval(() => {
             countdown--;
             if (countEl) countEl.textContent = `${countdown}초 후 호스팅 목록으로 이동합니다...`;
-            if (countdown <= 0) {
-                clearInterval(redirectTimer);
-                window.location.href = '/hosting';
-            }
+            if (countdown <= 0) { clearInterval(t); window.location.href = '/hosting'; }
         }, 1000);
     }
 
-    // ── 폼 유틸 ──────────────────────────────────────────────────────────────
-    function showAlert(msg, type = 'error') {
-        const el = document.getElementById('alertMsg');
-        el.textContent = msg;
-        el.className = type === 'success'
-            ? 'mb-6 p-3 rounded-xl text-sm text-center bg-green-900/40 border border-green-500/40 text-green-400'
-            : 'mb-6 p-3 rounded-xl text-sm text-center bg-red-900/40 border border-red-500/40 text-red-400';
-        el.classList.remove('hidden');
-        setTimeout(() => el.classList.add('hidden'), 4000);
-    }
-
-    function goStep(n) {
-        if (n === 2) {
-            const name = document.getElementById('site_name').value.trim();
-            if (!name) { showAlert('사이트 이름을 입력해주세요.'); return; }
-            loadPhpVersions();
-        }
-        if (n === 3) {
-            document.getElementById('sum-name').textContent = document.getElementById('site_name').value;
-            document.getElementById('sum-php').textContent  = `PHP ${selectedPhp}`;
-        }
-        [1, 2, 3].forEach(i => {
-            document.getElementById(`step-${i}`).classList.add('hidden');
-            const ind = document.getElementById(`step-${i}-ind`);
-            if (i < n) {
-                ind.className = 'step-done flex-1 p-3 border rounded-xl text-center text-sm font-bold text-green-400';
-                ind.innerHTML = `<span>✓</span> ${i===1?'기본 정보':i===2?'PHP 버전':'WP 설정'}`;
-            } else if (i === n) {
-                ind.className = 'step-active flex-1 p-3 border rounded-xl text-center text-sm font-bold';
-                const labels = {1:'기본 정보',2:'PHP 버전',3:'WP 설정'};
-                ind.innerHTML = `<span class="text-blue-400">${i}</span> ${labels[i]}`;
-            } else {
-                ind.className = 'step-inactive flex-1 p-3 border rounded-xl text-center text-sm font-bold text-gray-600';
-                const labels = {1:'기본 정보',2:'PHP 버전',3:'WP 설정'};
-                ind.innerHTML = `<span>${i}</span> ${labels[i]}`;
-            }
-        });
-        document.getElementById(`step-${n}`).classList.remove('hidden');
-        currentStep = n;
-        document.getElementById('alertMsg').classList.add('hidden');
-    }
-
-    async function loadPhpVersions() {
-        const loading = document.getElementById('php-loading');
-        const list    = document.getElementById('php-versions');
-        loading.classList.remove('hidden');
-        list.classList.add('hidden');
+    // ─────────────────────────────────────────────────────────────────────────
+    // 결제수단 ID 수집
+    // ─────────────────────────────────────────────────────────────────────────
+    async function getPaymentMethodId() {
+        if (selectedPlan === 'free') return null;
+        const saved = document.querySelector('input[name=saved_card]:checked');
+        if (saved && saved.value !== 'new') return saved.value;
+        // 새 카드 → TossPayments 등록 API 호출 (실제 구현 시 교체)
+        const num  = document.getElementById('card_number').value.replace(/\s/g,'');
+        const exp  = document.getElementById('card_expiry').value;
+        const cvc  = document.getElementById('card_cvc').value;
+        const name = document.getElementById('card_name').value.trim();
         try {
-            const res  = await fetch('/api/php-versions', { headers: HEADERS });
+            const res  = await fetch('/api/payment/cards', {
+                method:  'POST', headers: HEADERS,
+                body:    JSON.stringify({ card_number: num, expiry: exp, cvc, holder_name: name }),
+            });
             const data = await res.json();
-            document.getElementById('php-source').textContent =
-                data.source === 'php.net' ? '✓ php.net 실시간' : '⚠ 오프라인 데이터';
-            list.innerHTML = data.versions.map(v => `
-                <div class="php-card border border-white/10 rounded-xl p-4 ${v.version.startsWith(selectedPhp.split('.')[0]+'.'+selectedPhp.split('.')[1])?'selected':''} ${!v.supported?'eol':''}"
-                     onclick="selectPhp('${v.version}', this)">
-                    <div class="flex justify-between items-center">
-                        <div>
-                            <span class="font-mono font-bold text-lg">${v.display_version||('PHP '+v.version.split('.').slice(0,2).join('.'))}</span>
-                            <span class="text-xs text-gray-500 ml-1">(${v.version})</span>
-                            ${v.is_security_release?'<span class="text-xs bg-green-900/40 border border-green-500/30 text-green-400 px-2 py-0.5 rounded-full ml-2">보안 릴리스</span>':''}
-                            ${!v.supported?'<span class="text-xs bg-red-900/40 border border-red-500/30 text-red-400 px-2 py-0.5 rounded-full ml-2">'+(v.support_label||'EOL')+'</span>':'<span class="text-xs bg-blue-900/40 border border-blue-500/30 text-blue-400 px-2 py-0.5 rounded-full ml-2">'+(v.support_label||'지원됨')+'</span>'}
-                        </div>
-                        <div class="text-right">
-                            <div class="text-xs text-gray-500">${v.date||''}</div>
-                            <i class="fas fa-check-circle text-indigo-400 selected-icon hidden"></i>
-                        </div>
-                    </div>
-                </div>
-            `).join('');
-            const cards = list.querySelectorAll('.php-card');
-            if (cards.length > 0) selectPhp(data.versions[0].version, cards[0]);
-            loading.classList.add('hidden');
-            list.classList.remove('hidden');
-        } catch {
-            loading.innerHTML = `<p class="text-red-400 text-sm">PHP 버전을 불러오지 못했습니다. 기본값(8.2)을 사용합니다.</p>`;
-            selectedPhp = '8.2';
-        }
+            return data.method_id || data.id || null;
+        } catch { return 'new_card'; }
     }
 
-    function selectPhp(version, el) {
-        selectedPhp = version;
-        document.querySelectorAll('.php-card').forEach(c => {
-            c.classList.remove('selected');
-            c.querySelector('.selected-icon')?.classList.add('hidden');
-        });
-        el.classList.add('selected');
-        el.querySelector('.selected-icon')?.classList.remove('hidden');
-    }
-
-    function toggleWpPass() {
-        const inp = document.getElementById('wp_admin_pass');
-        const ico = document.getElementById('wp-eye');
-        inp.type = inp.type === 'password' ? 'text' : 'password';
-        ico.classList.toggle('fa-eye');
-        ico.classList.toggle('fa-eye-slash');
-    }
-
-    // ── 호스팅 생성 ──────────────────────────────────────────────────────────
+    // ─────────────────────────────────────────────────────────────────────────
+    // 호스팅 생성
+    // ─────────────────────────────────────────────────────────────────────────
     async function createHosting() {
         const site_name      = document.getElementById('site_name').value.trim();
         const wp_admin_user  = document.getElementById('wp_admin_user').value.trim();
         const wp_admin_pass  = document.getElementById('wp_admin_pass').value;
         const wp_admin_email = document.getElementById('wp_admin_email').value.trim();
+        const cf_api_key     = document.getElementById('cf_api_key').value.trim();
+        const cf_email       = document.getElementById('cf_email').value.trim();
+        const initial_domain = document.getElementById('initial_domain').value.trim();
 
-        if (!site_name)     { showAlert('사이트 이름을 입력해주세요.'); return; }
-        if (!wp_admin_user) { showAlert('WordPress 관리자 아이디를 입력해주세요.'); return; }
-        if (!wp_admin_pass || wp_admin_pass.length < 8) {
-            showAlert('WordPress 관리자 비밀번호는 8자 이상이어야 합니다.'); return;
-        }
-        if (!wp_admin_email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(wp_admin_email)) {
-            showAlert('올바른 관리자 이메일을 입력해주세요.'); return;
-        }
+        if (!site_name)      { showAlert('사이트 이름을 입력해주세요.'); return; }
+        if (!wp_admin_user)  { showAlert('관리자 아이디를 입력해주세요.'); return; }
+        if (!wp_admin_pass || wp_admin_pass.length < 8)
+            { showAlert('비밀번호는 8자 이상이어야 합니다.'); return; }
+        if (!wp_admin_email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(wp_admin_email))
+            { showAlert('올바른 관리자 이메일을 입력해주세요.'); return; }
 
         const btn = document.getElementById('create-btn');
         btn.disabled = true;
         btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i> 생성 요청 중...';
 
+        // 결제수단 ID 수집 (유료 플랜)
+        let payment_method_id = null;
+        if (selectedPlan !== 'free') {
+            try { payment_method_id = await getPaymentMethodId(); }
+            catch { showAlert('결제수단 등록에 실패했습니다.'); btn.disabled=false; btn.innerHTML='<i class="fas fa-rocket mr-2"></i> 호스팅 생성 시작'; return; }
+        }
+
         try {
             const res  = await fetch('/api/sites', {
                 method:  'POST',
                 headers: HEADERS,
-                body:    JSON.stringify({ site_name, php_version: selectedPhp, wp_admin_user, wp_admin_pass, wp_admin_email }),
+                body:    JSON.stringify({
+                    site_name, php_version: '8.2',
+                    wp_admin_user, wp_admin_pass, wp_admin_email,
+                    cf_api_key: cf_api_key || undefined,
+                    cf_email:   cf_email   || undefined,
+                    initial_domain: initial_domain || undefined,
+                    plan: selectedPlan,
+                    payment_method_id: payment_method_id || undefined,
+                }),
             });
             const data = await res.json();
 
             if (res.ok && data.success) {
                 createdSiteId = data.id;
 
-                // 스텝 인디케이터 완료 처리
-                [1,2,3].forEach(i => {
-                    document.getElementById(`step-${i}`).classList.add('hidden');
-                    const ind = document.getElementById(`step-${i}-ind`);
-                    ind.className = 'step-done flex-1 p-3 border rounded-xl text-center text-sm font-bold text-green-400';
-                    ind.innerHTML = `<span>✓</span> ${i===1?'기본 정보':i===2?'PHP 버전':'WP 설정'}`;
-                });
+                // 스텝 인디케이터 → 완료 처리
+                for (let i = 1; i <= 5; i++) {
+                    document.getElementById(`step-${i}`)?.classList.add('hidden');
+                    const ind = document.getElementById(`ind-${i}`);
+                    ind.className = 'step-done flex-1 p-2.5 border rounded-xl text-center text-xs font-bold text-green-400';
+                    ind.innerHTML = `<span>✓</span> ${STEP_LABELS[i]}`;
+                }
 
                 // 프로비저닝 화면 표시
                 document.getElementById('step-provisioning').classList.remove('hidden');
-                addLog(`호스팅 ID: ${data.id} 생성 시작`);
+                document.getElementById('step-indicators').classList.add('hidden');
+                addLog(`✅ 호스팅 생성 요청 성공 (ID: ${data.id})`);
+                addLog(`📋 플랜: ${PLAN_INFO[selectedPlan].label}`);
+                if (cf_api_key) addLog('🌐 Cloudflare DNS 자동 설정 모드');
+                if (initial_domain) addLog(`🔗 도메인: ${initial_domain}`);
 
-                // 경과 타이머 시작
                 startElapsedTimer();
 
-                // 크롬 알림 권한 확인
-                if (Notification.permission === 'granted') {
-                    document.getElementById('notif-banner').remove();
-                } else if (Notification.permission === 'denied') {
-                    document.getElementById('notif-banner').remove();
+                if (Notification.permission === 'granted' || Notification.permission === 'denied') {
+                    document.getElementById('notif-banner')?.remove();
                 }
 
-                // 폴링 시작 (15초 간격 - API rate limit 고려)
-                pollInterval = setInterval(pollStatus, 15000);
-                // 첫 폴링은 5초 후
-                setTimeout(pollStatus, 5000);
+                // 폴링 시작 (10초 간격)
+                pollInterval = setInterval(pollStatus, 10000);
+                setTimeout(pollStatus, 4000);
 
             } else {
                 showAlert(data.error || '호스팅 생성에 실패했습니다.');
                 btn.disabled = false;
-                btn.innerHTML = '<i class="fas fa-rocket mr-2"></i> 호스팅 생성';
+                btn.innerHTML = '<i class="fas fa-rocket mr-2"></i> 호스팅 생성 시작';
             }
         } catch {
             showAlert('네트워크 오류가 발생했습니다.');
             btn.disabled = false;
-            btn.innerHTML = '<i class="fas fa-rocket mr-2"></i> 호스팅 생성';
+            btn.innerHTML = '<i class="fas fa-rocket mr-2"></i> 호스팅 생성 시작';
         }
     }
 
-    // 페이지 언로드 시 폴링 정리
     window.addEventListener('beforeunload', () => {
         if (pollInterval) clearInterval(pollInterval);
         stopElapsedTimer();

@@ -7,13 +7,14 @@
 import { jsonOk, jsonErr, requireAuth, PLAN_LIMITS } from "../_shared.js";
 import {
   pickGithubToken,
-  createGithubRepo,
-  uploadFileToGithub,
-  getRepoName,
   ghReq,
-  uploadWordPressFilesBackground,
 } from "./github-storage.js";
-import { getCmsZipBase64 } from "./admin/cms-settings.js";
+import {
+  provisionGithubPagesHosting,
+  getGithubPagesUrl,
+  setupGithubPagesDns,
+  configureGithubPagesCustomDomainWithToken,
+} from "./github-pages-hosting.js";
 
 // ── Cloudflare API 헬퍼 ────────────────────────────────────────────────────
 
@@ -1334,7 +1335,15 @@ export async function onRequestGet(context) {
       : env.DB.prepare(query).bind(payload.id);
 
     const { results } = await stmt.all();
-    return jsonOk({ success: true, sites: results });
+    // GitHub Pages URL 계산 (primary_domain 없을 때 참고용)
+    const sites = (results || []).map(s => ({
+      ...s,
+      github_pages_url: (s.github_repo_owner && s.github_repo_name)
+        ? getGithubPagesUrl(s.github_repo_owner, s.github_repo_name)
+        : null,
+      hosting_type: "github_pages",
+    }));
+    return jsonOk({ success: true, sites });
   } catch (e) {
     return jsonErr("조회 오류: " + e.message, 500);
   }
@@ -1441,135 +1450,55 @@ export async function onRequestPost(context) {
     ).bind(id, msg, level).run().catch(() => {});
   };
 
-  // ── 백그라운드 프로비저닝 ────────────────────────────────────────────────
+  // ── 백그라운드 프로비저닝 (GitHub Pages + GitHub repo as DB/Storage) ────────
   const provision = async () => {
     try {
-      await log("호스팅 프로비저닝 시작");
+      await log("호스팅 프로비저닝 시작 (GitHub Pages)");
 
-      // 1) GitHub repo 생성
-      let githubOwner = null;
-      let githubRepoName = null;
-      let activeGhToken = null;
+      // GitHub Pages 호스팅 생성
+      // - GitHub 레포를 DB + 스토리지로 사용 (D1/KV 없음)
+      // - _db/*.json = 데이터, _content/**/*.md = 본문
+      // - Astro 빌드 → gh-pages 브랜치 → GitHub Pages 서빙
+      const ghResult = await provisionGithubPagesHosting({
+        env, siteId: id, siteName: site_name.trim(),
+        adminUser: wp_admin_user,
+        adminPass: wp_admin_pass,
+        adminEmail: wp_admin_email,
+        log,
+      });
 
-      if (hasGithub) {
-        await log("GitHub 저장소 생성 중...");
-        const ghResult = await provisionGithubRepo(env, id, site_name.trim());
-        if (ghResult) {
-          githubOwner    = ghResult.owner;
-          githubRepoName = ghResult.repoName;
-          activeGhToken  = ghResult.token;
-          await log(`GitHub 저장소 생성 완료: ${githubOwner}/${githubRepoName}`);
-        } else {
-          await log("GitHub 저장소 생성 실패 (계속 진행)", "warning");
-        }
-      } else {
-        await log("GitHub 토큰 미설정 - 관리자 설정에서 토큰 추가 필요", "warning");
+      if (!ghResult) {
+        await log("GitHub Pages 호스팅 생성 실패", "error");
+        await env.DB.prepare("UPDATE sites SET status = 'error' WHERE id = ?").bind(id).run().catch(() => {});
+        return;
       }
 
-      // 2) CF D1 DB 생성 (CF API 있을 때만)
-      let d1Id = null;
-      let kvId = null;
-      let workerName = `cp-site-${shortId}`;
+      const { owner: githubOwner, repoName: githubRepoName, pagesUrl } = ghResult;
 
-      if (cf && cfAccountId) {
-        const d1Name = `cp-db-${shortId}`;
-        await log(`D1 데이터베이스 생성 중: ${d1Name}`);
-        const d1 = await createCfD1(cf, cfAccountId, d1Name).catch(() => null);
-        d1Id = d1?.id || null;
-        if (d1Id) await log(`D1 생성 완료: ${d1Name} (${d1Id})`);
-        else      await log("D1 생성 실패 (계속 진행)", "warning");
-
-        // 3) CF KV 생성
-        const kvName = `cp-kv-${shortId}`;
-        await log(`KV 네임스페이스 생성 중: ${kvName}`);
-        const kv = await createCfKV(cf, cfAccountId, kvName).catch(() => null);
-        kvId = kv?.id || null;
-        if (kvId) await log(`KV 생성 완료: ${kvName} (${kvId})`);
-        else      await log("KV 생성 실패 (계속 진행)", "warning");
-
-        // 4) CF Worker 생성 + D1/KV 바인딩 연결
-        await log(`Cloudflare Worker 생성 중: ${workerName}`);
-        const workerOk = await createCfWorkerWithBindings({
-          cf, accountId: cfAccountId, workerName, siteId: id,
-          githubOwner: githubOwner || "", githubRepo: githubRepoName || "",
-          d1Id, kvId,
-          jwtSecret:   env.JWT_SECRET || "",
-          githubToken: activeGhToken  || env.GITHUB_TOKEN || "",
-          adminUser:  wp_admin_user,
-          adminPass:  wp_admin_pass,
-          adminEmail: wp_admin_email,
-          env, // ASSETS 바인딩으로 worker-wp.js 소스 취득
-        }).catch((e) => { console.error("[worker-create] 오류:", e.message); return false; });
-
-        if (workerOk) {
-          await log(`Worker 생성 완료: ${workerName}`);
-          const subOk = await enableWorkersDevSubdomain(cf, cfAccountId, workerName).catch(() => false);
-          if (subOk) await log(`workers.dev 서브도메인 활성화: ${workerName}.workers.dev`);
-        } else {
-          await log("Worker 생성 실패 (계속 진행)", "warning");
-        }
-
-        // 5) WordPress D1 초기화 SQL 실행
-        if (d1Id) {
-          const tempDomain = `${workerName}.workers.dev`;
-          await log("WordPress 데이터베이스 초기화 중...");
-          const initSql = await buildWpInitSql(id, tempDomain, wp_admin_user, wp_admin_pass, wp_admin_email);
-          const execRes = await cf.post(
-            `/accounts/${cfAccountId}/d1/database/${d1Id}/exec`,
-            { sql: initSql }
-          ).catch(() => ({ success: false }));
-
-          if (execRes.success) {
-            await log("WordPress DB 초기화 완료");
-          } else {
-            await log("exec API 실패, statement별 실행 재시도...", "warning");
-            const statements = initSql.split(";").map(s => s.trim()).filter(s => s.length > 10 && !s.startsWith("--"));
-            let okCnt = 0, failCnt = 0;
-            for (const stmt of statements) {
-              const r = await cf.post(`/accounts/${cfAccountId}/d1/database/${d1Id}/query`, { sql: stmt + ";" }).catch(() => ({ success: false }));
-              if (r.success) okCnt++; else failCnt++;
-            }
-            await log(`WordPress DB 초기화: 성공 ${okCnt}개, 실패 ${failCnt}개`, failCnt > okCnt ? "error" : "info");
-          }
-        }
-      } else {
-        await log("CF API 키 미설정 — Worker/D1/KV 자동 생성 건너뜀 (GitHub 저장소만 생성)", "warning");
-      }
-
-      // 7) GitHub에 WordPress 파일 백그라운드 업로드
-      if (githubOwner && githubRepoName && activeGhToken) {
-        await log("GitHub 저장소 초기화 중 (wp-content 구조 + GitHub Actions 워크플로우)...");
-        // 백그라운드: wp-content/uploads 구조 + GitHub Actions workflow 생성
-        // WordPress 코어는 Worker에서 WordPress/WordPress 공식 레포를 직접 참조
-        uploadWordPressFilesBackground(
-          activeGhToken, githubOwner, githubRepoName, id, log
-        ).catch(e => log(`GitHub 저장소 초기화 오류: ${e.message}`, "warning"));
-        await log("GitHub Actions 파일 관리자 워크플로우가 자동으로 활성화됩니다. push 이벤트마다 자동 검증이 실행됩니다.");
-      }
-
-      // 7-b) CMS 배포: 어드민에 저장된 zip → CMS GitHub 레포 업로드 → Cloudflare Worker 배포
-      await deployCmsForSite({ env, cf, cfAccountId, siteId: id, workerName, log }).catch(
-        e => log(`CMS 배포 건너뜀: ${e.message}`, "warning")
-      );
-
-      // 8) DB 업데이트 (active 상태로)
-      const finalDomain = (cf && cfAccountId)
-        ? `${workerName}.workers.dev`
-        : `${id.slice(0,8)}.cloudpress.app`; // CF 없을 때 임시 도메인
-
+      // DB 업데이트
+      // ⚠️ primary_domain은 커스텀 도메인 추가 전까지 null
+      // GitHub Pages 기본 URL은 참고용으로만 저장
       await env.DB.prepare(
         `UPDATE sites SET
           primary_domain    = ?,
-          cf_worker_name    = ?,
-          cf_d1_id          = ?,
-          cf_kv_id          = ?,
+          cf_worker_name    = NULL,
+          cf_d1_id          = NULL,
+          cf_kv_id          = NULL,
           github_repo_owner = ?,
           github_repo_name  = ?,
-          status = 'active'
+          status = 'pending_domain'
          WHERE id = ?`
-      ).bind(finalDomain, workerName, d1Id, kvId, githubOwner, githubRepoName, id).run();
+      ).bind(
+        null,              // 커스텀 도메인 설정 전 null → 접속 불가
+        githubOwner,
+        githubRepoName,
+        id
+      ).run();
 
-      await log(`호스팅 생성 완료! 도메인: https://${finalDomain}`);
+      await log(`✅ GitHub Pages 호스팅 생성 완료!`);
+      await log(`📦 레포: https://github.com/${githubOwner}/${githubRepoName}`);
+      await log(`🌐 Pages URL (빌드 후): ${pagesUrl}`);
+      await log(`⚠️ 도메인 관리에서 커스텀 도메인을 추가해야 접속 가능합니다.`);
 
     } catch (e) {
       await log("프로비저닝 오류: " + e.message, "error");
@@ -1578,6 +1507,7 @@ export async function onRequestPost(context) {
   };
 
   // waitUntil: Pages Functions와 Worker 모두 호환
+    // waitUntil: Pages Functions와 Worker 모두 호환
   // worker.js에서 makeContext의 waitUntil이 더미일 수 있으므로
   // 실제 Workers ctx.waitUntil이 있으면 사용, 없으면 백그라운드 실행
   const realWaitUntil = context._workerCtx?.waitUntil?.bind(context._workerCtx);
@@ -1590,13 +1520,11 @@ export async function onRequestPost(context) {
   }
 
   return jsonOk({
-    success:        true,
+    success:  true,
     id,
-    message:        `호스팅 생성이 시작되었습니다. Cloudflare 리소스(Worker/D1/KV)${hasGithub ? "와 GitHub 저장소" : ""}를 자동으로 생성 중입니다.`,
-    status:         "provisioning",
-    wp_admin_user,
-    github_enabled: hasGithub,
-    note:           "WordPress 코어는 WordPress/WordPress 공식 레포에서 직접 서빙됩니다. GitHub Actions 파일 관리자가 자동 활성화됩니다.",
+    message:  "GitHub Pages 호스팅 생성이 시작되었습니다. GitHub 저장소와 Astro 소스를 자동으로 구성 중입니다.",
+    status:   "provisioning",
+    note:     "도메인 관리에서 커스텀 도메인을 추가해야 접속 가능합니다. GitHub 레포가 DB + 스토리지로 사용됩니다.",
   });
 }
 
@@ -1654,30 +1582,8 @@ export async function onRequestDelete(context) {
   if (site.user_id !== payload.id && payload.role !== "admin")
     return jsonErr("권한이 없습니다.", 403);
 
-  // CF 리소스 정리
-  try {
-    const user = await env.DB.prepare(
-      "SELECT cf_global_api_key, cf_email FROM users WHERE id = ?"
-    ).bind(site.user_id).first();
-
-    if (user?.cf_global_api_key && user?.cf_email) {
-      const cf = new CfApi(user.cf_global_api_key, user.cf_email, null);
-      const accountId = env.CF_ACCOUNT_ID || await getCfAccountId(cf).catch(() => null);
-      if (accountId) {
-        if (site.cf_worker_name) {
-          await cf.del(`/accounts/${accountId}/workers/scripts/${site.cf_worker_name}`).catch(() => {});
-        }
-        if (site.cf_d1_id) {
-          await cf.del(`/accounts/${accountId}/d1/database/${site.cf_d1_id}`).catch(() => {});
-        }
-        if (site.cf_kv_id) {
-          await cf.del(`/accounts/${accountId}/storage/kv/namespaces/${site.cf_kv_id}`).catch(() => {});
-        }
-      }
-    }
-  } catch (e) {
-    console.warn("[sites/delete] CF cleanup:", e.message);
-  }
+  // GitHub 레포는 보존 (사용자 데이터 안전을 위해 자동 삭제 안 함)
+  // 필요 시 GitHub에서 직접 삭제 가능
 
   try {
     await env.DB.prepare("DELETE FROM domain_aliases WHERE site_id = ?").bind(id).run();

@@ -124,6 +124,35 @@ export async function onRequestGet(context) {
       return jsonOk({ success: true, settings });
     }
 
+    // ── 스토리지 할당량 통계 ─────────────────────────────────────────────
+    if (path === "quota-stats") {
+      // GitHub Storage 사용량: github_storage_files 테이블이 있으면 집계
+      let usedBytes = 0;
+      try {
+        const sizeRow = await env.DB.prepare(
+          "SELECT SUM(file_size) as total FROM github_storage_files"
+        ).first().catch(() => null);
+        usedBytes = sizeRow?.total || 0;
+      } catch { /* 테이블 없으면 0 */ }
+
+      // 사이트별 할당량 집계 (sites 테이블의 storage_used 컬럼이 있으면 사용)
+      let siteStats = [];
+      try {
+        const { results } = await env.DB.prepare(
+          "SELECT id, site_name, primary_domain FROM sites ORDER BY rowid DESC LIMIT 100"
+        ).all().catch(() => ({ results: [] }));
+        siteStats = results || [];
+      } catch { /* ignore */ }
+
+      return jsonOk({
+        success: true,
+        usedBytes,
+        totalBytes: 18 * 1024 * 1024 * 1024, // 18GB 기본 할당
+        siteCount: siteStats.length,
+        sites: siteStats,
+      });
+    }
+
     return jsonErr("알 수 없는 경로입니다.", 404);
   } catch (e) {
     return jsonErr("서버 오류: " + e.message, 500);

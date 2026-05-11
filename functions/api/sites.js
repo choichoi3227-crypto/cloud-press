@@ -252,7 +252,7 @@ export async function onRequestPost(context) {
         return;
       }
 
-      const { owner, repoName, pagesUrl, pagesProject, cfDomain } = result;
+      const { owner, repoName, pagesUrl, pagesProject, cfDomain, d1Id, kvSessionsId, kvCacheId, workerName } = result;
 
       // DB 최종 업데이트
       const primaryDomain = cfDomain || pagesUrl?.replace("https://", "").split("/")[0] || null;
@@ -263,6 +263,9 @@ export async function onRequestPost(context) {
           github_repo_name  = ?,
           cf_pages_url      = ?,
           cf_pages_project  = ?,
+          cf_worker_name    = ?,
+          cf_d1_id          = ?,
+          cf_kv_id          = ?,
           plan              = ?,
           status            = 'active'
          WHERE id = ?`
@@ -272,6 +275,9 @@ export async function onRequestPost(context) {
         repoName,
         pagesUrl,
         pagesProject,
+        workerName   || null,
+        d1Id         || null,
+        kvSessionsId || null,
         plan,
         id
       ).run();

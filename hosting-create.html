@@ -93,9 +93,8 @@
         <div class="flex gap-2 mb-8" id="step-indicators">
             <div id="ind-1" class="step-active flex-1 p-2.5 border rounded-xl text-center text-xs font-bold"><span class="text-blue-400">1</span> 기본 정보</div>
             <div id="ind-2" class="step-inactive flex-1 p-2.5 border rounded-xl text-center text-xs font-bold text-gray-600"><span>2</span> 플랜 선택</div>
-            <div id="ind-3" class="step-inactive flex-1 p-2.5 border rounded-xl text-center text-xs font-bold text-gray-600"><span>3</span> Cloudflare</div>
-            <div id="ind-4" class="step-inactive flex-1 p-2.5 border rounded-xl text-center text-xs font-bold text-gray-600"><span>4</span> 도메인</div>
-            <div id="ind-5" class="step-inactive flex-1 p-2.5 border rounded-xl text-center text-xs font-bold text-gray-600"><span>5</span> 관리자</div>
+            <div id="ind-3" class="step-inactive flex-1 p-2.5 border rounded-xl text-center text-xs font-bold text-gray-600"><span>3</span> 도메인</div>
+            <div id="ind-4" class="step-inactive flex-1 p-2.5 border rounded-xl text-center text-xs font-bold text-gray-600"><span>4</span> 관리자</div>
         </div>
 
         <!-- 알림 -->
@@ -129,6 +128,17 @@
                 class="w-full bg-blue-600 hover:bg-blue-500 py-4 rounded-xl font-bold text-base transition flex items-center justify-center gap-2">
                 다음 단계 <i class="fas fa-arrow-right"></i>
             </button>
+
+            <!-- CF 상태 표시 -->
+            <div class="flex items-center justify-between mt-1 px-1">
+                <span class="text-xs text-gray-600"><i class="fas fa-cloud mr-1"></i>Cloudflare API 상태</span>
+                <span id="cf-status-badge" class="text-xs px-3 py-1 rounded-full bg-white/5 border border-white/10 text-gray-500">
+                    확인 중...
+                </span>
+            </div>
+            <a href="/account" class="text-xs text-blue-500 hover:underline px-1" id="cf-account-link" style="display:none">
+                → 내 정보에서 Cloudflare API 등록하기
+            </a>
         </div>
 
         <!-- ══════════════════════════════════════════════
@@ -158,7 +168,6 @@
                             <div class="flex items-center gap-1.5 text-red-400/70"><i class="fas fa-times w-3"></i> 커스텀 도메인 불가</div>
                             <div class="flex items-center gap-1.5 text-red-400/70"><i class="fas fa-times w-3"></i> 자동 백업 불가</div>
                         </div>
-                        <div class="mt-3 text-xs text-gray-600">초과: 스토리지 1GB당 ₩1,900 / 트래픽 70% 초과당 ₩2,300 (다음달 청구)</div>
                     </div>
 
                     <!-- STARTER -->
@@ -179,7 +188,6 @@
                             <div class="flex items-center gap-1.5 text-green-400"><i class="fas fa-check w-3"></i> 커스텀 도메인</div>
                             <div class="flex items-center gap-1.5 text-green-400"><i class="fas fa-check w-3"></i> 자동 백업</div>
                         </div>
-                        <div class="mt-3 text-xs text-gray-600">초과: 스토리지 1GB당 ₩1,900 / 트래픽 70% 초과당 ₩2,300 (다음달 청구)</div>
                     </div>
 
                     <!-- PRO -->
@@ -204,21 +212,16 @@
                             <div class="flex items-center gap-1.5 text-green-400"><i class="fas fa-check w-3"></i> 자동 백업</div>
                             <div class="flex items-center gap-1.5 text-green-400"><i class="fas fa-check w-3"></i> SSH 접근</div>
                         </div>
-                        <div class="mt-3 text-xs text-gray-600">초과: 스토리지 1GB당 ₩1,900 / 트래픽은 무제한 (초과 요금 없음)</div>
                     </div>
                 </div>
 
-                <!-- 유료 플랜 결제수단 섹션 (선택 시 표시) -->
+                <!-- 유료 플랜 결제수단 섹션 (선택 시 표시, 어드민 제외) -->
                 <div id="payment-section" class="hidden mt-5 pt-5 border-t border-white/10">
                     <div class="text-sm font-bold text-gray-300 mb-4 flex items-center gap-2">
                         <i class="fas fa-credit-card text-yellow-400"></i> 결제수단 등록
                         <span class="text-red-400 text-xs ml-1">* 유료 플랜 필수</span>
                     </div>
-
-                    <!-- 저장된 카드 목록 -->
                     <div id="saved-cards" class="space-y-2 mb-4"></div>
-
-                    <!-- 새 카드 입력 -->
                     <div id="new-card-form" class="space-y-3">
                         <div class="grid grid-cols-2 gap-3">
                             <div class="col-span-2">
@@ -245,12 +248,6 @@
                             카드 정보는 TossPayments로 안전하게 전송되며 서버에 저장되지 않습니다.
                         </div>
                     </div>
-
-                    <div id="payment-notice" class="mt-3 p-3 bg-yellow-950/30 border border-yellow-500/25 rounded-xl text-xs text-yellow-300">
-                        <i class="fas fa-info-circle mr-1"></i>
-                        선택 플랜의 첫 월 요금은 호스팅 생성 완료 후 청구됩니다.
-                        스토리지·트래픽 초과분은 다음 달 청구서에 반영됩니다.
-                    </div>
                 </div>
             </div>
 
@@ -265,70 +262,9 @@
         </div>
 
         <!-- ══════════════════════════════════════════════
-             STEP 3 — Cloudflare API
+             STEP 3 — 도메인
         ══════════════════════════════════════════════ -->
         <div id="step-3" class="hidden space-y-5">
-            <div class="section-card space-y-5">
-                <div class="section-title"><i class="fas fa-cloud text-orange-400"></i> Cloudflare Pages 설정</div>
-
-                <div class="p-4 bg-blue-950/30 border border-blue-500/25 rounded-xl text-sm text-blue-200 space-y-2">
-                    <div class="font-bold">Cloudflare Pages 미러링 방식</div>
-                    <ul class="text-blue-200/75 text-xs space-y-1 ml-4 list-disc">
-                        <li>GitHub 레포에 변환된 Astro 코드가 저장됩니다</li>
-                        <li>Cloudflare Pages가 해당 레포를 직접 빌드·배포합니다 (미러링)</li>
-                        <li>Pages에는 미러링 설정 + 바인딩 코드만 존재합니다</li>
-                        <li>D1/KV 바인딩이 자동으로 연동됩니다</li>
-                    </ul>
-                </div>
-
-                <div>
-                    <label class="cp-label">Cloudflare API 토큰
-                        <span class="text-gray-600 font-normal ml-1">(선택 — Pages 프로젝트 자동 생성 시 필요)</span>
-                    </label>
-                    <div class="input-wrap">
-                        <input id="cf_api_key" type="password" class="cp-input pr-12"
-                            placeholder="Cloudflare 대시보드 → My Profile → API Tokens → Create Token">
-                        <button class="eye-btn" onclick="toggleVis('cf_api_key', this)">
-                            <i class="fas fa-eye"></i>
-                        </button>
-                    </div>
-                    <p class="text-xs text-gray-600 mt-2">
-                        <i class="fas fa-external-link-alt mr-1"></i>
-                        <a href="https://dash.cloudflare.com/profile/api-tokens" target="_blank" class="text-blue-400 hover:underline">
-                            Cloudflare API 토큰 발급 (Cloudflare Pages:Edit 권한 필요)
-                        </a>
-                    </p>
-                </div>
-
-                <div>
-                    <label class="cp-label">Cloudflare 계정 ID
-                        <span class="text-gray-600 font-normal ml-1">(API 토큰 사용 시 필수)</span>
-                    </label>
-                    <input id="cf_email" type="text" class="cp-input" placeholder="Cloudflare 대시보드 우측 사이드바에서 확인">
-                </div>
-
-                <div id="cf-validate-result" class="hidden p-3 rounded-xl text-xs"></div>
-
-                <div class="p-3 bg-white/3 border border-white/8 rounded-xl text-xs text-gray-500">
-                    <i class="fas fa-info-circle mr-1 text-gray-600"></i>
-                    API 토큰 없이도 호스팅 생성 가능합니다. 단, Cloudflare 대시보드에서 Pages 프로젝트를 수동으로 GitHub 레포와 연동해야 합니다.
-                </div>
-            </div>
-
-            <div class="flex gap-3">
-                <button onclick="goStep(2)" class="flex-1 border border-white/20 py-4 rounded-xl font-bold hover:bg-white/5 transition">
-                    <i class="fas fa-arrow-left mr-2"></i> 이전
-                </button>
-                <button onclick="goStep(4)" class="flex-1 bg-blue-600 hover:bg-blue-500 py-4 rounded-xl font-bold transition">
-                    다음 단계 <i class="fas fa-arrow-right ml-2"></i>
-                </button>
-            </div>
-        </div>
-
-        <!-- ══════════════════════════════════════════════
-             STEP 4 — 도메인
-        ══════════════════════════════════════════════ -->
-        <div id="step-4" class="hidden space-y-5">
             <div class="section-card space-y-5">
                 <div class="section-title"><i class="fas fa-globe text-green-400"></i> 도메인 설정</div>
 
@@ -347,8 +283,7 @@
 
                     <div id="domain-cf-warning" class="hidden mt-3 p-3 bg-yellow-950/30 border border-yellow-500/25 rounded-xl text-xs text-yellow-300">
                         <i class="fas fa-exclamation-triangle mr-1"></i>
-                        Cloudflare API 미입력 상태입니다. 도메인 DNS를 입력해도 자동 설정되지 않으며
-                        호스팅 상세 → 도메인 탭에서 수동 설정이 필요합니다.
+                        Cloudflare API가 등록되지 않았습니다. <a href="/account" class="underline">내 정보</a>에서 등록하면 DNS가 자동 설정됩니다. 지금은 수동 설정이 필요합니다.
                     </div>
                 </div>
 
@@ -364,19 +299,19 @@
             </div>
 
             <div class="flex gap-3">
-                <button onclick="goStep(3)" class="flex-1 border border-white/20 py-4 rounded-xl font-bold hover:bg-white/5 transition">
+                <button onclick="goStep(2)" class="flex-1 border border-white/20 py-4 rounded-xl font-bold hover:bg-white/5 transition">
                     <i class="fas fa-arrow-left mr-2"></i> 이전
                 </button>
-                <button onclick="goStep(5)" class="flex-1 bg-blue-600 hover:bg-blue-500 py-4 rounded-xl font-bold transition">
+                <button onclick="goStep(4)" class="flex-1 bg-blue-600 hover:bg-blue-500 py-4 rounded-xl font-bold transition">
                     다음 단계 <i class="fas fa-arrow-right ml-2"></i>
                 </button>
             </div>
         </div>
 
         <!-- ══════════════════════════════════════════════
-             STEP 5 — 관리자 설정 + 최종 확인
+             STEP 4 — 관리자 설정 + 최종 확인
         ══════════════════════════════════════════════ -->
-        <div id="step-5" class="hidden space-y-5">
+        <div id="step-4" class="hidden space-y-5">
             <div class="section-card space-y-5">
                 <div class="section-title"><i class="fas fa-user-shield text-indigo-400"></i> 관리자 계정 설정</div>
 
@@ -448,7 +383,7 @@
             </div>
 
             <div class="flex gap-3">
-                <button onclick="goStep(4)" class="flex-1 border border-white/20 py-4 rounded-xl font-bold hover:bg-white/5 transition">
+                <button onclick="goStep(3)" class="flex-1 border border-white/20 py-4 rounded-xl font-bold hover:bg-white/5 transition">
                     <i class="fas fa-arrow-left mr-2"></i> 이전
                 </button>
                 <button onclick="createHosting()" id="create-btn"
@@ -784,51 +719,37 @@
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // CF API 검증
+    // 페이지 로드 시 CF 설정 여부 확인 (account.html에서 저장된 값 사용)
     // ─────────────────────────────────────────────────────────────────────────
-    async function validateCfApi() {
-        const apiKey = document.getElementById('cf_api_key').value.trim();
-        const email  = document.getElementById('cf_email').value.trim();
-        const result = document.getElementById('cf-validate-result');
-        const btn    = document.getElementById('cf-validate-btn');
-
-        if (!apiKey || !email) {
-            showAlert('API 키와 이메일을 모두 입력해주세요.');
-            return;
-        }
-
-        btn.disabled = true;
-        btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i> 검증 중...';
-        result.classList.add('hidden');
-
+    async function checkCfStatus() {
         try {
-            const res  = await fetch('/api/account', {
-                method:  'PUT',
-                headers: HEADERS,
-                body:    JSON.stringify({ cf_global_api_key: apiKey, cf_email: email }),
-            });
+            const res  = await fetch('/api/account', { headers: HEADERS });
             const data = await res.json();
-            if (data.success) {
+            const badge = document.getElementById('cf-status-badge');
+            const link  = document.getElementById('cf-account-link');
+            if (data.hasCfKey) {
                 cfValidated = true;
-                result.className = 'p-3 rounded-xl text-xs bg-green-950/40 border border-green-500/30 text-green-400';
-                result.textContent = '✅ Cloudflare API 검증 완료. DNS 자동 설정이 활성화됩니다.';
+                if (badge) {
+                    badge.className = 'text-xs px-3 py-1 rounded-full bg-green-950/40 border border-green-500/30 text-green-400';
+                    badge.textContent = '✅ 등록됨';
+                }
             } else {
-                result.className = 'p-3 rounded-xl text-xs bg-red-950/40 border border-red-500/30 text-red-400';
-                result.textContent = '❌ 검증 실패: ' + (data.error || '올바른 API 키가 아닙니다.');
+                if (badge) {
+                    badge.className = 'text-xs px-3 py-1 rounded-full bg-yellow-950/30 border border-yellow-500/25 text-yellow-400';
+                    badge.textContent = '⚠️ 미등록';
+                }
+                if (link) link.style.display = 'block';
             }
-        } catch {
-            result.className = 'p-3 rounded-xl text-xs bg-red-950/40 border border-red-500/30 text-red-400';
-            result.textContent = '❌ 네트워크 오류';
-        }
-        result.classList.remove('hidden');
-        btn.disabled = false;
-        btn.innerHTML = '<i class="fas fa-check-circle mr-2"></i> API 키 검증';
+        } catch {}
     }
+
+    // 초기화
+    checkCfStatus();
 
     // ─────────────────────────────────────────────────────────────────────────
     // 스텝 이동
     // ─────────────────────────────────────────────────────────────────────────
-    const STEP_LABELS = {1:'기본 정보', 2:'플랜 선택', 3:'Cloudflare', 4:'도메인', 5:'관리자'};
+    const STEP_LABELS = {1:'기본 정보', 2:'플랜 선택', 3:'도메인', 4:'관리자'};
 
     function goStep(n) {
         // 유효성 검사
@@ -836,7 +757,7 @@
             const name = document.getElementById('site_name').value.trim();
             if (!name) { showAlert('사이트 이름을 입력해주세요.'); return; }
         }
-        if (n > 2 && selectedPlan !== 'free') {
+        if (n > 2 && selectedPlan !== 'free' && USER_ROLE !== 'admin') {
             const savedCard = document.querySelector('input[name=saved_card]:checked');
             const isNew = !savedCard || savedCard.value === 'new';
             if (isNew) {
@@ -848,10 +769,9 @@
                 }
             }
         }
-        if (n === 4) {
-            // 도메인 단계 — CF API 없으면 경고 표시
-            const apiKey = document.getElementById('cf_api_key').value.trim();
-            document.getElementById('domain-cf-warning').classList.toggle('hidden', !!apiKey);
+        if (n === 3) {
+            // 도메인 단계 — CF 등록 여부 경고 표시 (account에서 설정)
+            document.getElementById('domain-cf-warning').classList.toggle('hidden', cfValidated);
 
             // 플랜별 도메인 안내 업데이트
             const planNotice = document.getElementById('domain-plan-notice');
@@ -861,7 +781,7 @@
                 planNotice.innerHTML = `<i class="fas fa-check-circle text-green-400 mr-2"></i><span class="text-green-300 text-sm">${PLAN_INFO[selectedPlan].label} 플랜은 커스텀 도메인을 지원합니다. 도메인 입력 시 Cloudflare DNS가 자동 설정됩니다.</span>`;
             }
         }
-        if (n === 5) {
+        if (n === 4) {
             // 요약 업데이트
             const plan = PLAN_INFO[selectedPlan];
             document.getElementById('sum-name').textContent    = document.getElementById('site_name').value.trim() || '-';
@@ -870,16 +790,15 @@
             document.getElementById('sum-storage').textContent = plan.storage;
             document.getElementById('sum-traffic').textContent = plan.traffic;
 
-            const cfKey = document.getElementById('cf_api_key').value.trim();
-            document.getElementById('sum-cf').textContent = cfKey ? '✅ 입력됨 (DNS 자동 설정)' : '미입력 (수동 설정 필요)';
-            document.getElementById('sum-cf').className   = cfKey ? 'text-green-400' : 'text-gray-600';
+            document.getElementById('sum-cf').textContent = cfValidated ? '✅ 등록됨 (DNS 자동 설정)' : '미등록 — 내 정보에서 설정 가능';
+            document.getElementById('sum-cf').className   = cfValidated ? 'text-green-400' : 'text-gray-500';
 
             const domain = document.getElementById('initial_domain').value.trim();
             document.getElementById('sum-domain').textContent = domain || '미설정 (나중에 추가 가능)';
         }
 
         // 인디케이터 업데이트
-        for (let i = 1; i <= 5; i++) {
+        for (let i = 1; i <= 4; i++) {
             const ind = document.getElementById(`ind-${i}`);
             document.getElementById(`step-${i}`)?.classList.add('hidden');
             if (i < n) {
@@ -1151,8 +1070,6 @@
         const wp_admin_user  = document.getElementById('wp_admin_user').value.trim();
         const wp_admin_pass  = document.getElementById('wp_admin_pass').value;
         const wp_admin_email = document.getElementById('wp_admin_email').value.trim();
-        const cf_api_token   = document.getElementById('cf_api_key').value.trim();
-        const cf_account_id  = document.getElementById('cf_email').value.trim();
         const initial_domain = document.getElementById('initial_domain').value.trim();
 
         if (!site_name)      { showAlert('사이트 이름을 입력해주세요.'); return; }
@@ -1183,8 +1100,6 @@
                 body:    JSON.stringify({
                     site_name, php_version: '8.2',
                     wp_admin_user, wp_admin_pass, wp_admin_email,
-                    cf_api_token:  cf_api_token  || undefined,
-                    cf_account_id: cf_account_id || undefined,
                     initial_domain: initial_domain || undefined,
                     plan: selectedPlan,
                     payment_method_id: payment_method_id || undefined,
@@ -1208,7 +1123,7 @@
                 document.getElementById('step-indicators').classList.add('hidden');
                 addLog(`호스팅 생성 요청 성공 (ID: ${data.id})`);
                 addLog(`플랜: ${PLAN_INFO[selectedPlan].label}`);
-                if (cf_api_token) addLog('Cloudflare Pages 자동 연동 모드');
+                if (cfValidated) addLog('Cloudflare Pages 자동 연동 모드 (내 정보 설정값 사용)');
                 if (initial_domain) addLog(`도메인: ${initial_domain}`);
 
                 startElapsedTimer();

@@ -221,12 +221,11 @@ export async function onRequestPost(context) {
       await log("Cloudflare Pages 호스팅 구축 시작");
       await log(`플랜: ${plan} | 스토리지: ${planLimits.storage_gb}GB`);
 
-      // Cloudflare API 토큰/계정 ID 조회
-      const u = await env.DB.prepare("SELECT cf_api_token, cf_account_id FROM users WHERE id = ?")
+      // Cloudflare API 토큰/계정 ID 조회 (account.html: cf_global_api_key+cf_email 컬럼 사용)
+      const u = await env.DB.prepare("SELECT cf_api_token, cf_account_id, cf_global_api_key, cf_email FROM users WHERE id = ?")
         .bind(payload.id).first().catch(() => null);
-      const cfToken     = cf_api_token     || u?.cf_api_token     || env.CF_API_TOKEN;
-      const cfAccountId = cf_account_id    || u?.cf_account_id    || env.CF_ACCOUNT_ID;
-
+      const cfToken     = cf_api_token  || u?.cf_api_token  || u?.cf_global_api_key || env.CF_API_TOKEN;
+      const cfAccountId = cf_account_id || u?.cf_account_id || u?.cf_email          || env.CF_ACCOUNT_ID;
       const result = await provisionCloudflarePagesHosting({
         env,
         siteId:      id,

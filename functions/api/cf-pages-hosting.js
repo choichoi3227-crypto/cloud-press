@@ -824,6 +824,128 @@ async function createCfPagesProject({ cfToken, cfAccountId, projectName, owner, 
   return createRes.data?.result;
 }
 
+
+// ── Cloudflare D1 데이터베이스 생성 ──────────────────────────────────────────
+async function createD1Database({ cfToken, cfAccountId, dbName, log }) {
+  if (!cfToken || !cfAccountId) return null;
+  await log(`  D1 데이터베이스 생성 중: ${dbName}`);
+
+  // 기존 DB 확인
+  const listRes = await cfReq(cfToken, "GET", `/accounts/${cfAccountId}/d1/database?name=${encodeURIComponent(dbName)}`);
+  const existing = listRes.data?.result?.find(db => db.name === dbName);
+  if (existing) {
+    await log(`  D1 기존 DB 사용: ${existing.uuid}`);
+    return existing.uuid;
+  }
+
+  const res = await cfReq(cfToken, "POST", `/accounts/${cfAccountId}/d1/database`, { name: dbName });
+  if (!res.ok) {
+    await log(`  D1 생성 실패: ${JSON.stringify(res.data?.errors)}`, "warning");
+    return null;
+  }
+  const id = res.data?.result?.uuid;
+  await log(`  D1 생성 완료: ${id}`);
+  return id;
+}
+
+// ── Cloudflare KV 네임스페이스 생성 ──────────────────────────────────────────
+async function createKVNamespace({ cfToken, cfAccountId, title, log }) {
+  if (!cfToken || !cfAccountId) return null;
+  await log(`  KV 네임스페이스 생성 중: ${title}`);
+
+  // 기존 KV 확인
+  const listRes = await cfReq(cfToken, "GET", `/accounts/${cfAccountId}/storage/kv/namespaces`);
+  const existing = listRes.data?.result?.find(ns => ns.title === title);
+  if (existing) {
+    await log(`  KV 기존 네임스페이스 사용: ${existing.id}`);
+    return existing.id;
+  }
+
+  const res = await cfReq(cfToken, "POST", `/accounts/${cfAccountId}/storage/kv/namespaces`, { title });
+  if (!res.ok) {
+    await log(`  KV 생성 실패: ${JSON.stringify(res.data?.errors)}`, "warning");
+    return null;
+  }
+  const id = res.data?.result?.id;
+  await log(`  KV 생성 완료: ${id}`);
+  return id;
+}
+
+// ── Cloudflare Worker 생성 ────────────────────────────────────────────────────
+async function createWorker({ cfToken, cfAccountId, workerName, siteId, siteName, d1Id, kvSessionsId, kvCacheId, log }) {
+  if (!cfToken || !cfAccountId) return null;
+  await log(`  Cloudflare Worker 생성 중: ${workerName}`);
+
+  // Worker 스크립트 (D1/KV 바인딩 포함 프록시)
+  const workerScript = `
+// CloudPress Worker: ${siteName} (${siteId})
+// D1, KV 바인딩이 연결된 Cloudflare Pages 프록시
+
+export default {
+  async fetch(request, env, ctx) {
+    const url = new URL(request.url);
+    // /api/* 요청은 Pages Functions로 처리됨
+    return fetch(request);
+  }
+};
+`.trim();
+
+  const bindings = [];
+  if (d1Id) bindings.push({ type: "d1", name: "DB", id: d1Id });
+  if (kvSessionsId) bindings.push({ type: "kv_namespace", name: "SESSIONS", namespace_id: kvSessionsId });
+  if (kvCacheId)    bindings.push({ type: "kv_namespace", name: "CACHE",    namespace_id: kvCacheId });
+
+  const formData = new FormData();
+  formData.append("metadata", JSON.stringify({
+    main_module: "worker.js",
+    compatibility_date: "2025-04-01",
+    bindings,
+  }));
+  formData.append("worker.js", new Blob([workerScript], { type: "application/javascript+module" }), "worker.js");
+
+  const res = await fetch(`https://api.cloudflare.com/client/v4/accounts/${cfAccountId}/workers/scripts/${workerName}`, {
+    method: "PUT",
+    headers: { "Authorization": `Bearer ${cfToken}` },
+    body: formData,
+  });
+  const data = await res.json().catch(() => ({}));
+
+  if (!res.ok) {
+    await log(`  Worker 생성 실패: ${JSON.stringify(data?.errors)}`, "warning");
+    return null;
+  }
+  await log(`  Worker 생성 완료: ${workerName}`);
+  return workerName;
+}
+
+// ── D1 스키마 초기화 ──────────────────────────────────────────────────────────
+async function initD1Schema({ cfToken, cfAccountId, d1Id, siteId, adminUser, adminEmail, adminPassHash, log }) {
+  if (!cfToken || !cfAccountId || !d1Id) return;
+  await log("  D1 스키마 초기화 중...");
+
+  const now = new Date().toISOString();
+  const statements = [
+    `CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, username TEXT NOT NULL, email TEXT NOT NULL UNIQUE, password_hash TEXT NOT NULL, role TEXT DEFAULT 'author', display_name TEXT, created_at TEXT DEFAULT CURRENT_TIMESTAMP)`,
+    `CREATE TABLE IF NOT EXISTS posts (id TEXT PRIMARY KEY, slug TEXT NOT NULL UNIQUE, title TEXT NOT NULL, content TEXT, status TEXT DEFAULT 'draft', author_id TEXT, created_at TEXT DEFAULT CURRENT_TIMESTAMP, updated_at TEXT DEFAULT CURRENT_TIMESTAMP)`,
+    `CREATE TABLE IF NOT EXISTS pages (id TEXT PRIMARY KEY, slug TEXT NOT NULL UNIQUE, title TEXT NOT NULL, content TEXT, status TEXT DEFAULT 'draft', created_at TEXT DEFAULT CURRENT_TIMESTAMP)`,
+    `CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT)`,
+    `CREATE TABLE IF NOT EXISTS media (id TEXT PRIMARY KEY, filename TEXT, url TEXT, mime_type TEXT, size INTEGER, created_at TEXT DEFAULT CURRENT_TIMESTAMP)`,
+    `INSERT OR IGNORE INTO users (id, username, email, password_hash, role, display_name, created_at) VALUES ('admin-${siteId.slice(0,8)}', '${adminUser.replace(/'/g,"''")}', '${adminEmail.replace(/'/g,"''")}', '${adminPassHash}', 'administrator', '${adminUser.replace(/'/g,"''")}', '${now}')`,
+    `INSERT OR IGNORE INTO settings (key, value) VALUES ('site_id', '${siteId}')`,
+  ];
+
+  for (const sql of statements) {
+    const res = await cfReq(cfToken, "POST",
+      `/accounts/${cfAccountId}/d1/database/${d1Id}/query`,
+      { sql }
+    );
+    if (!res.ok) {
+      await log(`  D1 쿼리 실패: ${sql.slice(0,60)}... — ${JSON.stringify(res.data?.errors)}`, "warning");
+    }
+  }
+  await log("  D1 스키마 초기화 완료");
+}
+
 // ── Cloudflare Pages D1/KV 바인딩 자동 설정 ──────────────────────────────────
 async function setCfPagesBindings({ cfToken, cfAccountId, projectName, d1Id, kvSessionsId, kvCacheId, log }) {
   if (!cfToken || !cfAccountId || !projectName) return;
@@ -935,25 +1057,84 @@ export async function provisionCloudflarePagesHosting({
   }
   await log(`[4/6] Astro 소스 ${fileCount}개 파일 생성 완료`);
 
-  // ── [5/6] Cloudflare Pages 설정 파일 + 미러링 워크플로우 생성 ──────────
-  await log("[5/6] Cloudflare Pages 설정 + 미러링 워크플로우 생성 중...");
+  // ── [5/6] Cloudflare D1 / KV / Worker 생성 ──────────────────────────────
+  await log("[5/6] Cloudflare 리소스 생성 중 (D1, KV, Worker)...");
+  let d1Id        = null;
+  let kvSessionsId = null;
+  let kvCacheId    = null;
+  let workerName   = null;
+
+  if (cfToken && cfAccountId) {
+    const resourcePrefix = `cp-${shortId}`;
+
+    // D1 데이터베이스 생성
+    d1Id = await createD1Database({
+      cfToken, cfAccountId,
+      dbName: `${resourcePrefix}-db`,
+      log,
+    });
+
+    // KV 네임스페이스 생성 (세션용, 캐시용)
+    kvSessionsId = await createKVNamespace({
+      cfToken, cfAccountId,
+      title: `${resourcePrefix}-sessions`,
+      log,
+    });
+    kvCacheId = await createKVNamespace({
+      cfToken, cfAccountId,
+      title: `${resourcePrefix}-cache`,
+      log,
+    });
+
+    // Worker 생성 (D1/KV 바인딩 포함)
+    workerName = await createWorker({
+      cfToken, cfAccountId,
+      workerName: resourcePrefix,
+      siteId, siteName,
+      d1Id, kvSessionsId, kvCacheId,
+      log,
+    });
+
+    // D1 스키마 초기화
+    if (d1Id) {
+      // SHA-256 해시 (cf-pages-hosting.js 내 인라인, _shared.js import 불가)
+      const adminPassHash = await (async (pw) => {
+        const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(pw));
+        return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2,"0")).join("");
+      })(adminPass);
+      await initD1Schema({
+        cfToken, cfAccountId, d1Id,
+        siteId, adminUser, adminEmail,
+        adminPassHash,
+        log,
+      });
+    }
+
+    // sites 테이블에 리소스 ID 저장
+    await env.DB.prepare(
+      "UPDATE sites SET cf_worker_name = ?, cf_d1_id = ?, cf_kv_id = ? WHERE id = ?"
+    ).bind(workerName, d1Id, kvSessionsId, siteId).run().catch(() => {});
+
+    await log(`[5/6] Cloudflare 리소스 생성 완료 — D1: ${d1Id ? "✅" : "⚠️없음"}, KV: ${kvSessionsId ? "✅" : "⚠️없음"}, Worker: ${workerName ? "✅" : "⚠️없음"}`);
+  } else {
+    await log("[5/6] Cloudflare API 없음 — D1/KV/Worker 건너뜀", "warning");
+  }
+
+  // ── [6/6] Cloudflare Pages 설정 파일 + 프로젝트 생성 ─────────────────
+  await log("[6/6] Cloudflare Pages 설정 + 프로젝트 생성 중...");
+
+  // 실제 생성된 ID로 설정 파일 작성
   const cfPagesConfig = buildCfPagesConfig({
-    siteId, siteName,
-    cfAccountId,
-    d1Id:        env.DB?.__D1_CONTRACT__?.databaseId || null,
-    kvSessionsId: null,
-    kvCacheId:    null,
+    siteId, siteName, cfAccountId,
+    d1Id, kvSessionsId, kvCacheId,
   });
   const mirrorWorkflows = buildMirrorWorkflow({ siteId, cfAccountId, cfPagesProject: projName });
 
-  for (const [path, content] of Object.entries({ ...cfPagesConfig, ...mirrorWorkflows })) {
-    await ghPutFile(token, owner, repoName, path, content, `init: ${path}`, null).catch(() => {});
+  for (const [path, fileContent] of Object.entries({ ...cfPagesConfig, ...mirrorWorkflows })) {
+    await ghPutFile(token, owner, repoName, path, fileContent, `init: ${path}`, null).catch(() => {});
     await delay(300);
   }
-  await log("[5/6] Cloudflare Pages 설정 파일 생성 완료");
 
-  // ── [6/6] Cloudflare Pages 프로젝트 생성 + GitHub 연동 (미러링) ─────────
-  await log("[6/6] Cloudflare Pages 프로젝트 생성 + GitHub 연동 중...");
   let pagesProject = null;
   let pagesUrl     = null;
 
@@ -967,28 +1148,22 @@ export async function provisionCloudflarePagesHosting({
     if (pagesProject) {
       pagesUrl = `https://${projName}.pages.dev`;
 
-      // D1/KV 바인딩 자동 설정
+      // 실제 생성된 D1/KV ID로 Pages 바인딩 설정
       await setCfPagesBindings({
         cfToken, cfAccountId,
         projectName: projName,
-        d1Id:        null,
-        kvSessionsId: null,
-        kvCacheId:    null,
+        d1Id, kvSessionsId, kvCacheId,
         log,
       });
 
       await log(`[6/6] Cloudflare Pages 연동 완료: ${pagesUrl}`);
     } else {
       await log("[6/6] Cloudflare Pages 수동 설정 필요", "warning");
-      await log(`  Cloudflare 대시보드에서 Pages 프로젝트 생성 후 GitHub 레포(${owner}/${repoName}) 연동`, "warning");
       pagesUrl = `https://${projName}.pages.dev`;
     }
   } else {
-    await log("[6/6] Cloudflare API 토큰 없음 - Pages 수동 설정 필요", "warning");
+    await log("[6/6] Cloudflare API 없음 — Pages 수동 설정 필요", "warning");
     await log(`  GitHub 레포: https://github.com/${owner}/${repoName}`, "warning");
-    await log(`  Cloudflare 대시보드 > Pages > 프로젝트 생성 > GitHub 레포 연동`, "warning");
-    await log(`  빌드 명령: npm install && npm run build`, "warning");
-    await log(`  빌드 출력 디렉토리: dist`, "warning");
     pagesUrl = null;
   }
 
@@ -999,7 +1174,11 @@ export async function provisionCloudflarePagesHosting({
     repoName,
     pagesUrl,
     pagesProject: projName,
-    cfDomain: initialDomain || null,
+    cfDomain:     initialDomain || null,
+    d1Id,
+    kvSessionsId,
+    kvCacheId,
+    workerName,
   };
 }
 

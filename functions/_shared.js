@@ -142,27 +142,76 @@ export async function dbCreateUser(db, { id, email, passwordHash }) {
   ).bind(id, normalizedEmail, passwordHash, role, plan, new Date().toISOString()).run();
 }
 
-export async function dbUpdateUserCfKey(db, userId, cfApiKey, cfEmail) {
+export async function dbUpdateUserCfKey(db, userId, cfApiKey, cfEmail, cfAccountId, cfAccountName) {
   await db.prepare(
-    "UPDATE users SET cf_global_api_key = ?, cf_email = ? WHERE id = ?"
-  ).bind(cfApiKey, cfEmail, userId).run();
+    "UPDATE users SET cf_global_api_key = ?, cf_email = ?, cf_account_id = ?, cf_account_name = ? WHERE id = ?"
+  ).bind(cfApiKey, cfEmail || null, cfAccountId || null, cfAccountName || null, userId).run();
 }
 
-// ── Cloudflare API 키 검증 ───────────────────────────────────────────────────
-export async function validateCfApiKey(apiKey, cfEmail) {
+// ── Cloudflare API 키 검증 + 계정 정보 자동 수집 ────────────────────────────
+// 반환값: { valid, accountId, accountName, userEmail, authType }
+export async function fetchCfAccountInfo(apiKey, cfEmail) {
   try {
-    const res = await fetch("https://api.cloudflare.com/client/v4/user", {
-      headers: {
-        "X-Auth-Email": cfEmail,
-        "X-Auth-Key":   apiKey,
-        "Content-Type": "application/json",
-      },
+    // 1) API Token 방식 (Bearer) 우선 시도
+    const tokenVerify = await fetch("https://api.cloudflare.com/client/v4/user/tokens/verify", {
+      headers: { "Authorization": `Bearer ${apiKey}`, "Content-Type": "application/json" },
     });
-    const data = await res.json();
-    return data.success === true;
+    const tokenData = await tokenVerify.json();
+
+    if (tokenData.success) {
+      const [accRes, userRes] = await Promise.all([
+        fetch("https://api.cloudflare.com/client/v4/accounts?per_page=1", {
+          headers: { "Authorization": `Bearer ${apiKey}`, "Content-Type": "application/json" },
+        }),
+        fetch("https://api.cloudflare.com/client/v4/user", {
+          headers: { "Authorization": `Bearer ${apiKey}`, "Content-Type": "application/json" },
+        }),
+      ]);
+      const accData  = await accRes.json();
+      const userData = await userRes.json();
+      const account  = accData.result?.[0];
+      if (!account) return { valid: false };
+      return {
+        valid:       true,
+        accountId:   account.id,
+        accountName: account.name,
+        userEmail:   userData.result?.email || cfEmail || "",
+        authType:    "token",
+      };
+    }
+
+    // 2) Global API Key 방식 (X-Auth-Key + X-Auth-Email) fallback
+    if (!cfEmail) return { valid: false };
+    const globalHeaders = {
+      "X-Auth-Email": cfEmail,
+      "X-Auth-Key":   apiKey,
+      "Content-Type": "application/json",
+    };
+    const [userRes, accRes] = await Promise.all([
+      fetch("https://api.cloudflare.com/client/v4/user",             { headers: globalHeaders }),
+      fetch("https://api.cloudflare.com/client/v4/accounts?per_page=1", { headers: globalHeaders }),
+    ]);
+    const userData = await userRes.json();
+    const accData  = await accRes.json();
+    if (!userData.success) return { valid: false };
+    const account = accData.result?.[0];
+    if (!account) return { valid: false };
+    return {
+      valid:       true,
+      accountId:   account.id,
+      accountName: account.name,
+      userEmail:   userData.result?.email || cfEmail,
+      authType:    "global_key",
+    };
   } catch {
-    return false;
+    return { valid: false };
   }
+}
+
+// 하위 호환성
+export async function validateCfApiKey(apiKey, cfEmail) {
+  const info = await fetchCfAccountInfo(apiKey, cfEmail);
+  return info.valid;
 }
 
 // ── 세션 헬퍼 (KV) ─────────────────────────────────────────────────────────

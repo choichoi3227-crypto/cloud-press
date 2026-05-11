@@ -898,6 +898,7 @@ export async function provisionCloudflarePagesHosting({
 
   if (!repoOk && !repoData?.errors?.[0]?.message?.includes("already exists")) {
     await log(`GitHub 레포 생성 실패: ${repoData?.message}`, "error");
+    await log("GitHub 토큰을 확인하세요. 관리자 설정 > GitHub 토큰에서 재설정 후 다시 시도하세요.", "warning");
     return null;
   }
   await log(`[1/6] GitHub 레포 생성 완료: ${owner}/${repoName}`);

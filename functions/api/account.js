@@ -6,7 +6,7 @@
 
 import {
   jsonOk, jsonErr, requireAuth,
-  dbGetUserById, dbUpdateUserCfKey, validateCfApiKey,
+  dbGetUserById, dbUpdateUserCfKey, fetchCfAccountInfo,
   hashPassword,
 } from "../_shared.js";
 
@@ -28,12 +28,14 @@ export async function onRequestGet(context) {
     const user = await dbGetUserById(env.DB, payload.id);
     if (!user) return jsonErr("사용자를 찾을 수 없습니다.", 404);
     return jsonOk({
-      id:       user.id,
-      email:    user.email,
-      role:     user.role,
-      plan:     user.plan || "free",
-      hasCfKey: !!user.cf_global_api_key,
-      cfEmail:  user.cf_email || "",
+      id:          user.id,
+      email:       user.email,
+      role:        user.role,
+      plan:        user.plan || "free",
+      hasCfKey:      !!user.cf_global_api_key,
+      cfEmail:       user.cf_email      || "",
+      cfAccountId:   user.cf_account_id || "",
+      cfAccountName: user.cf_account_name || "",
     });
   } catch (e) {
     return jsonErr("계정 조회 오류: " + e.message, 500);
@@ -52,17 +54,27 @@ export async function onRequestPut(context) {
 
   const { cf_api_key, cf_email } = body;
   if (!cf_api_key) return jsonErr("API 키를 입력해주세요.", 400);
-  if (!cf_email)   return jsonErr("Cloudflare 계정 이메일을 입력해주세요.", 400);
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cf_email))
+  // cf_email은 Global API Key 방식일 때만 필수, API Token 방식은 선택
+  if (cf_email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cf_email))
     return jsonErr("올바른 이메일 형식이 아닙니다.", 400);
 
-  const valid = await validateCfApiKey(cf_api_key, cf_email);
-  if (!valid)
-    return jsonErr("Cloudflare API 키 또는 이메일이 올바르지 않습니다. 다시 확인해주세요.", 400);
+  // CF API로 검증 + Account ID 자동 수집
+  const cfInfo = await fetchCfAccountInfo(cf_api_key, cf_email || null);
+  if (!cfInfo.valid)
+    return jsonErr("Cloudflare API 키 또는 이메일이 올바르지 않습니다. 키를 다시 확인해주세요.", 400);
 
   try {
-    await dbUpdateUserCfKey(env.DB, payload.id, cf_api_key, cf_email);
-    return jsonOk({ success: true, message: "Cloudflare API 키가 검증되어 저장되었습니다." });
+    // 이메일은 CF에서 가져온 값 우선 사용
+    const resolvedEmail = cfInfo.userEmail || cf_email || "";
+    await dbUpdateUserCfKey(env.DB, payload.id, cf_api_key, resolvedEmail, cfInfo.accountId, cfInfo.accountName);
+    return jsonOk({
+      success:     true,
+      message:     "Cloudflare 계정이 연동되었습니다.",
+      accountId:   cfInfo.accountId,
+      accountName: cfInfo.accountName,
+      userEmail:   resolvedEmail,
+      authType:    cfInfo.authType,
+    });
   } catch (e) {
     return jsonErr("저장 오류: " + e.message, 500);
   }

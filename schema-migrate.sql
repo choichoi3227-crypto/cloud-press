@@ -9,6 +9,9 @@ ALTER TABLE users ADD COLUMN cf_account_id TEXT;
 -- ── sites 테이블에 Cloudflare Pages 정보 컬럼 추가 ───────────────────────
 ALTER TABLE sites ADD COLUMN cf_pages_url     TEXT;
 ALTER TABLE sites ADD COLUMN cf_pages_project TEXT;
+ALTER TABLE sites ADD COLUMN cf_worker_name   TEXT;
+ALTER TABLE sites ADD COLUMN cf_d1_id         TEXT;
+ALTER TABLE sites ADD COLUMN cf_kv_id         TEXT;
 
 -- ── payment_cards 테이블 생성 (없으면) ───────────────────────────────────
 CREATE TABLE IF NOT EXISTS payment_cards (

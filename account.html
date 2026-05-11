@@ -66,7 +66,7 @@
                         <i class="fab fa-cloudflare text-orange-400"></i> Cloudflare 연동
                     </h2>
                     <p class="text-xs text-gray-500">
-                        Cloudflare Global API Key는 <a href="https://dash.cloudflare.com/profile/api-tokens" target="_blank" class="text-blue-400 underline">Cloudflare 대시보드 → 내 프로필 → API 토큰</a>에서 확인할 수 있습니다.
+                        Account ID는 <a href="https://dash.cloudflare.com" target="_blank" class="text-blue-400 underline">Cloudflare 대시보드 → 우측 사이드바</a>에서, API 토큰은 <a href="https://dash.cloudflare.com/profile/api-tokens" target="_blank" class="text-blue-400 underline">내 프로필 → API 토큰</a>에서 확인하세요.
                     </p>
 
                     <!-- 저장된 상태 배너 -->
@@ -75,6 +75,8 @@
                             <i class="fas fa-check-circle"></i>
                             <span>Cloudflare API 키가 연동되어 있습니다.</span>
                             <span id="cfkey-email-saved" class="text-green-300 ml-1"></span>
+                            <span id="cfkey-account-saved" class="text-green-300/70 text-xs ml-1"></span>
+                            <span id="cfkey-accountname-saved" class="text-green-300/50 text-xs ml-1"></span>
                         </div>
                         <button onclick="showCfKeyForm()" class="text-xs text-orange-300 hover:text-orange-200 underline flex-shrink-0">
                             키 변경
@@ -84,17 +86,17 @@
                     <!-- CF 키 입력 폼 -->
                     <div id="cfkey-form" class="space-y-4">
                         <div class="space-y-2">
-                            <label class="text-sm text-gray-400">Cloudflare 계정 이메일 <span class="text-red-400">*</span></label>
+                            <label class="text-sm text-gray-400">Cloudflare 계정 이메일 <span class="text-gray-600 text-xs">(Global API Key 방식일 때만 필요)</span></label>
                             <input type="email" id="cf_email"
                                 class="w-full p-4 bg-white/5 border border-white/10 rounded-xl outline-none focus:border-orange-400 transition"
                                 placeholder="cloudflare@example.com">
                         </div>
                         <div class="space-y-2">
-                            <label class="text-sm text-gray-400">Global API Key <span class="text-red-400">*</span></label>
+                            <label class="text-sm text-gray-400">API Token (또는 Global API Key) <span class="text-red-400">*</span></label>
                             <div class="relative">
                                 <input type="password" id="cf_api"
                                     class="w-full p-4 bg-white/5 border border-white/10 rounded-xl outline-none focus:border-orange-400 transition pr-12"
-                                    placeholder="API 키를 입력하세요">
+                                    placeholder="API Token 또는 Global API Key">
                                 <button onclick="toggleApiKeyVisibility()" class="absolute right-4 top-1/2 -translate-y-1/2 text-gray-500 hover:text-white transition">
                                     <i id="eye-icon" class="fas fa-eye"></i>
                                 </button>
@@ -215,6 +217,12 @@
                         if (data.cfEmail) {
                             document.getElementById('cfkey-email-saved').textContent = `(${data.cfEmail})`;
                         }
+                        if (data.cfAccountId) {
+                            document.getElementById('cfkey-account-saved').textContent = `• ID: ${data.cfAccountId.slice(0,8)}...`;
+                        }
+                        if (data.cfAccountName) {
+                            document.getElementById('cfkey-accountname-saved').textContent = `(${data.cfAccountName})`;
+                        }
                         document.getElementById('cfkey-form').classList.add('hidden');
                     }
                 }
@@ -228,11 +236,8 @@
             const cfEmail  = document.getElementById('cf_email').value.trim();
             const cfApiKey = document.getElementById('cf_api').value.trim();
 
-            if (!cfEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cfEmail)) {
-                showAlert('올바른 Cloudflare 이메일을 입력해주세요.', 'error'); return;
-            }
             if (!cfApiKey) {
-                showAlert('Cloudflare Global API Key를 입력해주세요.', 'error'); return;
+                showAlert('Cloudflare API Token 또는 Global API Key를 입력해주세요.', 'error'); return;
             }
 
             const btn = document.getElementById('save-btn');
@@ -243,7 +248,7 @@
             try {
                 const res  = await fetch('/api/account', {
                     method: 'PUT', headers: HEADERS,
-                    body: JSON.stringify({ cf_api_key: cfApiKey, cf_email: cfEmail }),
+                    body: JSON.stringify({ cf_api_key: cfApiKey, cf_email: cfEmail || undefined }),
                 });
                 const data = await res.json();
                 if (res.ok && data.success) {

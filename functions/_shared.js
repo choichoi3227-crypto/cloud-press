@@ -8,6 +8,39 @@ export function isAdminEmail(email) {
   return ADMIN_EMAILS.includes(email?.toLowerCase().trim());
 }
 
+// ── 플랜 한도 ─────────────────────────────────────────────────────────────────
+export const PLAN_LIMITS = {
+  free: {
+    sites:         1,
+    storage_gb:    5,
+    traffic_gb:    100,
+    custom_domain: false,
+    backups:       false,
+  },
+  starter: {
+    sites:         5,
+    storage_gb:    18,
+    traffic_gb:    1000,
+    custom_domain: true,
+    backups:       true,
+  },
+  pro: {
+    sites:         Infinity,
+    storage_gb:    36,
+    traffic_gb:    null, // 무제한
+    custom_domain: true,
+    backups:       true,
+  },
+  // 어드민 플랜: 결제 없이 무제한
+  admin: {
+    sites:         Infinity,
+    storage_gb:    Infinity,
+    traffic_gb:    null,
+    custom_domain: true,
+    backups:       true,
+  },
+};
+
 // ── CORS / 응답 헬퍼 ────────────────────────────────────────────────────────
 export const CORS = {
   "Access-Control-Allow-Origin":  "*",
@@ -97,111 +130,3 @@ export async function requireAuth(request, env) {
   }
   return null;
 }
-
-// ── SESSIONS KV ─────────────────────────────────────────────────────────────
-export async function sessionCreate(sessions, userId, email, role) {
-  const token = crypto.randomUUID().replace(/-/g, "") + crypto.randomUUID().replace(/-/g, "");
-  await sessions.put(
-    `session:${token}`,
-    JSON.stringify({ id: userId, email, role, createdAt: Date.now() }),
-    { expirationTtl: 86400 }
-  );
-  return token;
-}
-
-export async function sessionDelete(sessions, token) {
-  await sessions.delete(`session:${token}`);
-}
-
-// ── D1 유저 CRUD ────────────────────────────────────────────────────────────
-export async function dbGetUserByEmail(db, email) {
-  return db.prepare("SELECT * FROM users WHERE email = ?")
-    .bind(email.toLowerCase().trim()).first();
-}
-
-export async function dbGetUserById(db, id) {
-  return db.prepare("SELECT * FROM users WHERE id = ?").bind(id).first();
-}
-
-export async function dbCreateUser(db, { id, email, passwordHash, role = "user", plan = "free" }) {
-  const finalRole = isAdminEmail(email) ? "admin" : role;
-  const finalPlan = isAdminEmail(email) ? "pro"   : plan;
-  await db.prepare(
-    "INSERT INTO users (id, email, password_hash, role, plan, created_at) VALUES (?, ?, ?, ?, ?, ?)"
-  ).bind(id, email.toLowerCase().trim(), passwordHash, finalRole, finalPlan, new Date().toISOString()).run();
-}
-
-// ── CF API 키 업데이트 ──────────────────────────────────────────────────────
-export async function dbUpdateUserCfKey(db, userId, cfApiKey, cfEmail) {
-  if (cfEmail) {
-    await db.prepare("UPDATE users SET cf_global_api_key = ?, cf_email = ? WHERE id = ?")
-      .bind(cfApiKey, cfEmail, userId).run();
-  } else {
-    await db.prepare("UPDATE users SET cf_global_api_key = ? WHERE id = ?")
-      .bind(cfApiKey, userId).run();
-  }
-}
-
-// ── Cloudflare API 키 검증 ──────────────────────────────────────────────────
-export async function validateCfApiKey(apiKey, email) {
-  try {
-    const res = await fetch("https://api.cloudflare.com/client/v4/user", {
-      headers: {
-        "X-Auth-Key":   apiKey,
-        "X-Auth-Email": email,
-        "Content-Type": "application/json",
-      },
-    });
-    const data = await res.json();
-    return data.success === true;
-  } catch {
-    return false;
-  }
-}
-
-// ── 바인딩 체크 ─────────────────────────────────────────────────────────────
-export function checkBindings(env, required = ["DB", "SESSIONS"]) {
-  return required.filter(b => !env[b]);
-}
-
-// ── 플랜별 제한 ──────────────────────────────────────────────────────────────
-// sites         : 생성 가능 사이트 수
-// storage_gb    : 스토리지 한도 (GB)
-// traffic_gb    : 월간 트래픽 한도 (GB, null=무제한)
-// backups       : 자동 백업 허용 여부
-// custom_domain : 커스텀 도메인 허용 여부
-// allowed_php   : 허용 PHP minor 버전 목록 (null=전체)
-// wp_cli        : WP-CLI 접근 허용 여부
-// ssh_access    : SSH 접근 허용 여부
-export const PLAN_LIMITS = {
-  free: {
-    sites:         1,
-    storage_gb:    5,
-    traffic_gb:    100,
-    backups:       false,
-    custom_domain: false,
-    allowed_php:   ["8.2", "8.3"],   // 최신 2개 버전만
-    wp_cli:        false,
-    ssh_access:    false,
-  },
-  starter: {
-    sites:         5,
-    storage_gb:    18,
-    traffic_gb:    1000,
-    backups:       true,
-    custom_domain: true,
-    allowed_php:   null,             // 전체 허용
-    wp_cli:        true,
-    ssh_access:    false,
-  },
-  pro: {
-    sites:         Infinity,
-    storage_gb:    36,
-    traffic_gb:    null,             // 무제한
-    backups:       true,
-    custom_domain: true,
-    allowed_php:   null,
-    wp_cli:        true,
-    ssh_access:    true,
-  },
-};

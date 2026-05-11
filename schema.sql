@@ -10,6 +10,8 @@ CREATE TABLE IF NOT EXISTS users (
     two_factor_secret TEXT,
     cf_global_api_key TEXT,
     cf_email          TEXT,
+    cf_account_id     TEXT,
+    cf_account_name   TEXT,
     role              TEXT DEFAULT 'user',   -- user | admin
     plan              TEXT DEFAULT 'free',   -- free | starter | pro
     created_at        TEXT

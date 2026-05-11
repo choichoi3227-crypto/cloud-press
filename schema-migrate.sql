@@ -4,7 +4,8 @@
 
 -- ── users 테이블에 Cloudflare API 토큰/계정 ID 컬럼 추가 ─────────────────
 ALTER TABLE users ADD COLUMN cf_api_token  TEXT;
-ALTER TABLE users ADD COLUMN cf_account_id TEXT;
+ALTER TABLE users ADD COLUMN cf_account_id   TEXT;
+ALTER TABLE users ADD COLUMN cf_account_name TEXT;
 
 -- ── sites 테이블에 Cloudflare Pages 정보 컬럼 추가 ───────────────────────
 ALTER TABLE sites ADD COLUMN cf_pages_url     TEXT;

@@ -245,7 +245,11 @@ export async function onRequestPost(context) {
       });
 
       if (!result) {
-        await env.DB.prepare("UPDATE sites SET status = 'error' WHERE id = ?").bind(id).run().catch(() => {});
+        // GitHub 토큰/CF 설정 없어도 사이트 레코드는 active로 유지 (수동 연동 안내)
+        await env.DB.prepare(
+          "UPDATE sites SET status = 'active', plan = ? WHERE id = ?"
+        ).bind(plan, id).run().catch(() => {});
+        await log("GitHub 토큰 또는 Cloudflare 설정이 없어 자동 프로비저닝을 건너뜠습니다. 관리자 설정에서 GitHub 토큰을 추가하세요.", "warning");
         return;
       }
 

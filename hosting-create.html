@@ -668,6 +668,7 @@
     // ─────────────────────────────────────────────────────────────────────────
     const TOKEN   = localStorage.getItem('admin_token');
     const HEADERS = { 'Authorization': `Bearer ${TOKEN}`, 'Content-Type': 'application/json' };
+    const USER_ROLE = (() => { try { return JSON.parse(atob(TOKEN.split('.')[1])).role; } catch { return 'user'; } })();
 
     // 플랜 설정
     const PLAN_INFO = {
@@ -744,7 +745,7 @@
         el.classList.add('selected');
 
         const paySection = document.getElementById('payment-section');
-        if (plan !== 'free') {
+        if (plan !== 'free' && USER_ROLE !== 'admin') {
             paySection.classList.remove('hidden');
             loadSavedCards();
         } else {
@@ -1167,8 +1168,7 @@
 
         // 결제수단 ID 수집 (유료 플랜, 어드민은 생략)
         let payment_method_id = null;
-        const userRole = (() => { try { return JSON.parse(atob(localStorage.getItem('admin_token').split('.')[1])).role; } catch { return 'user'; } })();
-        if (selectedPlan !== 'free' && userRole !== 'admin') {
+        if (selectedPlan !== 'free' && USER_ROLE !== 'admin') {
             try { payment_method_id = await getPaymentMethodId(); }
             catch (e) {
                 // 결제수단 등록 실패 시 오류 메시지만 표시, 계속 진행 허용

@@ -71,12 +71,12 @@
         .timer-ring { transform-origin: center; transition: stroke-dashoffset .5s linear; }
     </style>
 </head>
-<body class="bg-[#050505] text-white">
+<body class="bg-[#050505] text-white md:flex md:h-screen md:overflow-hidden">
     <script>
         if (!localStorage.getItem('admin_token')) window.location.href = '/login';
     </script>
 
-    <main class="max-w-2xl mx-auto px-4 py-10">
+    <main class="flex-1 overflow-y-auto px-4 py-10"><div class="max-w-2xl mx-auto">
 
         <!-- 헤더 -->
         <div class="flex items-center gap-4 mb-8">
@@ -660,7 +660,7 @@
             </div>
         </div>
 
-    </main><!-- /main -->
+    </div></main><!-- /main -->
 
     <script src="/src/auth-frontend.js"></script>
     <script src="/src/sidebar.js"></script>

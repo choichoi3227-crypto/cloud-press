@@ -1111,9 +1111,10 @@
                 createdSiteId = data.id;
 
                 // 스텝 인디케이터 → 완료 처리
-                for (let i = 1; i <= 5; i++) {
+                for (let i = 1; i <= 4; i++) {
                     document.getElementById(`step-${i}`)?.classList.add('hidden');
                     const ind = document.getElementById(`ind-${i}`);
+                    if (!ind) continue;
                     ind.className = 'step-done flex-1 p-2.5 border rounded-xl text-center text-xs font-bold text-green-400';
                     ind.innerHTML = `<span>✓</span> ${STEP_LABELS[i]}`;
                 }
@@ -1141,8 +1142,9 @@
                 btn.disabled = false;
                 btn.innerHTML = '<i class="fas fa-rocket mr-2"></i> 호스팅 생성 시작';
             }
-        } catch {
-            showAlert('네트워크 오류가 발생했습니다.');
+        } catch (e) {
+            console.error('[createHosting]', e);
+            showAlert('네트워크 오류가 발생했습니다: ' + e.message);
             btn.disabled = false;
             btn.innerHTML = '<i class="fas fa-rocket mr-2"></i> 호스팅 생성 시작';
         }

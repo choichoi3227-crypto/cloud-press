@@ -221,11 +221,21 @@ export async function onRequestPost(context) {
       await log("Cloudflare Pages 호스팅 구축 시작");
       await log(`플랜: ${plan} | 스토리지: ${planLimits.storage_gb}GB`);
 
-      // Cloudflare API 토큰/계정 ID 조회 (account.html: cf_global_api_key+cf_email 컬럼 사용)
+      // Cloudflare 자격증명 조회
+      // cf_global_api_key = API Token 또는 Global API Key
+      // cf_account_id     = Cloudflare Account ID (32자리)
+      // cf_email          = Global API Key 방식일 때 필요
       const u = await env.DB.prepare("SELECT cf_api_token, cf_account_id, cf_global_api_key, cf_email FROM users WHERE id = ?")
         .bind(payload.id).first().catch(() => null);
       const cfToken     = cf_api_token  || u?.cf_api_token  || u?.cf_global_api_key || env.CF_API_TOKEN;
-      const cfAccountId = cf_account_id || u?.cf_account_id || u?.cf_email          || env.CF_ACCOUNT_ID;
+      const cfAccountId = cf_account_id || u?.cf_account_id || env.CF_ACCOUNT_ID;
+      const cfEmail     = u?.cf_email   || null;
+
+      if (!cfToken || !cfAccountId) {
+        await log("⚠️ Cloudflare API Token 또는 Account ID가 설정되지 않았습니다.", "warning");
+        await log("  내 정보 페이지에서 Cloudflare Account ID와 API Token을 등록해주세요.", "warning");
+      }
+
       const result = await provisionCloudflarePagesHosting({
         env,
         siteId:      id,
@@ -237,6 +247,7 @@ export async function onRequestPost(context) {
         planLimits,
         cfToken,
         cfAccountId,
+        cfEmail,
         initialDomain: initial_domain,
         userId:      payload.id,
         isAdmin:     payload.role === "admin",

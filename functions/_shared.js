@@ -115,6 +115,69 @@ export async function verifyJWT(token, secret) {
   } catch { return null; }
 }
 
+// ── 바인딩 체크 ─────────────────────────────────────────────────────────────
+export function checkBindings(env, keys) {
+  return keys.filter(k => !env[k]);
+}
+
+// ── DB 헬퍼 ─────────────────────────────────────────────────────────────────
+export async function dbGetUserByEmail(db, email) {
+  return db.prepare("SELECT * FROM users WHERE email = ?")
+    .bind(email.toLowerCase().trim())
+    .first();
+}
+
+export async function dbGetUserById(db, id) {
+  return db.prepare("SELECT * FROM users WHERE id = ?")
+    .bind(id)
+    .first();
+}
+
+export async function dbCreateUser(db, { id, email, passwordHash }) {
+  const normalizedEmail = email.toLowerCase().trim();
+  const role = isAdminEmail(normalizedEmail) ? "admin" : "user";
+  const plan = role === "admin" ? "admin" : "free";
+  await db.prepare(
+    "INSERT INTO users (id, email, password_hash, role, plan, created_at) VALUES (?, ?, ?, ?, ?, ?)"
+  ).bind(id, normalizedEmail, passwordHash, role, plan, new Date().toISOString()).run();
+}
+
+export async function dbUpdateUserCfKey(db, userId, cfApiKey, cfEmail) {
+  await db.prepare(
+    "UPDATE users SET cf_global_api_key = ?, cf_email = ? WHERE id = ?"
+  ).bind(cfApiKey, cfEmail, userId).run();
+}
+
+// ── Cloudflare API 키 검증 ───────────────────────────────────────────────────
+export async function validateCfApiKey(apiKey, cfEmail) {
+  try {
+    const res = await fetch("https://api.cloudflare.com/client/v4/user", {
+      headers: {
+        "X-Auth-Email": cfEmail,
+        "X-Auth-Key":   apiKey,
+        "Content-Type": "application/json",
+      },
+    });
+    const data = await res.json();
+    return data.success === true;
+  } catch {
+    return false;
+  }
+}
+
+// ── 세션 헬퍼 (KV) ─────────────────────────────────────────────────────────
+export async function sessionCreate(sessionsKV, userId, email, role) {
+  const sessionId = crypto.randomUUID();
+  const value = JSON.stringify({ id: userId, email, role });
+  // 24시간 TTL
+  await sessionsKV.put(`session:${sessionId}`, value, { expirationTtl: 86400 });
+  return sessionId;
+}
+
+export async function sessionDelete(sessionsKV, token) {
+  await sessionsKV.delete(`session:${token}`);
+}
+
 // ── 인증 미들웨어 ───────────────────────────────────────────────────────────
 export async function requireAuth(request, env) {
   const authHeader = request.headers.get("Authorization");

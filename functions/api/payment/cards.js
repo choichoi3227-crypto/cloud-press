@@ -6,10 +6,30 @@
 
 import { jsonOk, jsonErr, requireAuth } from "../../_shared.js";
 
+// ── payment_cards 테이블 자동 생성 (없으면) ─────────────────────────────────
+async function ensureTable(env) {
+  await env.DB.prepare(`
+    CREATE TABLE IF NOT EXISTS payment_cards (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id     TEXT NOT NULL,
+      billing_key TEXT NOT NULL,
+      card_name   TEXT NOT NULL DEFAULT '카드',
+      brand       TEXT NOT NULL DEFAULT '',
+      last4       TEXT NOT NULL DEFAULT '',
+      exp_month   TEXT NOT NULL DEFAULT '',
+      exp_year    TEXT NOT NULL DEFAULT '',
+      is_default  INTEGER NOT NULL DEFAULT 0,
+      created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )
+  `).run().catch(() => {});
+}
+
 export async function onRequestGet(context) {
   const { request, env } = context;
   const payload = await requireAuth(request, env);
   if (!payload) return jsonErr("인증이 필요합니다.", 401);
+
+  await ensureTable(env);
 
   try {
     const { results } = await env.DB.prepare(
@@ -26,6 +46,8 @@ export async function onRequestPost(context) {
   const payload = await requireAuth(request, env);
   if (!payload) return jsonErr("인증이 필요합니다.", 401);
 
+  await ensureTable(env);
+
   let body;
   try { body = await request.json(); }
   catch { return jsonErr("요청 형식이 올바르지 않습니다.", 400); }
@@ -33,15 +55,26 @@ export async function onRequestPost(context) {
   const { billing_key, card_name, brand, last4, exp_month, exp_year } = body;
   if (!billing_key) return jsonErr("billing_key가 필요합니다.", 400);
 
-  // 기존 카드가 있으면 is_default = 0으로 초기화
-  const existing = await env.DB.prepare("SELECT COUNT(*) as cnt FROM payment_cards WHERE user_id = ?").bind(payload.id).first();
-  const isDefault = (existing?.cnt || 0) === 0 ? 1 : 0;
-
   try {
+    // 기존 카드 수 확인
+    const existing = await env.DB.prepare(
+      "SELECT COUNT(*) as cnt FROM payment_cards WHERE user_id = ?"
+    ).bind(payload.id).first();
+    const isDefault = (existing?.cnt || 0) === 0 ? 1 : 0;
+
     await env.DB.prepare(
       `INSERT INTO payment_cards (user_id, billing_key, card_name, brand, last4, exp_month, exp_year, is_default, created_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`
-    ).bind(payload.id, billing_key, card_name || '카드', brand || '', last4 || '', exp_month || '', exp_year || '', isDefault).run();
+    ).bind(
+      payload.id,
+      billing_key,
+      card_name  || "카드",
+      brand      || "",
+      last4      || "",
+      exp_month  || "",
+      exp_year   || "",
+      isDefault
+    ).run();
 
     return jsonOk({ success: true, message: "카드가 등록되었습니다." });
   } catch (e) {
@@ -53,6 +86,8 @@ export async function onRequestPatch(context) {
   const { request, env } = context;
   const payload = await requireAuth(request, env);
   if (!payload) return jsonErr("인증이 필요합니다.", 401);
+
+  await ensureTable(env);
 
   let body;
   try { body = await request.json(); }
@@ -74,6 +109,8 @@ export async function onRequestDelete(context) {
   const { request, env } = context;
   const payload = await requireAuth(request, env);
   if (!payload) return jsonErr("인증이 필요합니다.", 401);
+
+  await ensureTable(env);
 
   const url = new URL(request.url);
   const id  = url.searchParams.get("id");

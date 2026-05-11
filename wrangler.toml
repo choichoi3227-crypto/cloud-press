@@ -1,11 +1,9 @@
-# CloudPress v3.0 — wrangler.toml
-# 진짜 서버리스 WordPress on Cloudflare Workers
-# PHP: WebAssembly (php-wasm 8.2)
-# Storage: Supabase Storage
-# DB: Cloudflare D1 (SQLite)
-# Cache: Cloudflare KV
+# CloudPress — wrangler.toml
+# 플랫폼 메타데이터 Worker (Cloudflare Pages Functions)
+# 호스팅 방식: GitHub 레포(스토리지) → Cloudflare Pages(배포, 미러링)
+# DB: Cloudflare D1 (플랫폼 메타데이터)
+# Cache/Session: Cloudflare KV
 
-# ── 메인 플랫폼 Worker ────────────────────────────────────────────────────
 name = "cloud-press"
 main = "worker.js"
 compatibility_date = "2025-04-01"
@@ -32,51 +30,31 @@ id      = "19e5e273e99941fbb963300e56dbdf9e"
 binding = "CACHE"
 id      = "9b8370d20a9646b9aa73f63c9200379f"
 
-# ── KV: WordPress 설치 큐 ────────────────────────────────────────────────
-[[kv_namespaces]]
-binding = "INSTALL_QUEUE"
-id      = "f6ae966a71914956864e6ed452ddd9e4"
-
-# ── KV: WordPress 설치 상태 (wp_installed:siteId) ────────────────────────
+# ── KV: 기타 ─────────────────────────────────────────────────────────────
 [[kv_namespaces]]
 binding = "KV"
 id      = "9b8370d20a9646b9aa73f63c9200379f"
 
-# ── Service Binding: PHP Runner Worker ───────────────────────────────────
-# php-wasm으로 실제 PHP를 실행하는 별도 Worker
-# 먼저 php-runner worker를 배포한 후 아래 주석 해제
-# [[services]]
-# binding = "PHP_RUNNER"
-# service = "cloudpress-php"
-
 # ── 필수 secrets (wrangler secret put 명령으로 설정) ─────────────────────
-#
-#   wrangler secret put SUPABASE_URL
-#     ← Supabase 프로젝트 URL (https://xxxx.supabase.co)
-#     ← 반드시 설정! WordPress 파일 저장에 사용
-#
-#   wrangler secret put SUPABASE_SERVICE_KEY
-#     ← Supabase service_role key (storage 접근용)
-#     ← 반드시 설정!
 #
 #   wrangler secret put JWT_SECRET
 #     ← CloudPress 플랫폼 JWT 서명키
 #
-#   wrangler secret put SUPABASE_MANAGEMENT_TOKEN   (선택)
-#     ← Supabase Management API 토큰 (새 프로젝트 자동 생성)
+#   wrangler secret put GITHUB_TOKEN
+#     ← GitHub Personal Access Token (레포 생성·파일 업로드용)
+#     ← repo, workflow 권한 필요
 #
-#   wrangler secret put SUPABASE_ORG_ID             (선택)
-#     ← Supabase 조직 ID
+#   wrangler secret put CF_API_TOKEN       (선택)
+#     ← Cloudflare API 토큰 (Pages 프로젝트 자동 생성용)
+#     ← Cloudflare Pages:Edit 권한 필요
+#
+#   wrangler secret put CF_ACCOUNT_ID     (선택)
+#     ← Cloudflare 계정 ID
 
 [vars]
-SUPABASE_REGION = "ap-northeast-2"
-
+# 플랫폼 도메인 (Cloudflare Pages .pages.dev 또는 커스텀 도메인)
+PLATFORM_DOMAIN = "cloudpress.pages.dev"
 
 [dev]
 port           = 8788
 local_protocol = "http"
-
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# PHP Runner Worker (별도 배포)
-# wrangler deploy --config wrangler-php.toml
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

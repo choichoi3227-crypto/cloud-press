@@ -303,19 +303,22 @@ export async function onRequestPost(context) {
       await log(`GitHub 레포: https://github.com/${owner}/${repoName}`);
 
     } catch (e) {
-      await log("프로비저닝 오류: " + e.message, "error");
+      const errMsg = String(e?.message || e);
+      const errStack = String(e?.stack || "").slice(0, 500);
+      await log("프로비저닝 오류: " + errMsg, "error");
+      await log("스택: " + errStack, "error");
       await env.DB.prepare("UPDATE sites SET status = 'error' WHERE id = ?").bind(id).run().catch(() => {});
     }
   };
 
-  // waitUntil 처리
-  const realWaitUntil = context._workerCtx?.waitUntil?.bind(context._workerCtx);
-  if (realWaitUntil) {
-    realWaitUntil(provision());
-  } else if (context.waitUntil && context.waitUntil !== (() => {})) {
-    try { context.waitUntil(provision()); } catch { provision().catch(() => {}); }
-  } else {
-    provision().catch(() => {});
+  // Cloudflare Pages Functions: context.waitUntil로 백그라운드 실행
+  try {
+    context.waitUntil(provision());
+  } catch {
+    provision().catch(async (e) => {
+      await env.DB.prepare("UPDATE sites SET status = 'error' WHERE id = ?").bind(id).run().catch(() => {});
+      await env.DB.prepare("INSERT INTO php_logs (site_id, message, level) VALUES (?, ?, ?)").bind(id, "프로비저닝 실행 오류: " + String(e?.message || e), "error").run().catch(() => {});
+    });
   }
 
   return jsonOk({

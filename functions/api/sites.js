@@ -114,6 +114,116 @@ export async function onRequestGet(context) {
 
 export async function onRequestPost(context) {
   const { request, env } = context;
+
+  // ── 내부 프로비저닝 요청 처리 ─────────────────────────────────────────
+  const url    = new URL(request.url);
+  const action = url.searchParams.get("action");
+  const siteId = url.searchParams.get("id");
+
+  if (action === "provision" && siteId) {
+    // 내부 요청 검증
+    const internalKey = request.headers.get("X-Internal-Provision");
+    if (!internalKey || internalKey !== (env.JWT_SECRET || "internal")) {
+      return jsonErr("Unauthorized", 401);
+    }
+
+    let body2;
+    try { body2 = await request.json(); }
+    catch { return jsonErr("Bad request", 400); }
+
+    const pp = body2._provision_payload || {};
+    const payload2 = await requireAuth(request, env).catch(() => null);
+    if (!payload2) return jsonErr("Unauthorized", 401);
+
+    // DB에서 CF 자격증명 조회
+    const u = await env.DB.prepare(
+      "SELECT cf_global_api_key, cf_account_id, cf_email FROM users WHERE id = ?"
+    ).bind(payload2.id).first().catch(() => null);
+
+    const cfToken     = pp.cf_api_token  || u?.cf_global_api_key || env.CF_API_TOKEN;
+    const cfAccountId = pp.cf_account_id || u?.cf_account_id     || env.CF_ACCOUNT_ID;
+    const cfEmail     = u?.cf_email || null;
+
+    const site = await env.DB.prepare("SELECT * FROM sites WHERE id = ?").bind(siteId).first();
+    if (!site) return jsonErr("Site not found", 404);
+
+    const planLimits  = PLAN_LIMITS[site.plan] || PLAN_LIMITS.free;
+
+    const log = async (msg, level = "info") => {
+      await env.DB.prepare("INSERT INTO php_logs (site_id, message, level) VALUES (?, ?, ?)")
+        .bind(siteId, msg, level).run().catch(() => {});
+    };
+
+    await log("프로비저닝 시작 (내부 트리거)");
+    await log(`CF Token: ${cfToken ? "✅ 있음(" + String(cfToken).slice(0,8) + "...)" : "❌ 없음"}`);
+    await log(`CF AccountId: ${cfAccountId ? "✅ 있음(" + String(cfAccountId).slice(0,8) + "...)" : "❌ 없음"}`);
+
+    try {
+      const result = await provisionCloudflarePagesHosting({
+        env,
+        siteId,
+        siteName:    site.site_name,
+        adminUser:   pp.wp_admin_user  || "admin",
+        adminPass:   pp.wp_admin_pass  || "changeme123!",
+        adminEmail:  pp.wp_admin_email || payload2.email,
+        plan:        site.plan,
+        planLimits,
+        cfToken,
+        cfAccountId,
+        cfEmail,
+        initialDomain: pp.initial_domain || null,
+        userId:      payload2.id,
+        isAdmin:     payload2.role === "admin",
+        log,
+      });
+
+      if (!result) {
+        await env.DB.prepare("UPDATE sites SET status = 'error' WHERE id = ?").bind(siteId).run().catch(() => {});
+        return jsonOk({ ok: false });
+      }
+
+      const { owner, repoName, pagesUrl, pagesProject, cfDomain,
+              d1Id, kvSessionsId, kvCacheId, workerName } = result;
+      const primaryDomain = cfDomain || pagesUrl || null;
+
+      await env.DB.prepare(`
+        UPDATE sites SET
+          primary_domain    = ?,
+          github_repo_owner = ?,
+          github_repo_name  = ?,
+          cf_pages_url      = ?,
+          cf_pages_project  = ?,
+          cf_worker_name    = ?,
+          cf_d1_id          = ?,
+          cf_kv_id          = ?,
+          plan              = ?,
+          status            = 'active'
+        WHERE id = ?
+      `).bind(
+        primaryDomain, owner, repoName, pagesUrl, pagesProject,
+        workerName || null, d1Id || null, kvSessionsId || null,
+        site.plan, siteId
+      ).run();
+
+      await log("✅ 프로비저닝 완료!");
+      await log(`Pages URL: ${pagesUrl}`);
+      await log(`GitHub: https://github.com/${owner}/${repoName}`);
+      if (d1Id)        await log(`D1 DB ID: ${d1Id}`);
+      if (kvSessionsId) await log(`KV ID: ${kvSessionsId}`);
+      if (workerName)  await log(`Worker: ${workerName}`);
+
+      return jsonOk({ ok: true, pagesUrl, d1Id, kvSessionsId, workerName });
+
+    } catch (e) {
+      const errMsg = String(e?.message || e);
+      await log("❌ 프로비저닝 오류: " + errMsg, "error");
+      await log("스택: " + String(e?.stack || "").slice(0, 500), "error");
+      await env.DB.prepare("UPDATE sites SET status = 'error' WHERE id = ?").bind(siteId).run().catch(() => {});
+      return jsonOk({ ok: false, error: errMsg });
+    }
+  }
+
+  // ── 일반 POST: 새 사이트 생성 ─────────────────────────────────────────
   const payload = await requireAuth(request, env);
   if (!payload) return jsonErr("인증이 필요합니다.", 401);
 
@@ -216,110 +326,35 @@ export async function onRequestPost(context) {
   const planLimits = PLAN_LIMITS[plan] || PLAN_LIMITS.free;
 
   // ── 백그라운드 프로비저닝 ────────────────────────────────────────────────
-  const provision = async () => {
-    try {
-      await log("Cloudflare Pages 호스팅 구축 시작");
-      await log(`플랜: ${plan} | 스토리지: ${planLimits.storage_gb}GB`);
-
-      // Cloudflare 자격증명 조회
-      // cf_global_api_key = API Token 또는 Global API Key
-      // cf_account_id     = Cloudflare Account ID (32자리)
-      // cf_email          = Global API Key 방식일 때 필요
-      const u = await env.DB.prepare("SELECT cf_api_token, cf_account_id, cf_global_api_key, cf_email FROM users WHERE id = ?")
-        .bind(payload.id).first().catch(() => null);
-      const cfToken     = cf_api_token  || u?.cf_api_token  || u?.cf_global_api_key || env.CF_API_TOKEN;
-      const cfAccountId = cf_account_id || u?.cf_account_id || env.CF_ACCOUNT_ID;
-      const cfEmail     = u?.cf_email   || null;
-
-      // 디버그: 실제 CF 자격증명 소스 로깅
-      await log(`CF Token: ${cfToken ? "✅ 있음(" + String(cfToken).slice(0,8) + "...)" : "❌ 없음"}`);
-      await log(`CF AccountId: ${cfAccountId ? "✅ 있음(" + String(cfAccountId).slice(0,8) + "...)" : "❌ 없음"}`);
-      await log(`CF Email: ${cfEmail ? "✅ " + cfEmail : "없음(Token 방식)"}`);
-      await log(`DB 값: cf_global_api_key=${u?.cf_global_api_key ? "있음" : "없음"}, cf_account_id=${u?.cf_account_id ? "있음" : "없음"}`);
-      await log(`ENV 값: CF_API_TOKEN=${env.CF_API_TOKEN ? "있음" : "없음"}, CF_ACCOUNT_ID=${env.CF_ACCOUNT_ID ? "있음" : "없음"}`);
-
-      if (!cfToken || !cfAccountId) {
-        await log("⚠️ Cloudflare API Token 또는 Account ID가 없습니다. 내 정보 페이지에서 Cloudflare API를 등록해주세요.", "error");
-      }
-
-      const result = await provisionCloudflarePagesHosting({
-        env,
-        siteId:      id,
-        siteName:    site_name.trim(),
-        adminUser:   wp_admin_user,
-        adminPass:   wp_admin_pass,
-        adminEmail:  wp_admin_email,
-        plan,
-        planLimits,
-        cfToken,
-        cfAccountId,
-        cfEmail,
-        initialDomain: initial_domain,
-        userId:      payload.id,
-        isAdmin:     payload.role === "admin",
-        log,
-      });
-
-      if (!result) {
-        await env.DB.prepare(
-          "UPDATE sites SET status = 'error' WHERE id = ?"
-        ).bind(id).run().catch(() => {});
-        // log에 이미 원인 메시지가 기록돼 있음 (GitHub 토큰 없음 / CF 자격증명 없음 등)
-        return;
-      }
-
-      const { owner, repoName, pagesUrl, pagesProject, cfDomain, d1Id, kvSessionsId, kvCacheId, workerName } = result;
-
-      // DB 최종 업데이트
-      const primaryDomain = cfDomain || pagesUrl?.replace("https://", "").split("/")[0] || null;
-      await env.DB.prepare(
-        `UPDATE sites SET
-          primary_domain    = ?,
-          github_repo_owner = ?,
-          github_repo_name  = ?,
-          cf_pages_url      = ?,
-          cf_pages_project  = ?,
-          cf_worker_name    = ?,
-          cf_d1_id          = ?,
-          cf_kv_id          = ?,
-          plan              = ?,
-          status            = 'active'
-         WHERE id = ?`
-      ).bind(
-        primaryDomain,
-        owner,
-        repoName,
-        pagesUrl,
-        pagesProject,
-        workerName   || null,
-        d1Id         || null,
-        kvSessionsId || null,
-        plan,
-        id
-      ).run();
-
-      await log("Cloudflare Pages 호스팅 구축 완료!");
-      await log(`Pages URL: ${pagesUrl}`);
-      await log(`GitHub 레포: https://github.com/${owner}/${repoName}`);
-
-    } catch (e) {
-      const errMsg = String(e?.message || e);
-      const errStack = String(e?.stack || "").slice(0, 500);
-      await log("프로비저닝 오류: " + errMsg, "error");
-      await log("스택: " + errStack, "error");
-      await env.DB.prepare("UPDATE sites SET status = 'error' WHERE id = ?").bind(id).run().catch(() => {});
-    }
   };
 
-  // Cloudflare Pages Functions: context.waitUntil로 백그라운드 실행
-  try {
-    context.waitUntil(provision());
-  } catch {
-    provision().catch(async (e) => {
-      await env.DB.prepare("UPDATE sites SET status = 'error' WHERE id = ?").bind(id).run().catch(() => {});
-      await env.DB.prepare("INSERT INTO php_logs (site_id, message, level) VALUES (?, ?, ?)").bind(id, "프로비저닝 실행 오류: " + String(e?.message || e), "error").run().catch(() => {});
-    });
-  }
+  // Self-fetch로 프로비저닝 트리거 (긴 작업을 별도 요청으로 분리)
+  // waitUntil로 보장: 응답 반환 후에도 fetch가 완료될 때까지 Worker 유지
+  const provisionUrl = new URL(request.url);
+  provisionUrl.pathname = "/api/sites";
+  provisionUrl.search   = `?action=provision&id=${id}`;
+
+  const triggerFetch = fetch(provisionUrl.toString(), {
+    method:  "POST",
+    headers: {
+      "Content-Type":  "application/json",
+      "Authorization": request.headers.get("Authorization") || "",
+      "X-Internal-Provision": env.JWT_SECRET || "internal",
+    },
+    body: JSON.stringify({
+      _provision_payload: {
+        site_name, plan, initial_domain,
+        wp_admin_user, wp_admin_pass, wp_admin_email,
+        cf_api_token, cf_account_id,
+      }
+    }),
+  }).catch(async (e) => {
+    await env.DB.prepare("UPDATE sites SET status = 'error' WHERE id = ?").bind(id).run().catch(() => {});
+    await env.DB.prepare("INSERT INTO php_logs (site_id, message, level) VALUES (?, ?, ?)")
+      .bind(id, "프로비저닝 트리거 실패: " + String(e?.message || e), "error").run().catch(() => {});
+  });
+
+  try { context.waitUntil(triggerFetch); } catch { /* waitUntil 없어도 fetch는 실행됨 */ }
 
   return jsonOk({
     success: true,

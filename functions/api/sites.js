@@ -224,13 +224,26 @@ export async function onRequestPost(context) {
   // context.waitUntil이 있으면 사용 (Cloudflare Pages Functions 표준)
   // 없으면 직접 await (CPU 제한 내에서 완료)
   const doProvision = async () => {
+    // DB log 헬퍼 - 실패해도 console에라도 찍기
     const log = async (msg, level = "info") => {
+      console.log(`[CloudPress][${level.toUpperCase()}] ${msg}`);
       await env.DB.prepare("INSERT INTO php_logs (site_id, message, level) VALUES (?, ?, ?)")
-        .bind(id, msg, level).run().catch(() => {});
+        .bind(id, String(msg).slice(0, 2000), level).run()
+        .catch((dbErr) => console.error("[CloudPress] DB log write failed:", dbErr?.message));
     };
 
+    // 즉시 DB에 시작 로그 기록 (이게 안 되면 DB 자체 문제)
+    const startOk = await env.DB.prepare("INSERT INTO php_logs (site_id, message, level) VALUES (?, ?, ?)")
+      .bind(id, "프로비저닝 시작", "info").run()
+      .then(() => true).catch((e) => { console.error("[CloudPress] CRITICAL: first log failed:", e?.message, e); return false; });
+
+    if (!startOk) {
+      console.error("[CloudPress] Cannot write to php_logs - site_id:", id);
+      await env.DB.prepare("UPDATE sites SET status = 'error' WHERE id = ?").bind(id).run().catch(() => {});
+      return;
+    }
+
     try {
-      await log("프로비저닝 시작");
       await log(`CF Token: ${cfToken ? "✅ " + String(cfToken).slice(0,8) + "..." : "❌ 없음 - 내 정보에서 CF API 등록 필요"}`);
       await log(`CF AccountId: ${cfAccountId ? "✅ " + String(cfAccountId).slice(0,8) + "..." : "❌ 없음 - 내 정보에서 CF API 등록 필요"}`);
 
@@ -275,11 +288,11 @@ export async function onRequestPost(context) {
     } catch (e) {
       const msg = String(e?.message || e);
       const stk = String(e?.stack || "").slice(0, 400);
-      const log2 = async (m, lv = "error") =>
-        env.DB.prepare("INSERT INTO php_logs (site_id, message, level) VALUES (?, ?, ?)")
-          .bind(id, m, lv).run().catch(() => {});
-      await log2("❌ 프로비저닝 오류: " + msg);
-      await log2("스택: " + stk);
+      console.error("[CloudPress] Provision error:", msg, stk);
+      await env.DB.prepare("INSERT INTO php_logs (site_id, message, level) VALUES (?, ?, ?)")
+        .bind(id, "❌ 프로비저닝 오류: " + msg, "error").run().catch((de) => console.error("[CloudPress] log write error:", de?.message));
+      await env.DB.prepare("INSERT INTO php_logs (site_id, message, level) VALUES (?, ?, ?)")
+        .bind(id, "스택: " + stk, "error").run().catch(() => {});
       await env.DB.prepare("UPDATE sites SET status = 'error' WHERE id = ?").bind(id).run().catch(() => {});
     }
   };

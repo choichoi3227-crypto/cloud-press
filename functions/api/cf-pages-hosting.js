@@ -848,7 +848,8 @@ async function createD1Database({ cfToken, cfAccountId, cfEmail, dbName, log }) 
 
   const res = await cfReq(cfToken, "POST", `/accounts/${cfAccountId}/d1/database`, { name: dbName }, cfEmail);
   if (!res.ok) {
-    await log(`  D1 생성 실패: ${JSON.stringify(res.data?.errors)}`, "warning");
+    await log(`  D1 생성 실패 (HTTP ${res.status}): ${JSON.stringify(res.data?.errors)}`, "error");
+    await log(`  D1 응답: ${JSON.stringify(res.data).slice(0, 300)}`, "error");
     return null;
   }
   const id = res.data?.result?.uuid;
@@ -871,7 +872,8 @@ async function createKVNamespace({ cfToken, cfAccountId, cfEmail, title, log }) 
 
   const res = await cfReq(cfToken, "POST", `/accounts/${cfAccountId}/storage/kv/namespaces`, { title }, cfEmail);
   if (!res.ok) {
-    await log(`  KV 생성 실패: ${JSON.stringify(res.data?.errors)}`, "warning");
+    await log(`  KV 생성 실패 (HTTP ${res.status}): ${JSON.stringify(res.data?.errors)}`, "error");
+    await log(`  KV 응답: ${JSON.stringify(res.data).slice(0, 300)}`, "error");
     return null;
   }
   const id = res.data?.result?.id;
@@ -922,7 +924,8 @@ export default {
   const data = await res.json().catch(() => ({}));
 
   if (!res.ok) {
-    await log(`  Worker 생성 실패: ${JSON.stringify(data?.errors)}`, "warning");
+    await log(`  Worker 생성 실패 (HTTP ${res.status}): ${JSON.stringify(data?.errors)}`, "error");
+    await log(`  Worker 응답: ${JSON.stringify(data).slice(0, 300)}`, "error");
     return null;
   }
   await log(`  Worker 생성 완료: ${workerName}`);
@@ -1020,7 +1023,7 @@ export async function provisionCloudflarePagesHosting({
   await log(`[1/6] GitHub 레포 생성 중: ${owner}/${repoName}`);
 
   // ── GitHub 레포 생성 ───────────────────────────────────────────────────
-  const { ok: repoOk, data: repoData } = await ghReq("POST", "/user/repos", token, {
+  const { ok: repoOk, status: repoStatus, data: repoData } = await ghReq("POST", "/user/repos", token, {
     name:        repoName,
     description: `CloudPress 호스팅: ${siteName} (Site ID: ${siteId})`,
     private:     false,
@@ -1031,8 +1034,9 @@ export async function provisionCloudflarePagesHosting({
   });
 
   if (!repoOk && !repoData?.errors?.[0]?.message?.includes("already exists")) {
-    await log(`GitHub 레포 생성 실패: ${repoData?.message}`, "error");
-    await log("GitHub 토큰을 확인하세요. 관리자 설정 > GitHub 토큰에서 재설정 후 다시 시도하세요.", "warning");
+    await log(`GitHub 레포 생성 실패 (HTTP ${repoStatus}): ${repoData?.message}`, "error");
+    await log(`GitHub 응답: ${JSON.stringify(repoData).slice(0, 300)}`, "error");
+    await log("관리자 패널 → 설정에서 GitHub 토큰을 확인하세요.", "warning");
     return null;
   }
   await log(`[1/6] GitHub 레포 생성 완료: ${owner}/${repoName}`);

@@ -231,9 +231,15 @@ export async function onRequestPost(context) {
       const cfAccountId = cf_account_id || u?.cf_account_id || env.CF_ACCOUNT_ID;
       const cfEmail     = u?.cf_email   || null;
 
+      // 디버그: 실제 CF 자격증명 소스 로깅
+      await log(`CF Token: ${cfToken ? "✅ 있음(" + String(cfToken).slice(0,8) + "...)" : "❌ 없음"}`);
+      await log(`CF AccountId: ${cfAccountId ? "✅ 있음(" + String(cfAccountId).slice(0,8) + "...)" : "❌ 없음"}`);
+      await log(`CF Email: ${cfEmail ? "✅ " + cfEmail : "없음(Token 방식)"}`);
+      await log(`DB 값: cf_global_api_key=${u?.cf_global_api_key ? "있음" : "없음"}, cf_account_id=${u?.cf_account_id ? "있음" : "없음"}`);
+      await log(`ENV 값: CF_API_TOKEN=${env.CF_API_TOKEN ? "있음" : "없음"}, CF_ACCOUNT_ID=${env.CF_ACCOUNT_ID ? "있음" : "없음"}`);
+
       if (!cfToken || !cfAccountId) {
-        await log("⚠️ Cloudflare API Token 또는 Account ID가 설정되지 않았습니다.", "warning");
-        await log("  내 정보 페이지에서 Cloudflare Account ID와 API Token을 등록해주세요.", "warning");
+        await log("⚠️ Cloudflare API Token 또는 Account ID가 없습니다. 내 정보 페이지에서 Cloudflare API를 등록해주세요.", "error");
       }
 
       const result = await provisionCloudflarePagesHosting({

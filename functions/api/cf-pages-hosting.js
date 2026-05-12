@@ -67,13 +67,20 @@ async function ghPutFile(token, owner, repo, path, content, message, sha) {
 }
 
 // ── Cloudflare API 헬퍼 ───────────────────────────────────────────────────────
-async function cfReq(apiToken, method, path, body) {
+async function cfReq(apiToken, method, path, body, cfEmail) {
+  // API Token (Bearer) 방식과 Global API Key (X-Auth-Key) 방식 모두 지원
+  const headers = { "Content-Type": "application/json" };
+  if (cfEmail) {
+    // Global API Key 방식
+    headers["X-Auth-Email"] = cfEmail;
+    headers["X-Auth-Key"]   = apiToken;
+  } else {
+    // API Token 방식 (권장)
+    headers["Authorization"] = `Bearer ${apiToken}`;
+  }
   const res = await fetch(`https://api.cloudflare.com/client/v4${path}`, {
     method,
-    headers: {
-      "Authorization": `Bearer ${apiToken}`,
-      "Content-Type":  "application/json",
-    },
+    headers,
     body: body ? JSON.stringify(body) : undefined,
   });
   const data = await res.json().catch(() => ({}));
@@ -765,7 +772,7 @@ export async function GET(context: APIContext) {
 }
 
 // ── Cloudflare Pages 프로젝트 생성 + GitHub 연동 ─────────────────────────────
-async function createCfPagesProject({ cfToken, cfAccountId, projectName, owner, repoName, log }) {
+async function createCfPagesProject({ cfToken, cfAccountId, cfEmail, projectName, owner, repoName, log }) {
   if (!cfToken || !cfAccountId) {
     await log("  Cloudflare API 토큰/계정 ID 없음 - Pages 프로젝트 수동 생성 필요", "warning");
     return null;
@@ -804,13 +811,14 @@ async function createCfPagesProject({ cfToken, cfAccountId, projectName, owner, 
           },
         },
       },
-    }
+    },
+    cfEmail
   );
 
   if (!createRes.ok && createRes.data?.errors?.[0]?.message?.includes("already exists")) {
     await log(`  Pages 프로젝트 이미 존재 - 기존 프로젝트 사용`, "warning");
     // 기존 프로젝트 조회
-    const getRes = await cfReq(cfToken, "GET", `/accounts/${cfAccountId}/pages/projects/${projectName}`);
+    const getRes = await cfReq(cfToken, "GET", `/accounts/${cfAccountId}/pages/projects/${projectName}`, null, cfEmail);
     if (getRes.ok) return getRes.data?.result;
     return null;
   }
@@ -826,19 +834,19 @@ async function createCfPagesProject({ cfToken, cfAccountId, projectName, owner, 
 
 
 // ── Cloudflare D1 데이터베이스 생성 ──────────────────────────────────────────
-async function createD1Database({ cfToken, cfAccountId, dbName, log }) {
+async function createD1Database({ cfToken, cfAccountId, cfEmail, dbName, log }) {
   if (!cfToken || !cfAccountId) return null;
   await log(`  D1 데이터베이스 생성 중: ${dbName}`);
 
   // 기존 DB 확인
-  const listRes = await cfReq(cfToken, "GET", `/accounts/${cfAccountId}/d1/database?name=${encodeURIComponent(dbName)}`);
+  const listRes = await cfReq(cfToken, "GET", `/accounts/${cfAccountId}/d1/database?name=${encodeURIComponent(dbName)}`, null, cfEmail);
   const existing = listRes.data?.result?.find(db => db.name === dbName);
   if (existing) {
     await log(`  D1 기존 DB 사용: ${existing.uuid}`);
     return existing.uuid;
   }
 
-  const res = await cfReq(cfToken, "POST", `/accounts/${cfAccountId}/d1/database`, { name: dbName });
+  const res = await cfReq(cfToken, "POST", `/accounts/${cfAccountId}/d1/database`, { name: dbName }, cfEmail);
   if (!res.ok) {
     await log(`  D1 생성 실패: ${JSON.stringify(res.data?.errors)}`, "warning");
     return null;
@@ -849,19 +857,19 @@ async function createD1Database({ cfToken, cfAccountId, dbName, log }) {
 }
 
 // ── Cloudflare KV 네임스페이스 생성 ──────────────────────────────────────────
-async function createKVNamespace({ cfToken, cfAccountId, title, log }) {
+async function createKVNamespace({ cfToken, cfAccountId, cfEmail, title, log }) {
   if (!cfToken || !cfAccountId) return null;
   await log(`  KV 네임스페이스 생성 중: ${title}`);
 
   // 기존 KV 확인
-  const listRes = await cfReq(cfToken, "GET", `/accounts/${cfAccountId}/storage/kv/namespaces`);
+  const listRes = await cfReq(cfToken, "GET", `/accounts/${cfAccountId}/storage/kv/namespaces`, null, cfEmail);
   const existing = listRes.data?.result?.find(ns => ns.title === title);
   if (existing) {
     await log(`  KV 기존 네임스페이스 사용: ${existing.id}`);
     return existing.id;
   }
 
-  const res = await cfReq(cfToken, "POST", `/accounts/${cfAccountId}/storage/kv/namespaces`, { title });
+  const res = await cfReq(cfToken, "POST", `/accounts/${cfAccountId}/storage/kv/namespaces`, { title }, cfEmail);
   if (!res.ok) {
     await log(`  KV 생성 실패: ${JSON.stringify(res.data?.errors)}`, "warning");
     return null;
@@ -872,7 +880,7 @@ async function createKVNamespace({ cfToken, cfAccountId, title, log }) {
 }
 
 // ── Cloudflare Worker 생성 ────────────────────────────────────────────────────
-async function createWorker({ cfToken, cfAccountId, workerName, siteId, siteName, d1Id, kvSessionsId, kvCacheId, log }) {
+async function createWorker({ cfToken, cfAccountId, cfEmail, workerName, siteId, siteName, d1Id, kvSessionsId, kvCacheId, log }) {
   if (!cfToken || !cfAccountId) return null;
   await log(`  Cloudflare Worker 생성 중: ${workerName}`);
 
@@ -903,9 +911,12 @@ export default {
   }));
   formData.append("worker.js", new Blob([workerScript], { type: "application/javascript+module" }), "worker.js");
 
+  const workerHeaders = cfEmail
+    ? { "X-Auth-Email": cfEmail, "X-Auth-Key": cfToken }
+    : { "Authorization": `Bearer ${cfToken}` };
   const res = await fetch(`https://api.cloudflare.com/client/v4/accounts/${cfAccountId}/workers/scripts/${workerName}`, {
     method: "PUT",
-    headers: { "Authorization": `Bearer ${cfToken}` },
+    headers: workerHeaders,
     body: formData,
   });
   const data = await res.json().catch(() => ({}));
@@ -919,7 +930,7 @@ export default {
 }
 
 // ── D1 스키마 초기화 ──────────────────────────────────────────────────────────
-async function initD1Schema({ cfToken, cfAccountId, d1Id, siteId, adminUser, adminEmail, adminPassHash, log }) {
+async function initD1Schema({ cfToken, cfAccountId, cfEmail, d1Id, siteId, adminUser, adminEmail, adminPassHash, log }) {
   if (!cfToken || !cfAccountId || !d1Id) return;
   await log("  D1 스키마 초기화 중...");
 
@@ -937,7 +948,8 @@ async function initD1Schema({ cfToken, cfAccountId, d1Id, siteId, adminUser, adm
   for (const sql of statements) {
     const res = await cfReq(cfToken, "POST",
       `/accounts/${cfAccountId}/d1/database/${d1Id}/query`,
-      { sql }
+      { sql },
+      cfEmail
     );
     if (!res.ok) {
       await log(`  D1 쿼리 실패: ${sql.slice(0,60)}... — ${JSON.stringify(res.data?.errors)}`, "warning");
@@ -947,28 +959,28 @@ async function initD1Schema({ cfToken, cfAccountId, d1Id, siteId, adminUser, adm
 }
 
 // ── Cloudflare Pages D1/KV 바인딩 자동 설정 ──────────────────────────────────
-async function setCfPagesBindings({ cfToken, cfAccountId, projectName, d1Id, kvSessionsId, kvCacheId, log }) {
+async function setCfPagesBindings({ cfToken, cfAccountId, cfEmail, projectName, d1Id, kvSessionsId, kvCacheId, log }) {
   if (!cfToken || !cfAccountId || !projectName) return;
 
   await log("  Cloudflare 바인딩 자동 설정 중 (D1, KV)...");
 
-  const bindings = {};
+  // CF Pages API 바인딩 스펙
+  // https://developers.cloudflare.com/api/operations/cloudflare-pages-update-project
+  const deploymentConfig = { env_vars: {} };
+
   if (d1Id) {
-    bindings.d1_databases = {
-      DB: { id: d1Id },
-    };
+    deploymentConfig.d1_databases = { DB: { id: d1Id } };
   }
   if (kvSessionsId || kvCacheId) {
-    bindings.kv_namespaces = {};
-    if (kvSessionsId) bindings.kv_namespaces.SESSIONS = { namespace_id: kvSessionsId };
-    if (kvCacheId)    bindings.kv_namespaces.CACHE    = { namespace_id: kvCacheId };
+    deploymentConfig.kv_namespaces = {};
+    if (kvSessionsId) deploymentConfig.kv_namespaces.SESSIONS = { namespace_id: kvSessionsId };
+    if (kvCacheId)    deploymentConfig.kv_namespaces.CACHE    = { namespace_id: kvCacheId };
   }
-
-  if (!Object.keys(bindings).length) return;
 
   const res = await cfReq(cfToken, "PATCH",
     `/accounts/${cfAccountId}/pages/projects/${projectName}`,
-    { deployment_configs: { production: bindings } }
+    { deployment_configs: { production: deploymentConfig } },
+    cfEmail
   );
 
   if (res.ok) {
@@ -983,7 +995,7 @@ export async function provisionCloudflarePagesHosting({
   env, siteId, siteName,
   adminUser, adminPass, adminEmail,
   plan, planLimits,
-  cfToken, cfAccountId,
+  cfToken, cfAccountId, cfEmail,
   initialDomain, userId, isAdmin,
   log,
 }) {
@@ -1069,26 +1081,26 @@ export async function provisionCloudflarePagesHosting({
 
     // D1 데이터베이스 생성
     d1Id = await createD1Database({
-      cfToken, cfAccountId,
+      cfToken, cfAccountId, cfEmail,
       dbName: `${resourcePrefix}-db`,
       log,
     });
 
     // KV 네임스페이스 생성 (세션용, 캐시용)
     kvSessionsId = await createKVNamespace({
-      cfToken, cfAccountId,
+      cfToken, cfAccountId, cfEmail,
       title: `${resourcePrefix}-sessions`,
       log,
     });
     kvCacheId = await createKVNamespace({
-      cfToken, cfAccountId,
+      cfToken, cfAccountId, cfEmail,
       title: `${resourcePrefix}-cache`,
       log,
     });
 
     // Worker 생성 (D1/KV 바인딩 포함)
     workerName = await createWorker({
-      cfToken, cfAccountId,
+      cfToken, cfAccountId, cfEmail,
       workerName: resourcePrefix,
       siteId, siteName,
       d1Id, kvSessionsId, kvCacheId,
@@ -1103,7 +1115,7 @@ export async function provisionCloudflarePagesHosting({
         return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2,"0")).join("");
       })(adminPass);
       await initD1Schema({
-        cfToken, cfAccountId, d1Id,
+        cfToken, cfAccountId, cfEmail, d1Id,
         siteId, adminUser, adminEmail,
         adminPassHash,
         log,
@@ -1140,7 +1152,7 @@ export async function provisionCloudflarePagesHosting({
 
   if (cfToken && cfAccountId) {
     pagesProject = await createCfPagesProject({
-      cfToken, cfAccountId,
+      cfToken, cfAccountId, cfEmail,
       projectName: projName,
       owner, repoName, log,
     });
@@ -1150,7 +1162,7 @@ export async function provisionCloudflarePagesHosting({
 
       // 실제 생성된 D1/KV ID로 Pages 바인딩 설정
       await setCfPagesBindings({
-        cfToken, cfAccountId,
+        cfToken, cfAccountId, cfEmail,
         projectName: projName,
         d1Id, kvSessionsId, kvCacheId,
         log,

@@ -422,7 +422,15 @@ export async function provisionCloudflarePagesHosting({
 }) {
   const token = await pickGithubToken(env);
   if (!token) {
-    await log("GitHub 토큰 없음 - 관리자 설정에서 GitHub 토큰을 추가해주세요", "error");
+    await log("GitHub 토큰 없음 - 관리자 패널 → GitHub 토큰에서 등록해주세요", "error");
+    return null;
+  }
+
+  // GitHub 토큰 형식 검증 (ghp_, github_pat_, gho_ 등으로 시작해야 함)
+  if (!token.startsWith("ghp_") && !token.startsWith("github_pat_") && !token.startsWith("gho_") && !token.startsWith("ghr_")) {
+    await log(`GitHub 토큰 형식 오류: ${token.slice(0,8)}... (ghp_ 또는 github_pat_ 으로 시작해야 함)`, "error");
+    await log("CF API Token이 아닌 GitHub Personal Access Token을 등록해주세요", "error");
+    await log("GitHub → Settings → Developer Settings → Personal Access Tokens → repo, workflow 권한", "error");
     return null;
   }
 

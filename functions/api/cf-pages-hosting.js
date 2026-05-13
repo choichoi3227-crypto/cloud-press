@@ -431,12 +431,14 @@ export async function provisionCloudflarePagesHosting({
   const projName  = `cp-${shortId}`;
 
   // GitHub 계정 확인
-  const { ok: meOk, data: meData } = await ghReq("GET", "/user", token);
+  const { ok: meOk, status: meStatus, data: meData } = await ghReq("GET", "/user", token);
   if (!meOk || !meData?.login) {
-    await log("GitHub 토큰 인증 실패", "error");
+    await log(`GitHub 토큰 인증 실패 (HTTP ${meStatus}): ${JSON.stringify(meData).slice(0, 200)}`, "error");
+    await log("관리자 패널 → GitHub 토큰 설정에서 토큰을 재발급해주세요. (repo, workflow 권한 필요)", "error");
     return null;
   }
   const owner = meData.login;
+  await log(`GitHub 계정: ${owner} (${meData.name || ""})`);
 
   await log(`[1/6] GitHub 레포 생성 중: ${owner}/${repoName}`);
 

@@ -31,3 +31,7 @@ CREATE TABLE IF NOT EXISTS payment_cards (
 -- ── 기존 GitHub Pages 상태를 Cloudflare Pages로 업데이트 ─────────────────
 -- (pending_domain 상태 사이트는 그대로 유지)
 UPDATE sites SET status = 'active' WHERE status = 'pending_domain';
+
+-- ── php_logs 테이블 누락 컬럼 추가 ──────────────────────────────────────────
+ALTER TABLE php_logs ADD COLUMN level   TEXT DEFAULT 'info';
+ALTER TABLE php_logs ADD COLUMN is_read INTEGER DEFAULT 0;

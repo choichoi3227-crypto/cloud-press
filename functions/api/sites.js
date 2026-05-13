@@ -13,6 +13,7 @@
 
 import { jsonOk, jsonErr, requireAuth, PLAN_LIMITS } from "../_shared.js";
 import { provisionCloudflarePagesHosting } from "./cf-pages-hosting.js";
+import { pickGithubToken } from "./github-storage.js";
 
 // ── Cloudflare API 헬퍼 ────────────────────────────────────────────────────
 
@@ -230,7 +231,8 @@ export async function onRequestPost(context) {
     await log("▶ 프로비저닝 시작");
     await log(`CF Token     : ${cfToken     ? "✅ " + String(cfToken).slice(0,8)     + "..." : "❌ 없음 - 내 정보에서 Cloudflare API 등록 필요"}`);
     await log(`CF AccountId : ${cfAccountId ? "✅ " + String(cfAccountId).slice(0,8) + "..." : "❌ 없음 - 내 정보에서 Cloudflare API 등록 필요"}`);
-    await log(`GitHub Token : ${(await import("./github-storage.js").then(m => m.pickGithubToken(env)).catch(() => null)) ? "✅ 있음" : "❌ 없음 - 관리자 패널에서 GitHub 토큰 등록 필요"}`);
+    const ghToken = await pickGithubToken(env).catch(() => null);
+    await log(`GitHub Token : ${ghToken ? "✅ 있음" : "❌ 없음 - 관리자 패널에서 GitHub 토큰 등록 필요"}`);
     await log(`Plan         : ${plan}`);
 
     try {

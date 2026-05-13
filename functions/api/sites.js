@@ -12,8 +12,6 @@
 //   - Cloudflare API: Pages 프로젝트 생성 + GitHub 연동 (미러링)
 
 import { jsonOk, jsonErr, requireAuth, PLAN_LIMITS } from "../_shared.js";
-import { pickGithubToken, ghReq } from "./github-storage.js";
-import { provisionCloudflarePagesHosting, getCfPagesUrl } from "./cf-pages-hosting.js";
 
 // ── Cloudflare API 헬퍼 ────────────────────────────────────────────────────
 
@@ -197,7 +195,7 @@ export async function onRequestPost(context) {
                ?,
                '', 1, ?)`
     ).bind(
-      id, payload.id, site_name.trim(), null, php_version,
+      id, payload.id, site_name.trim(), initial_domain || null, php_version,
       wp_admin_user, wp_admin_pass, wp_admin_email,
       plan,
       // 어드민은 결제수단 없어도 저장 가능
@@ -223,85 +221,24 @@ export async function onRequestPost(context) {
   // provision을 waitUntil로 백그라운드 실행
   // context.waitUntil이 있으면 사용 (Cloudflare Pages Functions 표준)
   // 없으면 직접 await (CPU 제한 내에서 완료)
-  const doProvision = async () => {
-    // DB log 헬퍼 - 실패해도 console에라도 찍기
-    const log = async (msg, level = "info") => {
-      console.log(`[CloudPress][${level.toUpperCase()}] ${msg}`);
-      await env.DB.prepare("INSERT INTO php_logs (site_id, message, level) VALUES (?, ?, ?)")
-        .bind(id, String(msg).slice(0, 2000), level).run()
-        .catch((dbErr) => console.error("[CloudPress] DB log write failed:", dbErr?.message));
-    };
 
-    // 즉시 DB에 시작 로그 기록 (이게 안 되면 DB 자체 문제)
-    const startOk = await env.DB.prepare("INSERT INTO php_logs (site_id, message, level) VALUES (?, ?, ?)")
-      .bind(id, "프로비저닝 시작", "info").run()
-      .then(() => true).catch((e) => { console.error("[CloudPress] CRITICAL: first log failed:", e?.message, e); return false; });
+  // ── /api/provisioning 호출 (별도 엔드포인트에서 실제 작업) ─────────────
+  const provUrl = new URL(request.url);
+  provUrl.pathname = "/api/provisioning";
+  provUrl.search   = `?id=${id}`;
 
-    if (!startOk) {
-      console.error("[CloudPress] Cannot write to php_logs - site_id:", id);
-      await env.DB.prepare("UPDATE sites SET status = 'error' WHERE id = ?").bind(id).run().catch(() => {});
-      return;
-    }
-
-    try {
-      await log(`CF Token: ${cfToken ? "✅ " + String(cfToken).slice(0,8) + "..." : "❌ 없음 - 내 정보에서 CF API 등록 필요"}`);
-      await log(`CF AccountId: ${cfAccountId ? "✅ " + String(cfAccountId).slice(0,8) + "..." : "❌ 없음 - 내 정보에서 CF API 등록 필요"}`);
-
-      const result = await provisionCloudflarePagesHosting({
-        env, siteId: id, siteName: site_name.trim(),
-        adminUser: wp_admin_user, adminPass: wp_admin_pass, adminEmail: wp_admin_email,
-        plan, planLimits, cfToken, cfAccountId, cfEmail,
-        initialDomain: initial_domain || null,
-        userId: payload.id, isAdmin: payload.role === "admin",
-        log,
-      });
-
-      if (!result) {
-        await env.DB.prepare("UPDATE sites SET status = 'error' WHERE id = ?").bind(id).run().catch(() => {});
-        return;
-      }
-
-      const { owner, repoName, pagesUrl, pagesProject, cfDomain,
-              d1Id, kvSessionsId, kvCacheId, workerName } = result;
-      const primaryDomain = cfDomain || pagesUrl || null;
-
-      await env.DB.prepare(`
-        UPDATE sites SET
-          primary_domain = ?, github_repo_owner = ?, github_repo_name = ?,
-          cf_pages_url = ?, cf_pages_project = ?,
-          cf_worker_name = ?, cf_d1_id = ?, cf_kv_id = ?,
-          plan = ?, status = 'active'
-        WHERE id = ?
-      `).bind(
-        primaryDomain, owner, repoName, pagesUrl, pagesProject,
-        workerName || null, d1Id || null, kvSessionsId || null,
-        plan, id
-      ).run();
-
-      await log("✅ 프로비저닝 완료!");
-      await log(`Pages URL: ${pagesUrl}`);
-      await log(`GitHub: https://github.com/${owner}/${repoName}`);
-      if (d1Id)         await log(`D1 DB: ${d1Id}`);
-      if (kvSessionsId) await log(`KV: ${kvSessionsId}`);
-      if (workerName)   await log(`Worker: ${workerName}`);
-
-    } catch (e) {
-      const msg = String(e?.message || e);
-      const stk = String(e?.stack || "").slice(0, 400);
-      console.error("[CloudPress] Provision error:", msg, stk);
-      await env.DB.prepare("INSERT INTO php_logs (site_id, message, level) VALUES (?, ?, ?)")
-        .bind(id, "❌ 프로비저닝 오류: " + msg, "error").run().catch((de) => console.error("[CloudPress] log write error:", de?.message));
-      await env.DB.prepare("INSERT INTO php_logs (site_id, message, level) VALUES (?, ?, ?)")
-        .bind(id, "스택: " + stk, "error").run().catch(() => {});
-      await env.DB.prepare("UPDATE sites SET status = 'error' WHERE id = ?").bind(id).run().catch(() => {});
-    }
-  };
+  const provFetch = fetch(provUrl.toString(), {
+    method:  "POST",
+    headers: {
+      "Authorization": request.headers.get("Authorization") || "",
+      "Content-Type":  "application/json",
+    },
+  }).catch((e) => console.error("[Sites] provisioning fetch failed:", e?.message));
 
   if (typeof context.waitUntil === "function") {
-    context.waitUntil(doProvision());
-  } else {
-    doProvision().catch(() => {});
+    context.waitUntil(provFetch);
   }
+
 
   return jsonOk({
     success: true,

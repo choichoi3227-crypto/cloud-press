@@ -222,9 +222,15 @@ export async function onRequestPost(context) {
 
   const log = async (msg, level = "info") => {
     console.log(`[Provision][${level}] ${msg}`);
-    await env.DB.prepare("INSERT INTO php_logs (site_id, message, level) VALUES (?, ?, ?)")
+    // level 컬럼 있으면 사용, 없으면 message만 저장 (migration 전 호환)
+    const ok = await env.DB.prepare("INSERT INTO php_logs (site_id, message, level) VALUES (?, ?, ?)")
       .bind(id, String(msg).slice(0, 2000), level)
-      .run().catch((e) => console.error("[Provision] log err:", e?.message));
+      .run().then(() => true).catch(() => false);
+    if (!ok) {
+      await env.DB.prepare("INSERT INTO php_logs (site_id, message) VALUES (?, ?)")
+        .bind(id, `[${level.toUpperCase()}] ${String(msg).slice(0, 2000)}`)
+        .run().catch((e) => console.error("[Provision] log fallback err:", e?.message));
+    }
   };
 
   const run = async () => {

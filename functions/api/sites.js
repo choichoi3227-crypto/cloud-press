@@ -207,21 +207,6 @@ export async function onRequestPost(context) {
   }
 
   // ── 로그 헬퍼 ────────────────────────────────────────────────────────────
-  const log = async (msg, level = "info") => {
-    await env.DB.prepare(
-      "INSERT INTO php_logs (site_id, message, level) VALUES (?, ?, ?)"
-    ).bind(id, msg, level).run().catch(() => {});
-  };
-
-  const planLimits = PLAN_LIMITS[plan] || PLAN_LIMITS.free;
-
-  // ── 백그라운드 프로비저닝 ────────────────────────────────────────────────
-  };
-
-  // provision을 waitUntil로 백그라운드 실행
-  // context.waitUntil이 있으면 사용 (Cloudflare Pages Functions 표준)
-  // 없으면 직접 await (CPU 제한 내에서 완료)
-
   // ── /api/provisioning 호출 (별도 엔드포인트에서 실제 작업) ─────────────
   const provUrl = new URL(request.url);
   provUrl.pathname = "/api/provisioning";

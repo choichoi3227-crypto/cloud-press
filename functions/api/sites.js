@@ -12,6 +12,7 @@
 //   - Cloudflare API: Pages 프로젝트 생성 + GitHub 연동 (미러링)
 
 import { jsonOk, jsonErr, requireAuth, PLAN_LIMITS } from "../_shared.js";
+import { provisionCloudflarePagesHosting } from "./cf-pages-hosting.js";
 
 // ── Cloudflare API 헬퍼 ────────────────────────────────────────────────────
 
@@ -207,21 +208,84 @@ export async function onRequestPost(context) {
   }
 
   // ── 로그 헬퍼 ────────────────────────────────────────────────────────────
-  // ── /api/provisioning 호출 (별도 엔드포인트에서 실제 작업) ─────────────
-  const provUrl = new URL(request.url);
-  provUrl.pathname = "/api/provisioning";
-  provUrl.search   = `?id=${id}`;
+  // ── 프로비저닝 직접 실행 (waitUntil 백그라운드) ────────────────────────
+  // DB에서 CF 자격증명 조회
+  const u = await env.DB.prepare(
+    "SELECT cf_global_api_key, cf_account_id, cf_email FROM users WHERE id = ?"
+  ).bind(payload.id).first().catch(() => null);
 
-  const provFetch = fetch(provUrl.toString(), {
-    method:  "POST",
-    headers: {
-      "Authorization": request.headers.get("Authorization") || "",
-      "Content-Type":  "application/json",
-    },
-  }).catch((e) => console.error("[Sites] provisioning fetch failed:", e?.message));
+  const cfToken     = u?.cf_global_api_key || env.CF_API_TOKEN  || null;
+  const cfAccountId = u?.cf_account_id     || env.CF_ACCOUNT_ID || null;
+  const cfEmail     = u?.cf_email          || null;
+  const planLimits  = PLAN_LIMITS[plan]    || PLAN_LIMITS.free;
+
+  const log = async (msg, level = "info") => {
+    console.log(`[Provision][${level}] ${msg}`);
+    await env.DB.prepare("INSERT INTO php_logs (site_id, message, level) VALUES (?, ?, ?)")
+      .bind(id, String(msg).slice(0, 2000), level)
+      .run().catch((e) => console.error("[Provision] log err:", e?.message));
+  };
+
+  const run = async () => {
+    await log("▶ 프로비저닝 시작");
+    await log(`CF Token     : ${cfToken     ? "✅ " + String(cfToken).slice(0,8)     + "..." : "❌ 없음 - 내 정보에서 Cloudflare API 등록 필요"}`);
+    await log(`CF AccountId : ${cfAccountId ? "✅ " + String(cfAccountId).slice(0,8) + "..." : "❌ 없음 - 내 정보에서 Cloudflare API 등록 필요"}`);
+    await log(`GitHub Token : ${(await import("./github-storage.js").then(m => m.pickGithubToken(env)).catch(() => null)) ? "✅ 있음" : "❌ 없음 - 관리자 패널에서 GitHub 토큰 등록 필요"}`);
+    await log(`Plan         : ${plan}`);
+
+    try {
+      const result = await provisionCloudflarePagesHosting({
+        env, siteId: id, siteName: site_name.trim(),
+        adminUser: wp_admin_user, adminPass: wp_admin_pass, adminEmail: wp_admin_email,
+        plan, planLimits, cfToken, cfAccountId, cfEmail,
+        initialDomain: initial_domain || null,
+        userId: payload.id, isAdmin: payload.role === "admin",
+        log,
+      });
+
+      if (!result) {
+        await env.DB.prepare("UPDATE sites SET status = 'error' WHERE id = ?")
+          .bind(id).run().catch(() => {});
+        return;
+      }
+
+      const { owner, repoName, pagesUrl, pagesProject, cfDomain,
+              d1Id, kvSessionsId, kvCacheId, workerName } = result;
+      const primaryDomain = cfDomain || pagesUrl || null;
+
+      await env.DB.prepare(`
+        UPDATE sites SET
+          primary_domain = ?, github_repo_owner = ?, github_repo_name = ?,
+          cf_pages_url = ?, cf_pages_project = ?,
+          cf_worker_name = ?, cf_d1_id = ?, cf_kv_id = ?,
+          plan = ?, status = 'active'
+        WHERE id = ?
+      `).bind(
+        primaryDomain, owner, repoName, pagesUrl, pagesProject,
+        workerName || null, d1Id || null, kvSessionsId || null,
+        plan, id
+      ).run();
+
+      await log("✅ 프로비저닝 완료!");
+      await log(`Pages : ${pagesUrl}`);
+      await log(`GitHub: https://github.com/${owner}/${repoName}`);
+      if (d1Id)         await log(`D1    : ${d1Id}`);
+      if (kvSessionsId) await log(`KV    : ${kvSessionsId}`);
+      if (workerName)   await log(`Worker: ${workerName}`);
+
+    } catch (e) {
+      console.error("[Provision] FATAL:", e?.message, e?.stack);
+      await log("❌ 오류: " + String(e?.message || e), "error");
+      await log("스택: "   + String(e?.stack   || "").slice(0, 500), "error");
+      await env.DB.prepare("UPDATE sites SET status = 'error' WHERE id = ?")
+        .bind(id).run().catch(() => {});
+    }
+  };
 
   if (typeof context.waitUntil === "function") {
-    context.waitUntil(provFetch);
+    context.waitUntil(run());
+  } else {
+    run().catch(() => {});
   }
 
 

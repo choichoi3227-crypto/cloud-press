@@ -115,6 +115,12 @@ export async function onRequestGet(context) {
 export async function onRequestPost(context) {
   const { request, env } = context;
 
+  // ── php_logs 컬럼 자동 migration (level/is_read 없으면 추가) ──────────
+  await env.DB.prepare("ALTER TABLE php_logs ADD COLUMN level TEXT DEFAULT 'info'")
+    .run().catch(() => {}); // 이미 있으면 무시
+  await env.DB.prepare("ALTER TABLE php_logs ADD COLUMN is_read INTEGER DEFAULT 0")
+    .run().catch(() => {}); // 이미 있으면 무시
+
   // ── 일반 POST: 새 사이트 생성 ─────────────────────────────────────────
   const payload = await requireAuth(request, env);
   if (!payload) return jsonErr("인증이 필요합니다.", 401);

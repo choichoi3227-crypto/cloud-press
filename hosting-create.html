@@ -927,25 +927,40 @@
         if (!createdSiteId) return;
         try {
             const res  = await fetch(`/api/notify/site-status?id=${createdSiteId}`, { headers: HEADERS });
+            if (!res.ok) { console.warn('[poll] HTTP', res.status); return; }
             const text = await res.text();
             let data;
             try { data = JSON.parse(text); } catch { return; }
             if (!data.success) return;
 
             const s = data.steps || {};
-            if (data.status === 'provisioning') {
-                if (s.github)   setStep('github',   'done');  else setStep('github',   'doing');
-                if (s.d1)       setStep('d1',        'done');  else if (s.github)   setStep('d1',      'doing');
-                if (s.worker)   setStep('worker',    'done');  else if (s.d1)       setStep('worker',  'doing');
-                if (s.wp_init)  setStep('wp_init',   'done');  else if (s.worker)   setStep('wp_init', 'doing');
-                if (s.wp_files) setStep('wp_files',  'done');  else if (s.wp_init)  setStep('wp_files','doing');
+
+            // ── step 상태 업데이트 ─────────────────────────────────────────
+            // done이면 done, 이전 step이 done이면 doing, 그 외 wait
+            // active/error 상태에서는 완료 처리로 건너뜀
+            if (data.status === 'provisioning' || data.status === 'active') {
+                const stateOf = (key, prevDone) => {
+                    if (s[key])    return 'done';
+                    if (prevDone)  return 'doing';
+                    return 'wait';
+                };
+                setStep('github',   stateOf('github',   true));
+                setStep('d1',       stateOf('d1',       s.github));
+                setStep('worker',   stateOf('worker',   s.d1 || s.github));
+                setStep('wp_init',  stateOf('wp_init',  s.worker));
+                setStep('wp_files', stateOf('wp_files', s.wp_init));
             }
             updateOverallProgress(s);
 
-            const newLogs = (data.logs || []).slice(lastLogCount);
-            newLogs.forEach(l => addLog(l.message, l.level));
-            lastLogCount = data.logs?.length || 0;
+            // ── 로그 렌더링 — 서버가 항상 전체 로그를 오래된순으로 줌 ──────
+            const logs = data.logs || [];
+            if (logs.length > lastLogCount) {
+                const newLogs = logs.slice(lastLogCount);
+                newLogs.forEach(l => addLog(l.message, l.level || 'info'));
+                lastLogCount = logs.length;
+            }
 
+            // ── 완료 ──────────────────────────────────────────────────────
             if (data.is_complete) {
                 clearInterval(pollInterval);
                 stopElapsedTimer();
@@ -959,13 +974,29 @@
                     method: 'POST', headers: HEADERS,
                     body: JSON.stringify({ site_id: createdSiteId }),
                 }).catch(() => {});
+                return;
             }
+
+            // ── 오류 ──────────────────────────────────────────────────────
             if (data.is_error) {
+                clearInterval(pollInterval);
+                stopElapsedTimer();
+                // 로그에서 마지막 에러 메시지 추출
+                const errLog = [...(data.logs || [])].reverse().find(l => l.level === 'error');
+                document.getElementById('step-provisioning').classList.add('hidden');
+                document.getElementById('step-error').classList.remove('hidden');
+                document.getElementById('error-msg').textContent =
+                    errLog?.message || '프로비저닝 중 오류가 발생했습니다. 로그를 확인해주세요.';
+                return;
+            }
+
+            // ── 타임아웃 안전장치: 20분 초과 시 에러 처리 ─────────────────
+            if (elapsedSec > 1200) {
                 clearInterval(pollInterval);
                 stopElapsedTimer();
                 document.getElementById('step-provisioning').classList.add('hidden');
                 document.getElementById('step-error').classList.remove('hidden');
-                document.getElementById('error-msg').textContent = '프로비저닝 중 오류가 발생했습니다. 로그를 확인해주세요.';
+                document.getElementById('error-msg').textContent = '프로비저닝 시간이 초과되었습니다 (20분). 다시 시도해주세요.';
             }
         } catch (e) {
             console.warn('[poll]', e.message);

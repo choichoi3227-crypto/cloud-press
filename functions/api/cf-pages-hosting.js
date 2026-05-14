@@ -87,60 +87,10 @@ async function ghBatchPush(token, owner, repo, files, commitMsg) {
   return updateRes.ok;
 }
 
-// ── PHP → Astro 변환 ──────────────────────────────────────────────────────────
-function convertPhpToAstro(phpCode, fileName) {
-  let code = phpCode
-    .replace(/<\?php\s*/g, "")
-    .replace(/<\?=/g, "{")
-    .replace(/\?>/g, "}")
-    .trim();
-
-  code = code
-    .replace(/\$(\w+)\s*=\s*/g, "const $1 = ")
-    .replace(/\$(\w+)/g, "$1");
-  code = code.replace(/echo\s+(.+?);/g, "{$1}");
-  code = code.replace(/function\s+(\w+)\s*\(/g, "function $1(");
-  code = code.replace(/array\s*\(/g, "[").replace(/\)/g, "]");
-  code = code.replace(/"\s*\.\s*"/g, '" + "').replace(/'\s*\.\s*'/g, "' + '");
-  code = code.replace(/foreach\s*\((\w+)\s+as\s+(\w+)\s*=>\s*(\w+)\)/g, "for (const [$2, $3] of Object.entries($1))");
-  code = code.replace(/foreach\s*\((\w+)\s+as\s+(\w+)\)/g, "for (const $2 of $1)");
-  code = code.replace(/require_once\s+['"](.+?)['"]/g, "// import '$1'");
-  code = code.replace(/require\s+['"](.+?)['"]/g, "// import '$1'");
-  code = code.replace(/include_once\s+['"](.+?)['"]/g, "// import '$1'");
-  code = code.replace(/include\s+['"](.+?)['"]/g, "// import '$1'");
-  code = code.replace(/^#\s*/gm, "// ");
-  code = code.replace(/(\w+)::/g, "$1.");
-
-  return `---
-// Converted from ${fileName} (WordPress official source → Astro)
-// Source: https://github.com/WordPress/WordPress
-
-${code}
----
-
-<slot />
-`;
-}
-
-// ── JS → TypeScript 변환 ─────────────────────────────────────────────────────
-function convertJsToTs(jsCode, fileName) {
-  let code = jsCode.replace(/\bvar\s+/g, "let ");
-  if (code.includes("jQuery") || code.includes("$")) {
-    code = `// @ts-ignore - jQuery type\ndeclare const jQuery: any;\ndeclare const $: typeof jQuery;\n\n` + code;
-  }
-  if (code.includes("wp.")) {
-    code = `// @ts-ignore - WordPress globals\ndeclare const wp: any;\n\n` + code;
-  }
-  if (code.includes("wpApiSettings") || code.includes("ajaxurl")) {
-    code = `// @ts-ignore - WordPress API globals\ndeclare const wpApiSettings: any;\ndeclare const ajaxurl: string;\n\n` + code;
-  }
-  return `// Converted from ${fileName} (WordPress official source → TypeScript)\n// Source: https://github.com/WordPress/WordPress\n\n${code}\n`;
-}
-
-// ── WordPress 공식 파일 변환 (배치) ──────────────────────────────────────────
-async function fetchAndConvertWordPressFiles(log) {
-  const WP_RAW = "https://raw.githubusercontent.com/WordPress/WordPress/master";
-
+// ── WordPress 공식 파일 변환 스크립트 생성 ───────────────────────────────────
+// Worker에서 직접 fetch하지 않고, GitHub Actions 빌드 시 가져오는 스크립트를 레포에 포함
+// → subrequest 20개 절감
+function buildWordPressConvertScript() {
   const targetFiles = [
     { path: "wp-login.php",                              type: "php" },
     { path: "wp-signup.php",                             type: "php" },
@@ -164,39 +114,94 @@ async function fetchAndConvertWordPressFiles(log) {
     { path: "wp-admin/css/common.css",                   type: "css" },
   ];
 
-  const converted = [];
+  const fileListJson = JSON.stringify(targetFiles, null, 2);
 
-  // 병렬로 fetch (5개씩)
-  const chunks = [];
-  for (let i = 0; i < targetFiles.length; i += 5) {
-    chunks.push(targetFiles.slice(i, i + 5));
+  const scriptContent = `#!/usr/bin/env node
+// scripts/convert-wp-files.mjs
+// GitHub Actions 빌드 시 WordPress 공식 소스를 가져와 Astro/TS로 변환
+// Worker subrequest 한도 초과 방지를 위해 빌드 타임으로 이동
+
+import { writeFileSync, mkdirSync } from 'fs';
+import { dirname } from 'path';
+
+const WP_RAW = 'https://raw.githubusercontent.com/WordPress/WordPress/master';
+const TARGET_FILES = ${fileListJson};
+
+function convertPhpToAstro(phpCode, fileName) {
+  let code = phpCode
+    .replace(/<\\?php\\s*/g, '')
+    .replace(/<\\?=/g, '{')
+    .replace(/\\?>/g, '}')
+    .trim();
+  code = code
+    .replace(/\\$(\\w+)\\s*=\\s*/g, 'const $1 = ')
+    .replace(/\\$(\\w+)/g, '$1');
+  code = code.replace(/echo\\s+(.+?);/g, '{$1}');
+  code = code.replace(/function\\s+(\\w+)\\s*\\(/g, 'function $1(');
+  code = code.replace(/array\\s*\\(/g, '[').replace(/\\)/g, ']');
+  code = code.replace(/"\\s*\\.\\s*"/g, '" + "').replace(/'\\s*\\.\\s*'/g, "' + '");
+  code = code.replace(/foreach\\s*\\((\\w+)\\s+as\\s+(\\w+)\\s*=>\\s*(\\w+)\\)/g, 'for (const [$2, $3] of Object.entries($1))');
+  code = code.replace(/foreach\\s*\\((\\w+)\\s+as\\s+(\\w+)\\)/g, 'for (const $2 of $1)');
+  code = code.replace(/require_once\\s+['"](.+?)['"]/g, "// import '$1'");
+  code = code.replace(/require\\s+['"](.+?)['"]/g, "// import '$1'");
+  code = code.replace(/include_once\\s+['"](.+?)['"]/g, "// import '$1'");
+  code = code.replace(/include\\s+['"](.+?)['"]/g, "// import '$1'");
+  code = code.replace(/^#\\s*/gm, '// ');
+  code = code.replace(/(\\w+)::/g, '$1.');
+  return \`---\\n// Converted from \${fileName} (WordPress official source → Astro)\\n// Source: https://github.com/WordPress/WordPress\\n\\n\${code}\\n---\\n\\n<slot />\\n\`;
+}
+
+function convertJsToTs(jsCode, fileName) {
+  let code = jsCode.replace(/\\bvar\\s+/g, 'let ');
+  if (code.includes('jQuery') || code.includes('$')) {
+    code = \`// @ts-ignore - jQuery type\\ndeclare const jQuery: any;\\ndeclare const $: typeof jQuery;\\n\\n\` + code;
   }
+  if (code.includes('wp.')) {
+    code = \`// @ts-ignore - WordPress globals\\ndeclare const wp: any;\\n\\n\` + code;
+  }
+  if (code.includes('wpApiSettings') || code.includes('ajaxurl')) {
+    code = \`// @ts-ignore - WordPress API globals\\ndeclare const wpApiSettings: any;\\ndeclare const ajaxurl: string;\\n\\n\` + code;
+  }
+  return \`// Converted from \${fileName} (WordPress official source → TypeScript)\\n// Source: https://github.com/WordPress/WordPress\\n\\n\${code}\\n\`;
+}
+
+async function run() {
+  let converted = 0;
+  const chunks = [];
+  for (let i = 0; i < TARGET_FILES.length; i += 5) chunks.push(TARGET_FILES.slice(i, i + 5));
 
   for (const chunk of chunks) {
-    const results = await Promise.allSettled(
-      chunk.map(async (file) => {
-        const res = await fetch(`${WP_RAW}/${file.path}`, {
-          headers: { "User-Agent": "CloudPress/3.1" },
-        });
-        if (!res.ok) return null;
-        const raw = await res.text();
-        const base = file.path.split("/").pop();
-
-        if (file.type === "php") {
-          return { path: `src/wp-converted/${file.path.replace(/\.php$/, ".astro")}`, content: convertPhpToAstro(raw, base) };
-        } else if (file.type === "js") {
-          return { path: `src/wp-converted/${file.path.replace(/\.js$/, ".ts")}`, content: convertJsToTs(raw, base) };
-        } else {
-          return { path: `public/${file.path}`, content: raw };
-        }
-      })
-    );
-    results.forEach(r => { if (r.status === "fulfilled" && r.value) converted.push(r.value); });
+    const results = await Promise.allSettled(chunk.map(async (file) => {
+      const res = await fetch(\`\${WP_RAW}/\${file.path}\`, { headers: { 'User-Agent': 'CloudPress/3.1' } });
+      if (!res.ok) return null;
+      const raw = await res.text();
+      const base = file.path.split('/').pop();
+      let outPath, content;
+      if (file.type === 'php') {
+        outPath = \`src/wp-converted/\${file.path.replace(/\\.php$/, '.astro')}\`;
+        content = convertPhpToAstro(raw, base);
+      } else if (file.type === 'js') {
+        outPath = \`src/wp-converted/\${file.path.replace(/\\.js$/, '.ts')}\`;
+        content = convertJsToTs(raw, base);
+      } else {
+        outPath = \`public/\${file.path}\`;
+        content = raw;
+      }
+      mkdirSync(dirname(outPath), { recursive: true });
+      writeFileSync(outPath, content, 'utf8');
+      return outPath;
+    }));
+    results.forEach(r => { if (r.status === 'fulfilled' && r.value) converted++; });
   }
-
-  await log(`  WordPress 공식 파일 변환 완료: ${converted.length}개`);
-  return converted;
+  console.log(\`WordPress 파일 변환 완료: \${converted}개\`);
 }
+
+run().catch(e => { console.error(e); process.exit(1); });
+`;
+
+  return [{ path: "scripts/convert-wp-files.mjs", content: scriptContent }];
+}
+
 
 // ── Astro 소스 파일 생성 ─────────────────────────────────────────────────────
 function buildAstroFiles({ siteName, siteId, owner, repoName, planLimits }) {
@@ -528,6 +533,9 @@ jobs:
           node-version: '20'
           cache: 'npm'
       - run: npm install --prefer-offline || npm install
+      - name: WordPress 파일 변환 (PHP→Astro, JS→TS)
+        run: node scripts/convert-wp-files.mjs
+        continue-on-error: true
       - name: Astro 빌드
         env:
           SITE_ID: ${siteId}
@@ -576,11 +584,22 @@ async function buildDbFiles({ siteId, siteName, adminUser, adminPass, adminEmail
 async function createD1Database({ cfToken, cfAccountId, cfEmail, dbName, log }) {
   if (!cfToken || !cfAccountId) return null;
   await log(`  D1 생성 중: ${dbName}`);
-  const list = await cfReq(cfToken, "GET", `/accounts/${cfAccountId}/d1/database?name=${encodeURIComponent(dbName)}`, null, cfEmail);
-  const existing = list.data?.result?.find(db => db.name === dbName);
-  if (existing) { await log(`  D1 기존 사용: ${existing.uuid}`); return existing.uuid; }
+  // GET 목록 조회 생략 → 바로 POST, 이미 존재하면 오류 메시지에서 uuid 추출
   const res = await cfReq(cfToken, "POST", `/accounts/${cfAccountId}/d1/database`, { name: dbName }, cfEmail);
-  if (!res.ok) { await log(`  D1 생성 실패 (${res.status}): ${JSON.stringify(res.data?.errors)}`, "error"); return null; }
+  if (!res.ok) {
+    // 이미 존재하는 경우: 오류에서 기존 uuid 파싱 시도
+    const errMsg = res.data?.errors?.[0]?.message || "";
+    const uuidMatch = errMsg.match(/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i);
+    if (uuidMatch) { await log(`  D1 기존 사용: ${uuidMatch[1]}`); return uuidMatch[1]; }
+    // 이미 존재 메시지인 경우 이름으로 재조회 (1회만)
+    if (errMsg.toLowerCase().includes("already exist") || res.status === 409) {
+      const listRes = await cfReq(cfToken, "GET", `/accounts/${cfAccountId}/d1/database?name=${encodeURIComponent(dbName)}`, null, cfEmail);
+      const found = listRes.data?.result?.find(db => db.name === dbName);
+      if (found) { await log(`  D1 기존 사용: ${found.uuid}`); return found.uuid; }
+    }
+    await log(`  D1 생성 실패 (${res.status}): ${JSON.stringify(res.data?.errors)}`, "error");
+    return null;
+  }
   const id = res.data?.result?.uuid;
   await log(`  D1 생성 완료: ${id}`);
   return id;
@@ -590,11 +609,19 @@ async function createD1Database({ cfToken, cfAccountId, cfEmail, dbName, log }) 
 async function createKVNamespace({ cfToken, cfAccountId, cfEmail, title, log }) {
   if (!cfToken || !cfAccountId) return null;
   await log(`  KV 생성 중: ${title}`);
-  const list = await cfReq(cfToken, "GET", `/accounts/${cfAccountId}/storage/kv/namespaces`, null, cfEmail);
-  const existing = list.data?.result?.find(ns => ns.title === title);
-  if (existing) { await log(`  KV 기존 사용: ${existing.id}`); return existing.id; }
+  // GET 목록 조회 생략 → 바로 POST, 이미 존재하면 오류 처리
   const res = await cfReq(cfToken, "POST", `/accounts/${cfAccountId}/storage/kv/namespaces`, { title }, cfEmail);
-  if (!res.ok) { await log(`  KV 생성 실패 (${res.status}): ${JSON.stringify(res.data?.errors)}`, "error"); return null; }
+  if (!res.ok) {
+    // 이미 존재하는 경우: 목록에서 찾기 (1회만)
+    const errMsg = res.data?.errors?.[0]?.message || "";
+    if (errMsg.toLowerCase().includes("already exist") || res.status === 409) {
+      const listRes = await cfReq(cfToken, "GET", `/accounts/${cfAccountId}/storage/kv/namespaces`, null, cfEmail);
+      const found = listRes.data?.result?.find(ns => ns.title === title);
+      if (found) { await log(`  KV 기존 사용: ${found.id}`); return found.id; }
+    }
+    await log(`  KV 생성 실패 (${res.status}): ${JSON.stringify(res.data?.errors)}`, "error");
+    return null;
+  }
   const id = res.data?.result?.id;
   await log(`  KV 생성 완료: ${id}`);
   return id;
@@ -652,9 +679,18 @@ async function initD1Schema({ cfToken, cfAccountId, cfEmail, d1Id, siteId, admin
     `INSERT OR IGNORE INTO users (id, username, email, password_hash, role, display_name, created_at) VALUES ('admin-${siteId.slice(0,8)}', '${adminUser.replace(/'/g,"''")}', '${adminEmail.replace(/'/g,"''")}', '${adminPassHash}', 'administrator', '${adminUser.replace(/'/g,"''")}', '${now}')`,
     `INSERT OR IGNORE INTO settings (key, value) VALUES ('site_id', '${siteId}')`,
   ];
-  for (const sql of sqls) {
-    const r = await cfReq(cfToken, "POST", `/accounts/${cfAccountId}/d1/database/${d1Id}/query`, { sql }, cfEmail);
-    if (!r.ok) await log(`  D1 쿼리 실패: ${sql.slice(0,60)}`, "warning");
+
+  // D1 Batch API로 한 번에 실행 (subrequest 7개 → 1개)
+  const r = await cfReq(cfToken, "POST", `/accounts/${cfAccountId}/d1/database/${d1Id}/query`, {
+    sql: sqls.join("; "),
+  }, cfEmail);
+
+  // Batch API가 지원되지 않는 경우 개별 실행으로 fallback
+  if (!r.ok) {
+    for (const sql of sqls) {
+      const res = await cfReq(cfToken, "POST", `/accounts/${cfAccountId}/d1/database/${d1Id}/query`, { sql }, cfEmail);
+      if (!res.ok) await log(`  D1 쿼리 실패: ${sql.slice(0,60)}`, "warning");
+    }
   }
   await log("  D1 스키마 초기화 완료");
 }
@@ -786,12 +822,12 @@ export async function provisionCloudflarePagesHosting({
   const batch1ok = await ghBatchPush(token, owner, repoName, allFiles, "init: Astro source, DB data, CF config");
   await log(`[3/5] 기본 파일 push: ${batch1ok ? "✅" : "❌ 실패"}`);
 
-  // ── [4/5] WordPress 공식 파일 변환 배치 push ───────────────────────────
+  // ── [4/5] WordPress 변환 스크립트를 레포에 push (빌드 타임에 실행) ────────
   await log("[4/5] WordPress 공식 파일 변환 중 (PHP→Astro, JS→TS)...");
-  const wpFiles = await fetchAndConvertWordPressFiles(log);
-  if (wpFiles.length > 0) {
-    const batch2ok = await ghBatchPush(token, owner, repoName, wpFiles, `convert: ${wpFiles.length} WordPress files`);
-    await log(`[4/5] WordPress 파일 변환 push: ${batch2ok ? "✅ " + wpFiles.length + "개" : "❌ 실패"}`);
+  const wpScriptFiles = buildWordPressConvertScript();
+  if (wpScriptFiles.length > 0) {
+    const batch2ok = await ghBatchPush(token, owner, repoName, wpScriptFiles, `convert: add WordPress file conversion script (build-time)`);
+    await log(`[4/5] WordPress 파일 변환 push: ${batch2ok ? "✅ " + wpScriptFiles.length + "개" : "❌ 실패"}`);
   } else {
     await log("[4/5] WordPress 파일 변환 없음 (네트워크 오류)", "warning");
   }

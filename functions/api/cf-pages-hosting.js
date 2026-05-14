@@ -805,16 +805,89 @@ export default {
   return workerName;
 }
 
-// ── D1 스키마 초기화 (WordPress wp_* 테이블) ──────────────────────────────────
-// worker-wp.js가 기대하는 실제 WordPress DB 스키마로 초기화
-// autoInstallWordPress()와 동일한 구조를 CF API로 미리 생성
+// ── D1 스키마 초기화 ─────────────────────────────────────────────────────────
+// DDL은 GitHub 레포의 migrations/0001_wp_schema.sql 파일로 관리
+// (GitHub Actions / wrangler d1 migrations apply 로 적용)
+// 여기서는 Worker가 즉시 필요한 최소 seed 데이터만 /query로 INSERT
 async function initD1Schema({ cfToken, cfAccountId, cfEmail, d1Id, siteId, adminUser, adminEmail, adminPassHash, log }) {
   if (!d1Id) return;
   await log("  D1 스키마 초기화 중...");
 
-  // D1 REST API는 세미콜론으로 구분된 multi-statement를 지원하지 않으므로
-  // /raw endpoint의 queries 배열 사용 (batch 방식)
-  const sqls = [
+  // DDL: 핵심 4개 테이블만 즉시 생성 (Worker 첫 요청 전에 필요한 최소)
+  // 나머지 테이블은 migrations/0001_wp_schema.sql이 적용될 때 생성됨
+  const ddlStatements = [
+    `CREATE TABLE IF NOT EXISTS wp_options (option_id INTEGER PRIMARY KEY AUTOINCREMENT, option_name TEXT UNIQUE NOT NULL, option_value TEXT NOT NULL DEFAULT '', autoload TEXT NOT NULL DEFAULT 'yes')`,
+    `CREATE TABLE IF NOT EXISTS wp_users (ID INTEGER PRIMARY KEY AUTOINCREMENT, user_login TEXT NOT NULL DEFAULT '', user_pass TEXT NOT NULL DEFAULT '', user_nicename TEXT NOT NULL DEFAULT '', user_email TEXT NOT NULL DEFAULT '', user_url TEXT NOT NULL DEFAULT '', user_registered TEXT NOT NULL DEFAULT '', user_activation_key TEXT NOT NULL DEFAULT '', user_status INTEGER NOT NULL DEFAULT 0, display_name TEXT NOT NULL DEFAULT '')`,
+    `CREATE TABLE IF NOT EXISTS wp_usermeta (umeta_id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL DEFAULT 0, meta_key TEXT, meta_value TEXT)`,
+    `CREATE TABLE IF NOT EXISTS wp_posts (ID INTEGER PRIMARY KEY AUTOINCREMENT, post_author INTEGER NOT NULL DEFAULT 0, post_date TEXT NOT NULL DEFAULT '', post_date_gmt TEXT NOT NULL DEFAULT '', post_content TEXT NOT NULL DEFAULT '', post_title TEXT NOT NULL DEFAULT '', post_excerpt TEXT NOT NULL DEFAULT '', post_status TEXT NOT NULL DEFAULT 'publish', comment_status TEXT NOT NULL DEFAULT 'open', ping_status TEXT NOT NULL DEFAULT 'open', post_password TEXT NOT NULL DEFAULT '', post_name TEXT NOT NULL DEFAULT '', to_ping TEXT NOT NULL DEFAULT '', pinged TEXT NOT NULL DEFAULT '', post_modified TEXT NOT NULL DEFAULT '', post_modified_gmt TEXT NOT NULL DEFAULT '', post_content_filtered TEXT NOT NULL DEFAULT '', post_parent INTEGER NOT NULL DEFAULT 0, guid TEXT NOT NULL DEFAULT '', menu_order INTEGER NOT NULL DEFAULT 0, post_type TEXT NOT NULL DEFAULT 'post', post_mime_type TEXT NOT NULL DEFAULT '', comment_count INTEGER NOT NULL DEFAULT 0)`,
+    `CREATE TABLE IF NOT EXISTS wp_postmeta (meta_id INTEGER PRIMARY KEY AUTOINCREMENT, post_id INTEGER NOT NULL DEFAULT 0, meta_key TEXT, meta_value TEXT)`,
+    `CREATE TABLE IF NOT EXISTS wp_terms (term_id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL DEFAULT '', slug TEXT NOT NULL DEFAULT '', term_group INTEGER NOT NULL DEFAULT 0)`,
+    `CREATE TABLE IF NOT EXISTS wp_term_taxonomy (term_taxonomy_id INTEGER PRIMARY KEY AUTOINCREMENT, term_id INTEGER NOT NULL DEFAULT 0, taxonomy TEXT NOT NULL DEFAULT '', description TEXT NOT NULL DEFAULT '', parent INTEGER NOT NULL DEFAULT 0, count INTEGER NOT NULL DEFAULT 0)`,
+    `CREATE TABLE IF NOT EXISTS wp_term_relationships (object_id INTEGER NOT NULL DEFAULT 0, term_taxonomy_id INTEGER NOT NULL DEFAULT 0, term_order INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (object_id, term_taxonomy_id))`,
+    `CREATE TABLE IF NOT EXISTS wp_comments (comment_ID INTEGER PRIMARY KEY AUTOINCREMENT, comment_post_ID INTEGER NOT NULL DEFAULT 0, comment_author TEXT NOT NULL DEFAULT '', comment_author_email TEXT NOT NULL DEFAULT '', comment_author_url TEXT NOT NULL DEFAULT '', comment_author_IP TEXT NOT NULL DEFAULT '', comment_date TEXT NOT NULL DEFAULT '', comment_date_gmt TEXT NOT NULL DEFAULT '', comment_content TEXT NOT NULL DEFAULT '', comment_karma INTEGER NOT NULL DEFAULT 0, comment_approved TEXT NOT NULL DEFAULT '1', comment_agent TEXT NOT NULL DEFAULT '', comment_type TEXT NOT NULL DEFAULT 'comment', comment_parent INTEGER NOT NULL DEFAULT 0, user_id INTEGER NOT NULL DEFAULT 0)`,
+    `CREATE TABLE IF NOT EXISTS wp_commentmeta (meta_id INTEGER PRIMARY KEY AUTOINCREMENT, comment_id INTEGER NOT NULL DEFAULT 0, meta_key TEXT, meta_value TEXT)`,
+  ];
+
+  // DDL은 한 번에 하나씩 (D1 /query는 single statement만 지원)
+  for (const sql of ddlStatements) {
+    const r = await cfReq(cfToken, "POST", `/accounts/${cfAccountId}/d1/database/${d1Id}/query`, { sql }, cfEmail);
+    if (!r.ok) {
+      const errMsg = r.data?.errors?.[0]?.message || "";
+      // "already exists"는 무시
+      if (!errMsg.toLowerCase().includes("already exist")) {
+        await log(`  D1 DDL 실패: ${sql.slice(0, 80).replace(/\s+/g, " ")}`, "warning");
+      }
+    }
+  }
+
+  // ── Seed 데이터 — 파라미터 바인딩으로 SQL injection 방지 ─────────────────
+  const now = new Date().toISOString().replace("T", " ").slice(0, 19);
+
+  // 관리자 계정 + 메타 (3개 쿼리)
+  await cfReq(cfToken, "POST", `/accounts/${cfAccountId}/d1/database/${d1Id}/query`, {
+    sql: `INSERT OR IGNORE INTO wp_users (user_login, user_pass, user_nicename, user_email, user_url, user_registered, user_activation_key, user_status, display_name) VALUES (?, ?, ?, ?, '', ?, '', 0, ?)`,
+    params: [adminUser, adminPassHash, adminUser, adminEmail, now, adminUser],
+  }, cfEmail);
+  await cfReq(cfToken, "POST", `/accounts/${cfAccountId}/d1/database/${d1Id}/query`, {
+    sql: `INSERT OR IGNORE INTO wp_usermeta (user_id, meta_key, meta_value) VALUES (1, 'wp_capabilities', 'a:1:{s:13:"administrator";b:1;}'), (1, 'wp_user_level', '10'), (1, 'admin_color', 'fresh')`,
+    params: [],
+  }, cfEmail);
+
+  // 기본 카테고리 (1개 쿼리로 합치기)
+  await cfReq(cfToken, "POST", `/accounts/${cfAccountId}/d1/database/${d1Id}/query`, {
+    sql: `INSERT OR IGNORE INTO wp_terms (term_id, name, slug, term_group) VALUES (1, '미분류', 'uncategorized', 0)`,
+    params: [],
+  }, cfEmail);
+  await cfReq(cfToken, "POST", `/accounts/${cfAccountId}/d1/database/${d1Id}/query`, {
+    sql: `INSERT OR IGNORE INTO wp_term_taxonomy (term_taxonomy_id, term_id, taxonomy, description, parent, count) VALUES (1, 1, 'category', '', 0, 1)`,
+    params: [],
+  }, cfEmail);
+
+  // WordPress 옵션 — 여러 행을 한 INSERT로 합치기 (1개 쿼리)
+  await cfReq(cfToken, "POST", `/accounts/${cfAccountId}/d1/database/${d1Id}/query`, {
+    sql: `INSERT OR IGNORE INTO wp_options (option_name, option_value, autoload) VALUES
+      ('siteurl',              '',                              'yes'),
+      ('blogname',             '내 WordPress 사이트',          'yes'),
+      ('blogdescription',      'CloudPress WordPress 호스팅',  'yes'),
+      ('admin_email',          ?,                              'yes'),
+      ('template',             'twentytwentyfour',             'yes'),
+      ('stylesheet',           'twentytwentyfour',             'yes'),
+      ('current_theme',        'Twenty Twenty-Four',           'yes'),
+      ('active_plugins',       'a:0:{}',                       'yes'),
+      ('permalink_structure',  '/%postname%/',                 'yes'),
+      ('wp_installed_version', '6.7.2',                        'no'),
+      ('db_version',           '57155',                        'no'),
+      ('timezone_string',      'Asia/Seoul',                   'yes'),
+      ('blog_charset',         'UTF-8',                        'yes'),
+      ('blogpublic',           '1',                            'yes'),
+      ('cp_auto_installed',    '1',                            'no'),
+      ('cp_admin_user',        ?,                              'no'),
+      ('cp_site_id',           ?,                              'no')`,
+    params: [adminEmail, adminUser, siteId],
+  }, cfEmail);
+
+  await log("  D1 스키마 초기화 완료 (WordPress wp_* 테이블)");
+}
     // ── 테이블 생성 ───────────────────────────────────────────────────────
     `CREATE TABLE IF NOT EXISTS wp_options (
       option_id   INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -916,69 +989,6 @@ async function initD1Schema({ cfToken, cfAccountId, cfEmail, d1Id, siteId, admin
     )`,
   ];
 
-  // D1 Batch API (/raw endpoint) 사용 — 테이블 생성은 한 번에
-  const batchRes = await cfReq(cfToken, "POST", `/accounts/${cfAccountId}/d1/database/${d1Id}/raw`, {
-    params: [],
-    sql: sqls.join(";\n"),
-  }, cfEmail);
-
-  if (!batchRes.ok) {
-    // fallback: 개별 실행
-    await log("  D1 batch 실패, 개별 실행으로 재시도...", "warning");
-    for (const sql of sqls) {
-      const r = await cfReq(cfToken, "POST", `/accounts/${cfAccountId}/d1/database/${d1Id}/query`, { sql }, cfEmail);
-      if (!r.ok) await log(`  D1 DDL 실패: ${sql.slice(0, 60).replace(/\s+/g, " ")}`, "warning");
-    }
-  }
-
-  // ── 기본 데이터 삽입 (D1 /query endpoint — 파라미터 바인딩 지원) ──────────
-  const now = new Date().toISOString().replace("T", " ").slice(0, 19);
-  const shortSiteId = siteId.slice(0, 8);
-
-  const inserts = [
-    // 관리자 사용자 (adminPassHash는 phpass 형식 또는 SHA-256)
-    {
-      sql: `INSERT OR IGNORE INTO wp_users (user_login, user_pass, user_nicename, user_email, user_url, user_registered, user_activation_key, user_status, display_name) VALUES (?, ?, ?, ?, '', ?, '', 0, ?)`,
-      params: [adminUser, adminPassHash, adminUser, adminEmail, now, adminUser],
-    },
-    // 사용자 메타 — 역할
-    { sql: `INSERT OR IGNORE INTO wp_usermeta (user_id, meta_key, meta_value) VALUES (1, 'wp_capabilities', 'a:1:{s:13:"administrator";b:1;}')`, params: [] },
-    { sql: `INSERT OR IGNORE INTO wp_usermeta (user_id, meta_key, meta_value) VALUES (1, 'wp_user_level', '10')`, params: [] },
-    { sql: `INSERT OR IGNORE INTO wp_usermeta (user_id, meta_key, meta_value) VALUES (1, 'admin_color', 'fresh')`, params: [] },
-    // 기본 카테고리
-    { sql: `INSERT OR IGNORE INTO wp_terms (term_id, name, slug, term_group) VALUES (1, '미분류', 'uncategorized', 0)`, params: [] },
-    { sql: `INSERT OR IGNORE INTO wp_term_taxonomy (term_taxonomy_id, term_id, taxonomy, description, parent, count) VALUES (1, 1, 'category', '', 0, 1)`, params: [] },
-    // WordPress 기본 옵션
-    { sql: `INSERT OR IGNORE INTO wp_options (option_name, option_value, autoload) VALUES ('siteurl', '', 'yes')`, params: [] },
-    { sql: `INSERT OR IGNORE INTO wp_options (option_name, option_value, autoload) VALUES ('blogname', '내 WordPress 사이트', 'yes')`, params: [] },
-    { sql: `INSERT OR IGNORE INTO wp_options (option_name, option_value, autoload) VALUES ('blogdescription', 'CloudPress로 만든 WordPress', 'yes')`, params: [] },
-    { sql: `INSERT OR IGNORE INTO wp_options (option_name, option_value, autoload) VALUES ('admin_email', ?, 'yes')`, params: [adminEmail] },
-    { sql: `INSERT OR IGNORE INTO wp_options (option_name, option_value, autoload) VALUES ('template', 'twentytwentyfour', 'yes')`, params: [] },
-    { sql: `INSERT OR IGNORE INTO wp_options (option_name, option_value, autoload) VALUES ('stylesheet', 'twentytwentyfour', 'yes')`, params: [] },
-    { sql: `INSERT OR IGNORE INTO wp_options (option_name, option_value, autoload) VALUES ('current_theme', 'Twenty Twenty-Four', 'yes')`, params: [] },
-    { sql: `INSERT OR IGNORE INTO wp_options (option_name, option_value, autoload) VALUES ('active_plugins', 'a:0:{}', 'yes')`, params: [] },
-    { sql: `INSERT OR IGNORE INTO wp_options (option_name, option_value, autoload) VALUES ('permalink_structure', '/%postname%/', 'yes')`, params: [] },
-    { sql: `INSERT OR IGNORE INTO wp_options (option_name, option_value, autoload) VALUES ('wp_installed_version', '6.7.2', 'no')`, params: [] },
-    { sql: `INSERT OR IGNORE INTO wp_options (option_name, option_value, autoload) VALUES ('db_version', '57155', 'no')`, params: [] },
-    { sql: `INSERT OR IGNORE INTO wp_options (option_name, option_value, autoload) VALUES ('timezone_string', 'Asia/Seoul', 'yes')`, params: [] },
-    { sql: `INSERT OR IGNORE INTO wp_options (option_name, option_value, autoload) VALUES ('blog_charset', 'UTF-8', 'yes')`, params: [] },
-    { sql: `INSERT OR IGNORE INTO wp_options (option_name, option_value, autoload) VALUES ('blogpublic', '1', 'yes')`, params: [] },
-    { sql: `INSERT OR IGNORE INTO wp_options (option_name, option_value, autoload) VALUES ('cp_auto_installed', '1', 'no')`, params: [] },
-    { sql: `INSERT OR IGNORE INTO wp_options (option_name, option_value, autoload) VALUES ('cp_admin_user', ?, 'no')`, params: [adminUser] },
-    { sql: `INSERT OR IGNORE INTO wp_options (option_name, option_value, autoload) VALUES ('cp_site_id', ?, 'no')`, params: [siteId] },
-    // 환영 게시물
-    { sql: `INSERT OR IGNORE INTO wp_posts (post_author, post_date, post_date_gmt, post_content, post_title, post_excerpt, post_status, comment_status, ping_status, post_name, post_type, post_modified, post_modified_gmt, guid, menu_order) VALUES (1, ?, ?, ?, '안녕하세요!', '', 'publish', 'open', 'open', 'hello-world', 'post', ?, ?, '', 0)`, params: [now, now, "WordPress에 오신 것을 환영합니다! CloudPress로 구동되는 이 사이트를 자유롭게 수정하고 꾸며보세요.", now, now] },
-    { sql: `INSERT OR IGNORE INTO wp_term_relationships (object_id, term_taxonomy_id, term_order) VALUES (1, 1, 0)`, params: [] },
-  ];
-
-  for (const { sql, params } of inserts) {
-    const r = await cfReq(cfToken, "POST", `/accounts/${cfAccountId}/d1/database/${d1Id}/query`, { sql, params }, cfEmail);
-    if (!r.ok) await log(`  D1 INSERT 실패: ${sql.slice(0, 60).replace(/\s+/g, " ")}`, "warning");
-  }
-
-  await log("  D1 스키마 초기화 완료 (WordPress wp_* 테이블)");
-}
-
 // ── Cloudflare Pages 프로젝트 생성 ───────────────────────────────────────────
 async function createCfPagesProject({ cfToken, cfAccountId, cfEmail, projectName, owner, repoName, log }) {
   if (!cfToken || !cfAccountId) {
@@ -1067,6 +1077,7 @@ export async function provisionCloudflarePagesHosting({
     return null;
   }
   await log(`[1/5] 완료: https://github.com/${owner}/${repoName}`);
+  await log("GitHub 저장소 생성 완료");
 
   await delay(4000); // 레포 초기화 대기
 
@@ -1133,7 +1144,9 @@ export async function provisionCloudflarePagesHosting({
     pagesUrl = null;
   }
 
-  await log("✅ 호스팅 구축 완료!");
+  // wp_files step 완료 마커 (notify.js 폴링이 이 문자열로 감지)
+  await log("WordPress 설치 완료 — Cloudflare Pages 빌드 시작");
+  await log("✅ 프로비저닝 완료!");
 
   return {
     owner, repoName, pagesUrl, pagesProject: projName,

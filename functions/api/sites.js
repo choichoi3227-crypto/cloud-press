@@ -360,24 +360,102 @@ export async function onRequestDelete(context) {
   if (!id) return jsonErr("사이트 ID가 필요합니다.", 400);
 
   const site = await env.DB.prepare(
-    "SELECT id, user_id, github_repo_owner, github_repo_name, cf_pages_project FROM sites WHERE id = ?"
+    `SELECT id, user_id, github_repo_owner, github_repo_name,
+            cf_pages_project, cf_worker_name, cf_d1_id, cf_kv_id
+     FROM sites WHERE id = ?`
   ).bind(id).first();
   if (!site) return jsonErr("사이트를 찾을 수 없습니다.", 404);
   if (site.user_id !== payload.id && payload.role !== "admin")
     return jsonErr("권한이 없습니다.", 403);
 
+  // CF 자격증명 조회
+  const u = await env.DB.prepare(
+    "SELECT cf_global_api_key, cf_account_id, cf_email FROM users WHERE id = ?"
+  ).bind(payload.id).first().catch(() => null);
+  const cfToken     = u?.cf_global_api_key || env.CF_API_TOKEN  || null;
+  const cfAccountId = u?.cf_account_id     || env.CF_ACCOUNT_ID || null;
+  const cfEmail     = u?.cf_email          || null;
+
+  const ghToken = await pickGithubToken(env).catch(() => null);
+
+  const deleted = [];
+  const failed  = [];
+
+  // ── 1. GitHub 레포 삭제 ─────────────────────────────────────────────────
+  if (ghToken && site.github_repo_owner && site.github_repo_name) {
+    const r = await ghReq("DELETE",
+      `/repos/${site.github_repo_owner}/${site.github_repo_name}`,
+      ghToken
+    );
+    if (r.ok || r.status === 404) deleted.push(`GitHub: ${site.github_repo_owner}/${site.github_repo_name}`);
+    else failed.push(`GitHub 레포 삭제 실패 (${r.status})`);
+  }
+
+  if (cfToken && cfAccountId) {
+    const cf = (method, path, body) => {
+      const headers = { "Content-Type": "application/json" };
+      if (cfEmail) { headers["X-Auth-Email"] = cfEmail; headers["X-Auth-Key"] = cfToken; }
+      else headers["Authorization"] = `Bearer ${cfToken}`;
+      return fetch(`https://api.cloudflare.com/client/v4${path}`, {
+        method, headers, body: body ? JSON.stringify(body) : undefined,
+      }).then(r => r.json().then(data => ({ ok: r.ok, status: r.status, data }))).catch(() => ({ ok: false }));
+    };
+
+    // ── 2. Cloudflare Pages 프로젝트 삭제 ─────────────────────────────────
+    if (site.cf_pages_project) {
+      const r = await cf("DELETE", `/accounts/${cfAccountId}/pages/projects/${site.cf_pages_project}`);
+      if (r.ok || r.status === 404) deleted.push(`CF Pages: ${site.cf_pages_project}`);
+      else failed.push(`CF Pages 삭제 실패 (${r.status}): ${JSON.stringify(r.data?.errors)}`);
+    }
+
+    // ── 3. Cloudflare Worker 삭제 ─────────────────────────────────────────
+    if (site.cf_worker_name) {
+      const r = await cf("DELETE", `/accounts/${cfAccountId}/workers/scripts/${site.cf_worker_name}`);
+      if (r.ok || r.status === 404) deleted.push(`CF Worker: ${site.cf_worker_name}`);
+      else failed.push(`CF Worker 삭제 실패 (${r.status})`);
+    }
+
+    // ── 4. D1 데이터베이스 삭제 ───────────────────────────────────────────
+    if (site.cf_d1_id) {
+      const r = await cf("DELETE", `/accounts/${cfAccountId}/d1/database/${site.cf_d1_id}`);
+      if (r.ok || r.status === 404) deleted.push(`CF D1: ${site.cf_d1_id}`);
+      else failed.push(`CF D1 삭제 실패 (${r.status})`);
+    }
+
+    // ── 5. KV 네임스페이스 삭제 ───────────────────────────────────────────
+    if (site.cf_kv_id) {
+      const r = await cf("DELETE", `/accounts/${cfAccountId}/storage/kv/namespaces/${site.cf_kv_id}`);
+      if (r.ok || r.status === 404) deleted.push(`CF KV: ${site.cf_kv_id}`);
+      else failed.push(`CF KV 삭제 실패 (${r.status})`);
+    }
+
+    // ── 6. KV CACHE 삭제 (cf_kv_id가 sessions, cache는 별도 조회) ─────────
+    // 이름 규칙: cp-{shortId}-cache
+    const shortId = id.replace(/-/g, "").slice(0, 8);
+    const cacheTitle = `cp-${shortId}-cache`;
+    const kvList = await cf("GET", `/accounts/${cfAccountId}/storage/kv/namespaces`);
+    const cacheNs = kvList.data?.result?.find(ns => ns.title === cacheTitle);
+    if (cacheNs) {
+      const r = await cf("DELETE", `/accounts/${cfAccountId}/storage/kv/namespaces/${cacheNs.id}`);
+      if (r.ok || r.status === 404) deleted.push(`CF KV Cache: ${cacheNs.id}`);
+      else failed.push(`CF KV Cache 삭제 실패 (${r.status})`);
+    }
+  }
+
+  // ── 7. DB 레코드 삭제 ────────────────────────────────────────────────────
   try {
     await env.DB.prepare("DELETE FROM domain_aliases WHERE site_id = ?").bind(id).run();
-    await env.DB.prepare("DELETE FROM site_ssh_keys WHERE site_id = ?").bind(id).run();
-    await env.DB.prepare("DELETE FROM php_logs WHERE site_id = ?").bind(id).run();
-    await env.DB.prepare("DELETE FROM sites WHERE id = ?").bind(id).run();
-    return jsonOk({
-      success: true,
-      message: "호스팅이 삭제되었습니다." + (site.github_repo_name
-        ? ` GitHub 저장소(${site.github_repo_owner}/${site.github_repo_name})는 보존됩니다.`
-        : ""),
-    });
+    await env.DB.prepare("DELETE FROM site_ssh_keys  WHERE site_id = ?").bind(id).run();
+    await env.DB.prepare("DELETE FROM php_logs        WHERE site_id = ?").bind(id).run();
+    await env.DB.prepare("DELETE FROM sites           WHERE id = ?").bind(id).run();
   } catch (e) {
-    return jsonErr("삭제 오류: " + e.message, 500);
+    return jsonErr("DB 삭제 오류: " + e.message, 500);
   }
+
+  return jsonOk({
+    success: true,
+    message: "호스팅이 삭제되었습니다.",
+    deleted,
+    ...(failed.length ? { warnings: failed } : {}),
+  });
 }

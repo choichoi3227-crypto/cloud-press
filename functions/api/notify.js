@@ -183,21 +183,39 @@ async function handleGetStatus(context) {
 
   if (!site) return jsonErr("사이트를 찾을 수 없습니다.", 404);
 
-  // 최근 로그 가져오기
-  const logs = await env.DB.prepare(
-    "SELECT message, level, created_at FROM php_logs WHERE site_id = ? ORDER BY rowid DESC LIMIT 20"
-  ).bind(siteId).all().catch(() => ({ results: [] }));
-
   // 완료 여부 체크
   const isComplete = site.status === "active";
   const isError    = site.status === "error";
 
-  // WP 설치 완료 여부 (로그에서 확인)
-  const allLogs    = (logs.results || []).map(l => l.message);
-  const wpDone     = allLogs.some(m => m.includes("WordPress 설치 완료") || m.includes("cloudpress-installed"));
-  const workerDone = allLogs.some(m => m.includes("Worker 생성 완료"));
-  const d1Done     = allLogs.some(m => m.includes("D1 생성 완료") || m.includes("D1 데이터베이스 생성 완료") || m.includes("D1 생성 완료"));
-  const ghDone     = allLogs.some(m => m.includes("GitHub 저장소 생성 완료"));
+  // ── 로그 — 최신순으로 가져와서 그대로 사용 ──────────────────────────────
+  const logsRes = await env.DB.prepare(
+    "SELECT message, level, created_at FROM php_logs WHERE site_id = ? ORDER BY rowid ASC"
+  ).bind(siteId).all().catch(() => ({ results: [] }));
+
+  const allLogs = (logsRes.results || []).map(l => l.message || "");
+
+  // ── step 감지 — 실제 cf-pages-hosting.js 로그 문자열과 정확히 매핑 ──────
+  const ghDone     = allLogs.some(m => m.includes("[1/5] 완료") || m.includes("GitHub 저장소 생성 완료"));
+  const d1Done     = allLogs.some(m => m.includes("D1 생성 완료") || m.includes("D1 데이터베이스 생성 완료") || m.includes("[2/5] 완료"));
+  const workerDone = allLogs.some(m => m.includes("Worker 생성 완료") || m.includes("[2/5] 완료"));
+  const wpInitDone = allLogs.some(m =>
+    m.includes("D1 스키마 초기화 완료") ||
+    m.includes("WordPress DB 초기화 완료") ||
+    m.includes("wp_* 테이블") ||
+    m.includes("cloudpress-installed")
+  );
+  const wpFilesDone = allLogs.some(m =>
+    m.includes("[5/5] Pages 완료") ||
+    m.includes("[5/5] Pages 수동 설정") ||
+    m.includes("WordPress 설치 완료") ||
+    m.includes("✅ 프로비저닝 완료") ||
+    isComplete
+  );
+
+  // ── 최근 로그 20개 — 오래된 것 → 최신 순서로 반환 ──────────────────────
+  const recentLogs = allLogs.length > 20
+    ? logsRes.results.slice(-20)
+    : logsRes.results;
 
   return jsonOk({
     success: true,
@@ -208,13 +226,13 @@ async function handleGetStatus(context) {
     is_complete: isComplete,
     is_error:    isError,
     steps: {
-      github:  ghDone,
-      d1:      d1Done,
-      worker:  workerDone,
-      wp_init: allLogs.some(m => m.includes("WordPress DB 초기화 완료")),
-      wp_files: wpDone,
+      github:   ghDone,
+      d1:       d1Done,
+      worker:   workerDone,
+      wp_init:  wpInitDone,
+      wp_files: wpFilesDone,
     },
-    logs: (logs.results || []).slice(0, 10).reverse(),
+    logs: recentLogs.map(l => ({ message: l.message, level: l.level || "info" })),
   });
 }
 

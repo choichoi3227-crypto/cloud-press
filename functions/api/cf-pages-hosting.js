@@ -20,10 +20,82 @@ function toBase64(str) {
   return btoa(bin);
 }
 
-// ── 비밀번호 해싱 (SHA-256) ────────────────────────────────────────────────────
-async function hashPassword(password) {
-  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(password));
-  return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, "0")).join("");
+// ── MD5 pure-JS (phpass 호환) ──────────────────────────────────────────────────
+function _md5(data) {
+  const bytes = typeof data === "string" ? new TextEncoder().encode(data) : data;
+  const T = new Uint32Array(64);
+  for (let i = 0; i < 64; i++) T[i] = (Math.abs(Math.sin(i + 1)) * 0x100000000) >>> 0;
+  const S = [7,12,17,22,7,12,17,22,7,12,17,22,7,12,17,22,5,9,14,20,5,9,14,20,5,9,14,20,5,9,14,20,4,11,16,23,4,11,16,23,4,11,16,23,4,11,16,23,6,10,15,21,6,10,15,21,6,10,15,21,6,10,15,21];
+  const msgLen = bytes.length, bitLen = msgLen * 8;
+  const padLen = ((msgLen % 64) < 56 ? 56 : 120) - (msgLen % 64);
+  const padded = new Uint8Array(msgLen + padLen + 8);
+  padded.set(bytes); padded[msgLen] = 0x80;
+  const view = new DataView(padded.buffer);
+  view.setUint32(msgLen + padLen, bitLen >>> 0, true);
+  view.setUint32(msgLen + padLen + 4, Math.floor(bitLen / 0x100000000), true);
+  let a0 = 0x67452301, b0 = 0xefcdab89, c0 = 0x98badcfe, d0 = 0x10325476;
+  for (let i = 0; i < padded.length; i += 64) {
+    const M = new Uint32Array(16);
+    for (let j = 0; j < 16; j++) M[j] = view.getUint32(i + j * 4, true);
+    let [a, b, c, d] = [a0, b0, c0, d0];
+    for (let j = 0; j < 64; j++) {
+      let f, g;
+      if      (j < 16) { f = (b & c) | (~b & d); g = j; }
+      else if (j < 32) { f = (d & b) | (~d & c); g = (5*j+1)%16; }
+      else if (j < 48) { f = b ^ c ^ d;           g = (3*j+5)%16; }
+      else             { f = c ^ (b | ~d);         g = (7*j)%16; }
+      f = (f + a + T[j] + M[g]) >>> 0;
+      a = d; d = c; c = b;
+      b = (b + ((f << S[j]) | (f >>> (32 - S[j])))) >>> 0;
+    }
+    a0=(a0+a)>>>0; b0=(b0+b)>>>0; c0=(c0+c)>>>0; d0=(d0+d)>>>0;
+  }
+  const out = new Uint8Array(16);
+  const ov = new DataView(out.buffer);
+  ov.setUint32(0, a0, true); ov.setUint32(4, b0, true);
+  ov.setUint32(8, c0, true); ov.setUint32(12, d0, true);
+  return out;
+}
+
+// ── phpass 비밀번호 해시 생성 (WordPress 호환) ─────────────────────────────────
+// worker-wp.js의 phpassCheck()와 호환되는 $P$ 해시 생성
+function phpassCreate(password) {
+  const ITOA64 = "./0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+  const countLog2 = 8; // 2^8 = 256 iterations
+  const chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789./";
+  const rnd = new Uint8Array(8);
+  crypto.getRandomValues(rnd);
+  let salt = "";
+  for (const b of rnd) salt += chars[b % chars.length];
+  const prefix = `$P$${ITOA64[countLog2]}${salt}`;
+  let count = 1 << countLog2;
+  const passBytes = new TextEncoder().encode(password);
+  let h = _md5(salt + password);
+  while (count--) {
+    const c = new Uint8Array(h.length + passBytes.length);
+    c.set(h); c.set(passBytes, h.length);
+    h = _md5(c);
+  }
+  // encode64
+  let output = ""; let i = 0;
+  while (i < 16) {
+    let value = h[i++];
+    output += ITOA64[value & 0x3f];
+    if (i < 16) value |= h[i] << 8;
+    output += ITOA64[(value >> 6) & 0x3f];
+    if (i++ >= 16) break;
+    if (i < 16) value |= h[i] << 16;
+    output += ITOA64[(value >> 12) & 0x3f];
+    if (i++ >= 16) break;
+    output += ITOA64[(value >> 18) & 0x3f];
+  }
+  return prefix + output;
+}
+
+// ── 비밀번호 해싱 (phpass — WordPress 호환) ────────────────────────────────────
+// worker-wp.js의 phpassCheck()와 호환되어야 하므로 phpass 사용
+function hashPassword(password) {
+  return phpassCreate(password);
 }
 
 // ── Cloudflare API 헬퍼 ───────────────────────────────────────────────────────
@@ -551,7 +623,7 @@ jobs:
 
 // ── DB 초기 데이터 파일 ───────────────────────────────────────────────────────
 async function buildDbFiles({ siteId, siteName, adminUser, adminPass, adminEmail }) {
-  const passHash = await hashPassword(adminPass);
+  const passHash = hashPassword(adminPass);
   const now      = new Date().toISOString();
   return [
     {
@@ -627,22 +699,90 @@ async function createKVNamespace({ cfToken, cfAccountId, cfEmail, title, log }) 
   return id;
 }
 
-// ── Cloudflare Worker 생성 ────────────────────────────────────────────────────
-async function createWorker({ cfToken, cfAccountId, cfEmail, workerName, siteId, d1Id, kvSessionsId, kvCacheId, log }) {
+// ── worker-wp.js 소스 로드 (GitHub 레포에서) ─────────────────────────────────
+// worker-wp.js는 배포된 Pages 레포의 루트에 있거나, 공개 레포에서 가져옴
+// 빌드 시점에 번들링된 내용을 사용
+async function fetchWorkerWpScript(log) {
+  // worker-wp.js는 현재 배포된 Pages 사이트(cloud-press)의 공개 URL에서 가져옴
+  // 환경에 따라 다를 수 있으므로 여러 소스를 시도
+  const sources = [
+    // 1) 같은 Pages 프로젝트에 배포된 worker-wp.js
+    "https://raw.githubusercontent.com/cloudpress-io/cloud-press/main/worker-wp.js",
+    // 2) 자기 자신의 Pages URL (cloud-press.co.kr)
+    "https://cloud-press.co.kr/worker-wp.js",
+  ];
+  for (const url of sources) {
+    try {
+      const res = await fetch(url, { cf: { cacheEverything: false } });
+      if (res.ok) {
+        const text = await res.text();
+        if (text.includes("CloudPress WordPress Worker")) return text;
+      }
+    } catch {}
+  }
+  await log("  worker-wp.js 원격 로드 실패 — 인라인 스크립트 사용", "warning");
+  return null;
+}
+
+// ── Cloudflare Worker 생성 (worker-wp.js 기반 실제 WordPress Worker) ──────────
+async function createWorker({ cfToken, cfAccountId, cfEmail, workerName, siteId, githubOwner, githubRepo, githubToken, d1Id, kvSessionsId, kvCacheId, log }) {
   if (!cfToken || !cfAccountId) return null;
   await log(`  Worker 생성 중: ${workerName}`);
 
-  const script = `// CloudPress Worker: ${siteId}
+  // worker-wp.js를 원격에서 가져와서 플레이스홀더 치환
+  let script = await fetchWorkerWpScript(log);
+
+  if (script) {
+    // %%SITE_ID%%, %%GITHUB_OWNER%%, %%GITHUB_REPO%% 치환
+    script = script
+      .replace(/%%SITE_ID%%/g,      siteId       || "")
+      .replace(/%%GITHUB_OWNER%%/g, githubOwner  || "")
+      .replace(/%%GITHUB_REPO%%/g,  githubRepo   || "");
+  } else {
+    // 원격 로드 실패 시: 최소 동작하는 폴백 (설정 안내 페이지 표시)
+    script = `// CloudPress WordPress Worker (fallback) - site: ${siteId}
+// worker-wp.js 로드 실패로 인한 폴백 스크립트
+// 다음 환경변수가 Worker에 바인딩되어야 합니다:
+//   DB (D1), CACHE (KV), SITE_ID, GITHUB_OWNER, GITHUB_REPO, GITHUB_TOKEN
 export default {
   async fetch(request, env, ctx) {
-    return fetch(request);
+    const url = new URL(request.url);
+    if (url.pathname === "/_health") {
+      return new Response(JSON.stringify({ status: "ok", version: "fallback", site_id: env.SITE_ID || "${siteId}", db: !!(env.DB), kv: !!(env.CACHE) }), {
+        headers: { "Content-Type": "application/json" }
+      });
+    }
+    return new Response(\`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>WordPress 준비 중</title></head>
+<body style="font-family:sans-serif;text-align:center;padding:60px;background:#f0f0f1;">
+<h1 style="color:#2271b1;">☁️ CloudPress</h1>
+<p>WordPress Worker가 설치 중입니다.</p>
+<p style="color:#666;font-size:13px;">잠시 후 새로고침 해주세요.</p>
+<p style="color:#999;font-size:11px;">Site: ${siteId}</p>
+</body></html>\`, { headers: { "Content-Type": "text/html; charset=utf-8" } });
   }
 };`;
+  }
 
+  // Cloudflare Workers API 바인딩 스펙 (올바른 형식)
   const bindings = [];
-  if (d1Id)         bindings.push({ type: "d1",           name: "DB",       id: d1Id });
-  if (kvSessionsId) bindings.push({ type: "kv_namespace", name: "SESSIONS", namespace_id: kvSessionsId });
-  if (kvCacheId)    bindings.push({ type: "kv_namespace", name: "CACHE",    namespace_id: kvCacheId });
+  if (d1Id) {
+    // D1 바인딩: database_id 필드 사용
+    bindings.push({ type: "d1", name: "DB",      database_id: d1Id });
+  }
+  if (kvSessionsId) {
+    bindings.push({ type: "kv_namespace", name: "SESSIONS", namespace_id: kvSessionsId });
+  }
+  if (kvCacheId) {
+    bindings.push({ type: "kv_namespace", name: "CACHE",    namespace_id: kvCacheId });
+  }
+  // plain_text 환경변수 바인딩
+  bindings.push({ type: "plain_text", name: "SITE_ID",      text: siteId       || "" });
+  bindings.push({ type: "plain_text", name: "GITHUB_OWNER", text: githubOwner  || "" });
+  bindings.push({ type: "plain_text", name: "GITHUB_REPO",  text: githubRepo   || "" });
+  // GitHub 토큰은 secret_text로
+  if (githubToken) {
+    bindings.push({ type: "secret_text", name: "GITHUB_TOKEN", text: githubToken });
+  }
 
   const form = new FormData();
   form.append("metadata", JSON.stringify({
@@ -665,34 +805,178 @@ export default {
   return workerName;
 }
 
-// ── D1 스키마 초기화 ──────────────────────────────────────────────────────────
+// ── D1 스키마 초기화 (WordPress wp_* 테이블) ──────────────────────────────────
+// worker-wp.js가 기대하는 실제 WordPress DB 스키마로 초기화
+// autoInstallWordPress()와 동일한 구조를 CF API로 미리 생성
 async function initD1Schema({ cfToken, cfAccountId, cfEmail, d1Id, siteId, adminUser, adminEmail, adminPassHash, log }) {
   if (!d1Id) return;
   await log("  D1 스키마 초기화 중...");
-  const now = new Date().toISOString();
+
+  // D1 REST API는 세미콜론으로 구분된 multi-statement를 지원하지 않으므로
+  // /raw endpoint의 queries 배열 사용 (batch 방식)
   const sqls = [
-    `CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, username TEXT NOT NULL, email TEXT NOT NULL UNIQUE, password_hash TEXT NOT NULL, role TEXT DEFAULT 'author', display_name TEXT, created_at TEXT DEFAULT CURRENT_TIMESTAMP)`,
-    `CREATE TABLE IF NOT EXISTS posts (id TEXT PRIMARY KEY, slug TEXT NOT NULL UNIQUE, title TEXT NOT NULL, content TEXT, status TEXT DEFAULT 'draft', author_id TEXT, created_at TEXT DEFAULT CURRENT_TIMESTAMP, updated_at TEXT DEFAULT CURRENT_TIMESTAMP)`,
-    `CREATE TABLE IF NOT EXISTS pages (id TEXT PRIMARY KEY, slug TEXT NOT NULL UNIQUE, title TEXT NOT NULL, content TEXT, status TEXT DEFAULT 'draft', created_at TEXT DEFAULT CURRENT_TIMESTAMP)`,
-    `CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT)`,
-    `CREATE TABLE IF NOT EXISTS media (id TEXT PRIMARY KEY, filename TEXT, url TEXT, mime_type TEXT, size INTEGER, created_at TEXT DEFAULT CURRENT_TIMESTAMP)`,
-    `INSERT OR IGNORE INTO users (id, username, email, password_hash, role, display_name, created_at) VALUES ('admin-${siteId.slice(0,8)}', '${adminUser.replace(/'/g,"''")}', '${adminEmail.replace(/'/g,"''")}', '${adminPassHash}', 'administrator', '${adminUser.replace(/'/g,"''")}', '${now}')`,
-    `INSERT OR IGNORE INTO settings (key, value) VALUES ('site_id', '${siteId}')`,
+    // ── 테이블 생성 ───────────────────────────────────────────────────────
+    `CREATE TABLE IF NOT EXISTS wp_options (
+      option_id   INTEGER PRIMARY KEY AUTOINCREMENT,
+      option_name TEXT UNIQUE NOT NULL,
+      option_value TEXT NOT NULL DEFAULT '',
+      autoload    TEXT NOT NULL DEFAULT 'yes'
+    )`,
+    `CREATE TABLE IF NOT EXISTS wp_users (
+      ID            INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_login    TEXT NOT NULL DEFAULT '',
+      user_pass     TEXT NOT NULL DEFAULT '',
+      user_nicename TEXT NOT NULL DEFAULT '',
+      user_email    TEXT NOT NULL DEFAULT '',
+      user_url      TEXT NOT NULL DEFAULT '',
+      user_registered TEXT NOT NULL DEFAULT '',
+      user_activation_key TEXT NOT NULL DEFAULT '',
+      user_status   INTEGER NOT NULL DEFAULT 0,
+      display_name  TEXT NOT NULL DEFAULT ''
+    )`,
+    `CREATE TABLE IF NOT EXISTS wp_usermeta (
+      umeta_id  INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id   INTEGER NOT NULL DEFAULT 0,
+      meta_key  TEXT,
+      meta_value TEXT
+    )`,
+    `CREATE TABLE IF NOT EXISTS wp_posts (
+      ID                    INTEGER PRIMARY KEY AUTOINCREMENT,
+      post_author           INTEGER NOT NULL DEFAULT 0,
+      post_date             TEXT NOT NULL DEFAULT '',
+      post_date_gmt         TEXT NOT NULL DEFAULT '',
+      post_content          TEXT NOT NULL DEFAULT '',
+      post_title            TEXT NOT NULL DEFAULT '',
+      post_excerpt          TEXT NOT NULL DEFAULT '',
+      post_status           TEXT NOT NULL DEFAULT 'publish',
+      comment_status        TEXT NOT NULL DEFAULT 'open',
+      ping_status           TEXT NOT NULL DEFAULT 'open',
+      post_password         TEXT NOT NULL DEFAULT '',
+      post_name             TEXT NOT NULL DEFAULT '',
+      to_ping               TEXT NOT NULL DEFAULT '',
+      pinged                TEXT NOT NULL DEFAULT '',
+      post_modified         TEXT NOT NULL DEFAULT '',
+      post_modified_gmt     TEXT NOT NULL DEFAULT '',
+      post_content_filtered TEXT NOT NULL DEFAULT '',
+      post_parent           INTEGER NOT NULL DEFAULT 0,
+      guid                  TEXT NOT NULL DEFAULT '',
+      menu_order            INTEGER NOT NULL DEFAULT 0,
+      post_type             TEXT NOT NULL DEFAULT 'post',
+      post_mime_type        TEXT NOT NULL DEFAULT '',
+      comment_count         INTEGER NOT NULL DEFAULT 0
+    )`,
+    `CREATE TABLE IF NOT EXISTS wp_postmeta (
+      meta_id    INTEGER PRIMARY KEY AUTOINCREMENT,
+      post_id    INTEGER NOT NULL DEFAULT 0,
+      meta_key   TEXT,
+      meta_value TEXT
+    )`,
+    `CREATE TABLE IF NOT EXISTS wp_terms (
+      term_id    INTEGER PRIMARY KEY AUTOINCREMENT,
+      name       TEXT NOT NULL DEFAULT '',
+      slug       TEXT NOT NULL DEFAULT '',
+      term_group INTEGER NOT NULL DEFAULT 0
+    )`,
+    `CREATE TABLE IF NOT EXISTS wp_term_taxonomy (
+      term_taxonomy_id INTEGER PRIMARY KEY AUTOINCREMENT,
+      term_id          INTEGER NOT NULL DEFAULT 0,
+      taxonomy         TEXT NOT NULL DEFAULT '',
+      description      TEXT NOT NULL DEFAULT '',
+      parent           INTEGER NOT NULL DEFAULT 0,
+      count            INTEGER NOT NULL DEFAULT 0
+    )`,
+    `CREATE TABLE IF NOT EXISTS wp_term_relationships (
+      object_id        INTEGER NOT NULL DEFAULT 0,
+      term_taxonomy_id INTEGER NOT NULL DEFAULT 0,
+      term_order       INTEGER NOT NULL DEFAULT 0,
+      PRIMARY KEY (object_id, term_taxonomy_id)
+    )`,
+    `CREATE TABLE IF NOT EXISTS wp_comments (
+      comment_ID           INTEGER PRIMARY KEY AUTOINCREMENT,
+      comment_post_ID      INTEGER NOT NULL DEFAULT 0,
+      comment_author       TEXT NOT NULL DEFAULT '',
+      comment_author_email TEXT NOT NULL DEFAULT '',
+      comment_author_url   TEXT NOT NULL DEFAULT '',
+      comment_author_IP    TEXT NOT NULL DEFAULT '',
+      comment_date         TEXT NOT NULL DEFAULT '',
+      comment_date_gmt     TEXT NOT NULL DEFAULT '',
+      comment_content      TEXT NOT NULL DEFAULT '',
+      comment_karma        INTEGER NOT NULL DEFAULT 0,
+      comment_approved     TEXT NOT NULL DEFAULT '1',
+      comment_agent        TEXT NOT NULL DEFAULT '',
+      comment_type         TEXT NOT NULL DEFAULT 'comment',
+      comment_parent       INTEGER NOT NULL DEFAULT 0,
+      user_id              INTEGER NOT NULL DEFAULT 0
+    )`,
+    `CREATE TABLE IF NOT EXISTS wp_commentmeta (
+      meta_id    INTEGER PRIMARY KEY AUTOINCREMENT,
+      comment_id INTEGER NOT NULL DEFAULT 0,
+      meta_key   TEXT,
+      meta_value TEXT
+    )`,
   ];
 
-  // D1 Batch API로 한 번에 실행 (subrequest 7개 → 1개)
-  const r = await cfReq(cfToken, "POST", `/accounts/${cfAccountId}/d1/database/${d1Id}/query`, {
-    sql: sqls.join("; "),
+  // D1 Batch API (/raw endpoint) 사용 — 테이블 생성은 한 번에
+  const batchRes = await cfReq(cfToken, "POST", `/accounts/${cfAccountId}/d1/database/${d1Id}/raw`, {
+    params: [],
+    sql: sqls.join(";\n"),
   }, cfEmail);
 
-  // Batch API가 지원되지 않는 경우 개별 실행으로 fallback
-  if (!r.ok) {
+  if (!batchRes.ok) {
+    // fallback: 개별 실행
+    await log("  D1 batch 실패, 개별 실행으로 재시도...", "warning");
     for (const sql of sqls) {
-      const res = await cfReq(cfToken, "POST", `/accounts/${cfAccountId}/d1/database/${d1Id}/query`, { sql }, cfEmail);
-      if (!res.ok) await log(`  D1 쿼리 실패: ${sql.slice(0,60)}`, "warning");
+      const r = await cfReq(cfToken, "POST", `/accounts/${cfAccountId}/d1/database/${d1Id}/query`, { sql }, cfEmail);
+      if (!r.ok) await log(`  D1 DDL 실패: ${sql.slice(0, 60).replace(/\s+/g, " ")}`, "warning");
     }
   }
-  await log("  D1 스키마 초기화 완료");
+
+  // ── 기본 데이터 삽입 (D1 /query endpoint — 파라미터 바인딩 지원) ──────────
+  const now = new Date().toISOString().replace("T", " ").slice(0, 19);
+  const shortSiteId = siteId.slice(0, 8);
+
+  const inserts = [
+    // 관리자 사용자 (adminPassHash는 phpass 형식 또는 SHA-256)
+    {
+      sql: `INSERT OR IGNORE INTO wp_users (user_login, user_pass, user_nicename, user_email, user_url, user_registered, user_activation_key, user_status, display_name) VALUES (?, ?, ?, ?, '', ?, '', 0, ?)`,
+      params: [adminUser, adminPassHash, adminUser, adminEmail, now, adminUser],
+    },
+    // 사용자 메타 — 역할
+    { sql: `INSERT OR IGNORE INTO wp_usermeta (user_id, meta_key, meta_value) VALUES (1, 'wp_capabilities', 'a:1:{s:13:"administrator";b:1;}')`, params: [] },
+    { sql: `INSERT OR IGNORE INTO wp_usermeta (user_id, meta_key, meta_value) VALUES (1, 'wp_user_level', '10')`, params: [] },
+    { sql: `INSERT OR IGNORE INTO wp_usermeta (user_id, meta_key, meta_value) VALUES (1, 'admin_color', 'fresh')`, params: [] },
+    // 기본 카테고리
+    { sql: `INSERT OR IGNORE INTO wp_terms (term_id, name, slug, term_group) VALUES (1, '미분류', 'uncategorized', 0)`, params: [] },
+    { sql: `INSERT OR IGNORE INTO wp_term_taxonomy (term_taxonomy_id, term_id, taxonomy, description, parent, count) VALUES (1, 1, 'category', '', 0, 1)`, params: [] },
+    // WordPress 기본 옵션
+    { sql: `INSERT OR IGNORE INTO wp_options (option_name, option_value, autoload) VALUES ('siteurl', '', 'yes')`, params: [] },
+    { sql: `INSERT OR IGNORE INTO wp_options (option_name, option_value, autoload) VALUES ('blogname', '내 WordPress 사이트', 'yes')`, params: [] },
+    { sql: `INSERT OR IGNORE INTO wp_options (option_name, option_value, autoload) VALUES ('blogdescription', 'CloudPress로 만든 WordPress', 'yes')`, params: [] },
+    { sql: `INSERT OR IGNORE INTO wp_options (option_name, option_value, autoload) VALUES ('admin_email', ?, 'yes')`, params: [adminEmail] },
+    { sql: `INSERT OR IGNORE INTO wp_options (option_name, option_value, autoload) VALUES ('template', 'twentytwentyfour', 'yes')`, params: [] },
+    { sql: `INSERT OR IGNORE INTO wp_options (option_name, option_value, autoload) VALUES ('stylesheet', 'twentytwentyfour', 'yes')`, params: [] },
+    { sql: `INSERT OR IGNORE INTO wp_options (option_name, option_value, autoload) VALUES ('current_theme', 'Twenty Twenty-Four', 'yes')`, params: [] },
+    { sql: `INSERT OR IGNORE INTO wp_options (option_name, option_value, autoload) VALUES ('active_plugins', 'a:0:{}', 'yes')`, params: [] },
+    { sql: `INSERT OR IGNORE INTO wp_options (option_name, option_value, autoload) VALUES ('permalink_structure', '/%postname%/', 'yes')`, params: [] },
+    { sql: `INSERT OR IGNORE INTO wp_options (option_name, option_value, autoload) VALUES ('wp_installed_version', '6.7.2', 'no')`, params: [] },
+    { sql: `INSERT OR IGNORE INTO wp_options (option_name, option_value, autoload) VALUES ('db_version', '57155', 'no')`, params: [] },
+    { sql: `INSERT OR IGNORE INTO wp_options (option_name, option_value, autoload) VALUES ('timezone_string', 'Asia/Seoul', 'yes')`, params: [] },
+    { sql: `INSERT OR IGNORE INTO wp_options (option_name, option_value, autoload) VALUES ('blog_charset', 'UTF-8', 'yes')`, params: [] },
+    { sql: `INSERT OR IGNORE INTO wp_options (option_name, option_value, autoload) VALUES ('blogpublic', '1', 'yes')`, params: [] },
+    { sql: `INSERT OR IGNORE INTO wp_options (option_name, option_value, autoload) VALUES ('cp_auto_installed', '1', 'no')`, params: [] },
+    { sql: `INSERT OR IGNORE INTO wp_options (option_name, option_value, autoload) VALUES ('cp_admin_user', ?, 'no')`, params: [adminUser] },
+    { sql: `INSERT OR IGNORE INTO wp_options (option_name, option_value, autoload) VALUES ('cp_site_id', ?, 'no')`, params: [siteId] },
+    // 환영 게시물
+    { sql: `INSERT OR IGNORE INTO wp_posts (post_author, post_date, post_date_gmt, post_content, post_title, post_excerpt, post_status, comment_status, ping_status, post_name, post_type, post_modified, post_modified_gmt, guid, menu_order) VALUES (1, ?, ?, ?, '안녕하세요!', '', 'publish', 'open', 'open', 'hello-world', 'post', ?, ?, '', 0)`, params: [now, now, "WordPress에 오신 것을 환영합니다! CloudPress로 구동되는 이 사이트를 자유롭게 수정하고 꾸며보세요.", now, now] },
+    { sql: `INSERT OR IGNORE INTO wp_term_relationships (object_id, term_taxonomy_id, term_order) VALUES (1, 1, 0)`, params: [] },
+  ];
+
+  for (const { sql, params } of inserts) {
+    const r = await cfReq(cfToken, "POST", `/accounts/${cfAccountId}/d1/database/${d1Id}/query`, { sql, params }, cfEmail);
+    if (!r.ok) await log(`  D1 INSERT 실패: ${sql.slice(0, 60).replace(/\s+/g, " ")}`, "warning");
+  }
+
+  await log("  D1 스키마 초기화 완료 (WordPress wp_* 테이블)");
 }
 
 // ── Cloudflare Pages 프로젝트 생성 ───────────────────────────────────────────
@@ -795,10 +1079,10 @@ export async function provisionCloudflarePagesHosting({
     d1Id = await createD1Database({ cfToken, cfAccountId, cfEmail, dbName: `${prefix}-db`, log });
     kvSessionsId = await createKVNamespace({ cfToken, cfAccountId, cfEmail, title: `${prefix}-sessions`, log });
     kvCacheId    = await createKVNamespace({ cfToken, cfAccountId, cfEmail, title: `${prefix}-cache`,    log });
-    workerName   = await createWorker({ cfToken, cfAccountId, cfEmail, workerName: prefix, siteId, d1Id, kvSessionsId, kvCacheId, log });
+    workerName   = await createWorker({ cfToken, cfAccountId, cfEmail, workerName: prefix, siteId, githubOwner: owner, githubRepo: repoName, githubToken: token, d1Id, kvSessionsId, kvCacheId, log });
 
     if (d1Id) {
-      const passHash = await hashPassword(adminPass);
+      const passHash = hashPassword(adminPass);
       await initD1Schema({ cfToken, cfAccountId, cfEmail, d1Id, siteId, adminUser, adminEmail, adminPassHash: passHash, log });
     }
 

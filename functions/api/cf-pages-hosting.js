@@ -1,7 +1,24 @@
 // Cloudflare Pages 호스팅 프로비저닝 전담 모듈
 // GitHub Tree API로 배치 push → 타임아웃 방지
 
-import { ghReq, pickGithubToken } from "./github-storage.js";
+import { pickGithubToken } from "./github-storage.js";
+
+// ── GitHub API 헬퍼 (github-storage.js와 동일, 로컬 정의로 'not defined' 방지) ──
+async function ghReq(method, path, token, body) {
+  const res = await fetch(`https://api.github.com${path}`, {
+    method,
+    headers: {
+      Authorization:           `Bearer ${token}`,
+      Accept:                  "application/vnd.github+json",
+      "X-GitHub-Api-Version":  "2022-11-28",
+      "Content-Type":          "application/json",
+      "User-Agent":            "CloudPress-Hosting/6.1",
+    },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const data = await res.json().catch(() => ({}));
+  return { status: res.status, ok: res.ok, data };
+}
 
 // ── 딜레이 ────────────────────────────────────────────────────────────────────
 const delay = (ms) => new Promise(r => setTimeout(r, ms));
@@ -1211,10 +1228,10 @@ export async function provisionCloudflarePagesHosting({
       )`,
     ];
 
-    // CF D1 HTTP API로 SQL 실행
-    const d1Exec = async (sql) => {
+    // ── CF D1 Batch API: 모든 SQL을 단 1회 fetch로 실행 (subrequest 절약) ──
+    const d1Batch = async (sqls) => {
       const r = await fetch(
-        `https://api.cloudflare.com/client/v4/accounts/${cfAccountId}/d1/database/${d1Id}/query`,
+        `https://api.cloudflare.com/client/v4/accounts/${cfAccountId}/d1/database/${d1Id}/raw`,
         {
           method: "POST",
           headers: {
@@ -1223,22 +1240,19 @@ export async function provisionCloudflarePagesHosting({
               ? { "X-Auth-Email": cfEmail, "X-Auth-Key": cfToken }
               : { "Authorization": `Bearer ${cfToken}` }),
           },
-          body: JSON.stringify({ sql }),
+          // /raw 엔드포인트는 sql에 여러 문장을 세미콜론으로 이어서 한 번에 처리
+          body: JSON.stringify({ sql: sqls.join(";\n") }),
         }
       );
       return r.json().catch(() => ({}));
     };
 
-    for (const sql of schemaSqls) {
-      const r = await d1Exec(sql);
-      if (r?.errors?.length) {
-        await log(`  D1 스키마 오류: ${JSON.stringify(r.errors)}`, "warn");
-      }
-    }
-
     // WordPress 기본 데이터 삽입
     const siteUrl = workerDomain || pagesUrl || `https://${workerName}.workers.dev`;
-    const insertSqls = [
+
+    // 스키마 + 데이터를 한 번에 전송 (fetch 1회 = subrequest 1개)
+    const allSqls = [
+      ...schemaSqls,
       `INSERT OR IGNORE INTO wp_users (user_login, user_pass, user_nicename, user_email, user_url, user_registered, user_status, display_name) VALUES ('${adminUser}', '${passHash.replace(/'/g,"''")}', '${adminUser}', '${adminEmail}', '${siteUrl}', '${now}', 0, '${adminUser}')`,
       `INSERT OR IGNORE INTO wp_usermeta (user_id, meta_key, meta_value) VALUES (1, 'wp_capabilities', 'a:1:{s:13:"administrator";b:1;}')`,
       `INSERT OR IGNORE INTO wp_usermeta (user_id, meta_key, meta_value) VALUES (1, 'wp_user_level', '10')`,
@@ -1261,13 +1275,11 @@ export async function provisionCloudflarePagesHosting({
       `INSERT OR IGNORE INTO wp_term_relationships (object_id, term_taxonomy_id) VALUES (1, 1)`,
     ];
 
-    for (const sql of insertSqls) {
-      const r = await d1Exec(sql);
-      if (r?.errors?.length) {
-        await log(`  D1 데이터 삽입 오류 (무시 가능): ${r.errors[0]?.message}`, "warn");
-      }
+    const batchRes = await d1Batch(allSqls);
+    if (batchRes?.errors?.length) {
+      await log(`  D1 배치 오류 (일부 무시 가능): ${JSON.stringify(batchRes.errors[0])}`, "warn");
     }
-    await log("  ✅ D1 WordPress 스키마 초기화 완료");
+    await log("  ✅ D1 WordPress 스키마 초기화 완료 (배치 1회)");
   }
 
   // ── 8. GitHub Actions 시크릿 설정 ────────────────────────────────────────

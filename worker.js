@@ -317,108 +317,320 @@ function buildPhpEnv(request, env, url, siteUrl) {
 
 // ─── WordPress 요청 처리 ───────────────────────────────────────────────────
 
-async function handleWordPressRequest(request, env) {
+/**
+ * WordPress 요청 처리 — php-wasm 기반 진짜 WordPress 실행
+ *
+ * 아키텍처:
+ *   정적 자산: GitHub 미러 or WordPress/WordPress 공식 CDN (immutable 캐시)
+ *   PHP 실행:  PHP_RUNNER Service Binding → php-wasm Worker
+ *   캐시 전략: L1 Edge Cache → L2 KV Cache → stale-while-revalidate
+ *   미러링:    업로드 파일을 GitHub 레포에 실시간 미러링
+ */
+async function handleWordPressRequest(request, env, ctx) {
   const url    = new URL(request.url);
-  const userGh = (env.GITHUB_TOKEN && env.GITHUB_OWNER && env.GITHUB_REPO)
-    ? new GitHubStorage(env.GITHUB_TOKEN, env.GITHUB_OWNER, env.GITHUB_REPO)
-    : null;
-  const coreGh = new WPCoreStorage();
+  const path   = url.pathname;
+  const method = request.method.toUpperCase();
 
-  if (!userGh) {
+  // STATIC 파일 확장자
+  const STATIC_EXT = /\.(css|js|mjs|jpg|jpeg|png|gif|webp|avif|svg|ico|woff2?|ttf|eot|otf|map|pdf|zip|mp4|mp3|ogg|wav|webm)$/i;
+
+  // ── GitHub 미러 인스턴스 ────────────────────────────────────────────────
+  const mirror = {
+    token:  env.GITHUB_TOKEN  || "",
+    owner:  env.GITHUB_OWNER  || "",
+    repo:   env.GITHUB_REPO   || "",
+    branch: "main",
+    enabled: !!(env.GITHUB_TOKEN && env.GITHUB_OWNER && env.GITHUB_REPO),
+
+    rawUrl(filePath) {
+      return `https://raw.githubusercontent.com/${this.owner}/${this.repo}/${this.branch}/${filePath}`;
+    },
+    async get(filePath) {
+      if (!this.enabled) return null;
+      const res = await fetch(this.rawUrl(filePath), {
+        headers: {
+          Authorization: `Bearer ${this.token}`,
+          "User-Agent": "CloudPress-Worker/4.0",
+        },
+        cf: { cacheEverything: true, cacheTtl: 3600 },
+      }).catch(() => null);
+      return res?.ok ? res : null;
+    },
+    // 파일을 GitHub 레포에 미러링
+    async put(filePath, content, message) {
+      if (!this.enabled) return false;
+      let b64;
+      if (typeof content === "string") {
+        const bytes = new TextEncoder().encode(content);
+        let bin = ""; for (const b of bytes) bin += String.fromCharCode(b);
+        b64 = btoa(bin);
+      } else {
+        const bytes = content instanceof ArrayBuffer ? new Uint8Array(content) : content;
+        let bin = ""; for (const b of bytes) bin += String.fromCharCode(b);
+        b64 = btoa(bin);
+      }
+      // 기존 SHA 조회
+      let sha;
+      const checkRes = await fetch(
+        `https://api.github.com/repos/${this.owner}/${this.repo}/contents/${filePath}?ref=${this.branch}`,
+        { headers: { Authorization: `Bearer ${this.token}`, Accept: "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28", "User-Agent": "CloudPress-Worker/4.0" } }
+      ).catch(() => null);
+      if (checkRes?.ok) { const d = await checkRes.json(); sha = d.sha; }
+
+      const body = { message: message || `upload: ${filePath}`, content: b64, branch: this.branch };
+      if (sha) body.sha = sha;
+      const res = await fetch(
+        `https://api.github.com/repos/${this.owner}/${this.repo}/contents/${filePath}`,
+        { method: "PUT", headers: { Authorization: `Bearer ${this.token}`, Accept: "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28", "Content-Type": "application/json", "User-Agent": "CloudPress-Worker/4.0" }, body: JSON.stringify(body) }
+      ).catch(() => null);
+      return res?.ok || false;
+    },
+  };
+
+  // GitHub 미러 미설정 시 안내
+  if (!mirror.enabled) {
     return new Response(setupPage("no_github"), { headers: { "Content-Type": "text/html;charset=utf-8" } });
   }
 
-  const staticExt = /\.(css|js|jpg|jpeg|png|gif|webp|svg|ico|woff2?|ttf|eot|otf|map)$/i;
+  // ── KV 캐시 헬퍼 ─────────────────────────────────────────────────────────
+  const kv = env.CACHE || env.KV;
+  const kvGet = async (key) => { try { return await kv?.get(key); } catch { return null; } };
+  const kvSet = async (key, val, ttl = 3600) => { try { await kv?.put(key, val, { expirationTtl: ttl }); } catch {} };
+  const kvGetMeta = async (key) => { try { return await kv?.getWithMetadata(key); } catch { return null; } };
 
-  // 정적 파일: wp-content → 사용자 repo, 그 외 → 공식 코어
-  if (staticExt.test(url.pathname)) {
-    if (url.pathname.startsWith("/wp-content/")) {
-      const f = await userGh.fetchRaw(url.pathname.slice(1));
-      if (f) return f;
+  // ── 정적 파일 서빙 ────────────────────────────────────────────────────────
+  if (STATIC_EXT.test(path)) {
+    const filePath = path.replace(/^\//, "");
+
+    // KV 캐시 확인 (핵심 자산)
+    const cacheKey = `static:${filePath}`;
+    const cached = await kvGetMeta(cacheKey);
+    if (cached?.value) {
+      return new Response(cached.value, {
+        headers: {
+          "Content-Type":  cached.metadata?.ct || mimeByExt(path),
+          "Cache-Control": "public, max-age=31536000, immutable",
+          "X-Cache":       "HIT",
+          "ETag":          cached.metadata?.etag || "",
+        },
+      });
     }
-    const coreFile = await coreGh.fetchRaw(url.pathname.replace(/^\//, ""));
-    if (coreFile) return coreFile;
-    return new Response("Not Found", { status: 404 });
-  }
 
-  // 미디어
-  if (url.pathname.startsWith("/wp-content/uploads/")) {
-    const f = await userGh.fetchRaw(url.pathname.slice(1));
-    if (f) return f;
-    return new Response("미디어 없음", { status: 404 });
-  }
+    // wp-content → GitHub 미러 우선
+    let res = null;
+    if (path.startsWith("/wp-content/")) {
+      res = await mirror.get(filePath);
+    }
 
-  let installed = await checkInstalled(env.DB, env.KV);
-  if (!installed) {
-    // DB가 연결돼 있으면 자동으로 WordPress 설치 시도
-    if (env.DB) {
-      const siteUrl = `${url.protocol}//${url.host}`;
-      const ok = await initWordPressDB(
-        env.DB, siteUrl,
-        "admin",
-        crypto.randomUUID().slice(0, 12),
-        `admin@${url.host}`
+    // WordPress 코어 → jsDelivr CDN → WordPress/WordPress GitHub
+    if (!res) {
+      for (const base of [
+        `https://cdn.jsdelivr.net/npm/wordpress-static@6.7.2`,
+        `https://raw.githubusercontent.com/WordPress/WordPress/master`,
+      ]) {
+        try {
+          const r = await fetch(`${base}/${filePath}`, { cf: { cacheEverything: true, cacheTtl: 86400 } });
+          if (r.ok) { res = r; break; }
+        } catch {}
+      }
+    }
+
+    if (!res) return new Response("Not Found", { status: 404 });
+
+    const body    = await res.arrayBuffer();
+    const ct      = mimeByExt(path);
+    const etag    = `"${Date.now().toString(36)}"`;
+    const isUploads = path.startsWith("/wp-content/uploads/");
+
+    // 텍스트 파일 KV 저장 (<=2MB)
+    if (!isUploads && body.byteLength < 2 * 1024 * 1024 && /\.(css|js|svg|json|xml|txt)$/.test(path)) {
+      if (ctx) ctx.waitUntil(
+        kv?.put(cacheKey, new TextDecoder().decode(body), {
+          expirationTtl: 86400,
+          metadata: { ct, etag },
+        }).catch(() => {})
       );
-      if (ok) {
-        installed = true;
-        if (env.KV) await setCached(env.KV, "wp:installed", "1", 86400);
-      } else {
-        return new Response(setupPage("init"), { headers: { "Content-Type": "text/html;charset=utf-8" } });
-      }
-    } else {
-      return new Response(setupPage("init"), { headers: { "Content-Type": "text/html;charset=utf-8" } });
+    }
+
+    return new Response(body, {
+      headers: {
+        "Content-Type":  ct,
+        "Cache-Control": isUploads
+          ? "public, max-age=86400, stale-while-revalidate=604800"
+          : "public, max-age=31536000, immutable",
+        "ETag":          etag,
+        "Vary":          "Accept-Encoding",
+        "X-Cache":       "MISS",
+        "X-Content-Type-Options": "nosniff",
+      },
+    });
+  }
+
+  // ── PHP 실행 (php-wasm) ───────────────────────────────────────────────────
+  if (!env.PHP_RUNNER) {
+    return new Response(`<!DOCTYPE html><html lang="ko"><head><meta charset="UTF-8"><title>PHP Runner 필요</title>
+<style>body{font-family:sans-serif;max-width:640px;margin:80px auto;padding:24px;background:#0a0a0a;color:#e5e5e5}h1{color:#f87171}
+pre{background:#1c1c1c;padding:16px;border-radius:8px;font-size:13px;color:#86efac;line-height:1.6;overflow:auto}</style></head><body>
+<h1>⚙️ PHP Runner Worker 설정 필요</h1>
+<p>진짜 WordPress PHP 실행을 위해 <code>cloudpress-php</code> worker를 먼저 배포하세요.</p>
+<pre># 1단계: PHP Runner Worker 배포
+wrangler deploy --config wrangler-php.toml
+
+# 2단계: wrangler.toml [[services]] 바인딩 활성화 (이미 활성화됨)
+
+# 3단계: 메인 Worker 재배포
+wrangler deploy</pre></body></html>`,
+      { status: 503, headers: { "Content-Type": "text/html; charset=utf-8" } }
+    );
+  }
+
+  // PHP 캐시 스킵 조건
+  const SKIP_CACHE = ["/wp-admin", "/wp-login.php", "/cart", "/checkout", "/my-account", "/wp-cron.php"];
+  const isCacheable = method === "GET"
+    && !SKIP_CACHE.some(s => path.startsWith(s))
+    && !(request.headers.get("Cookie") || "").includes("wordpress_logged_in");
+
+  // KV PHP 캐시 조회
+  if (isCacheable) {
+    const cached = await kvGet(`php:${url.pathname}${url.search}`);
+    if (cached) {
+      return new Response(cached, {
+        headers: {
+          "Content-Type":  "text/html; charset=utf-8",
+          "Cache-Control": "public, s-maxage=60, stale-while-revalidate=3600",
+          "X-Cache":       "HIT",
+          "X-Content-Type-Options": "nosniff",
+        },
+      });
     }
   }
 
-  // 공식 코어 접근 확인
-  const coreReady = await coreGh.exists("wp-load.php");
-  if (!coreReady) {
-    return new Response(setupPage("db_ready"), { headers: { "Content-Type": "text/html;charset=utf-8" } });
-  }
-
-  // KV 페이지 캐시
-  const cacheKey = `page:${url.pathname}${url.search}`;
-  if (request.method === "GET" && env.CACHE) {
-    const cached = await getCached(env.CACHE, cacheKey);
-    if (cached) return new Response(cached, { headers: { "Content-Type": "text/html;charset=utf-8", "X-Cache": "HIT" } });
-  }
-
+  // PHP 환경변수 구성
   const siteUrl = `${url.protocol}//${url.host}`;
-  const phpEnv  = buildPhpEnv(request, env, url, siteUrl);
-  const wpConf  = buildWpConfig(env, siteUrl);
-
-  // wp-login / wp-admin → 공식 코어
-  if (url.pathname === "/wp-login.php" || url.pathname.startsWith("/wp-admin")) {
-    const phpFile = url.pathname === "/wp-login.php" ? "wp-login.php" : url.pathname.slice(1);
-    const phpRes  = await coreGh.getFile(phpFile);
-    if (!phpRes) return new Response("WordPress 코어 파일 없음", { status: 503 });
-    return runPhp(phpRes.text, env, { phpEnv, files: { "/wordpress/wp-config.php": wpConf } });
+  let postBody  = "";
+  if (["POST", "PUT", "PATCH"].includes(method)) {
+    postBody = await request.text().catch(() => "");
   }
 
-  // 일반 PHP → 공식 코어
-  let phpPath = url.pathname;
-  if (!phpPath || phpPath === "/") phpPath = "/index.php";
-  if (!phpPath.endsWith(".php")) phpPath = phpPath.replace(/\/$/, "") + "/index.php";
+  // wp-config.php + db.php를 GitHub에서 직접 가져오기
+  const [wpConfigRes, dbPhpRes] = await Promise.all([
+    mirror.get("wp-config.php"),
+    mirror.get("wp-content/db.php"),
+  ]);
+  const wpConfig = wpConfigRes ? await wpConfigRes.text() : "";
+  const dbPhp    = dbPhpRes    ? await dbPhpRes.text()    : "";
 
-  const phpFile = phpPath.replace(/^\//, "");
-  const phpRes  = (await coreGh.getFile(phpFile).catch(() => null)) || (await coreGh.getFile("index.php"));
-  if (!phpRes) {
-    return new Response(setupPage("almost"), { headers: { "Content-Type": "text/html;charset=utf-8" } });
+  // PHP 파일 경로 결정
+  let phpFile = path;
+  if (!phpFile || phpFile === "/") phpFile = "/index.php";
+  else if (!phpFile.endsWith(".php")) {
+    if (phpFile === "/wp-admin" || phpFile === "/wp-admin/") phpFile = "/wp-admin/index.php";
+    else if (phpFile.startsWith("/wp-admin/")) phpFile = phpFile.replace(/\/$/, "");
+    else phpFile = "/index.php";
   }
 
-  const response = await runPhp(phpRes.text, env, { phpEnv, files: { "/wordpress/wp-config.php": wpConf } });
+  const payload = {
+    phpFile,
+    phpEnv: {
+      WP_HOME:    siteUrl, WP_SITEURL: siteUrl,
+      REQUEST_URI:    path + url.search,
+      REQUEST_METHOD: method,
+      HTTP_HOST:      url.host, SERVER_NAME: url.host,
+      SERVER_PORT:    url.port || (url.protocol === "https:" ? "443" : "80"),
+      HTTPS:          url.protocol === "https:" ? "on" : "",
+      DOCUMENT_ROOT:  "/wordpress",
+      SCRIPT_FILENAME: `/wordpress${phpFile}`,
+      SCRIPT_NAME:    phpFile,
+      PHP_SELF:       phpFile,
+      GATEWAY_INTERFACE: "CGI/1.1",
+      SERVER_PROTOCOL:   "HTTP/1.1",
+      SERVER_SOFTWARE:   "CloudPress/4.0",
+      HTTP_COOKIE:          request.headers.get("Cookie")            || "",
+      HTTP_USER_AGENT:      request.headers.get("User-Agent")        || "CloudPress",
+      HTTP_ACCEPT:          request.headers.get("Accept")            || "*/*",
+      HTTP_ACCEPT_LANGUAGE: request.headers.get("Accept-Language")   || "ko-KR,ko;q=0.9",
+      HTTP_ACCEPT_ENCODING: request.headers.get("Accept-Encoding")   || "gzip",
+      HTTP_REFERER:         request.headers.get("Referer")           || "",
+      HTTP_X_FORWARDED_FOR: request.headers.get("CF-Connecting-IP")  || "",
+      CONTENT_TYPE:         request.headers.get("Content-Type")      || "",
+      CONTENT_LENGTH:       String(postBody.length),
+      QUERY_STRING:         url.search.replace(/^\?/, ""),
+      // GitHub 미러 정보 (PHP Runner가 코어 파일 fetching에 활용)
+      GITHUB_OWNER: mirror.owner,
+      GITHUB_REPO:  mirror.repo,
+      GITHUB_TOKEN: mirror.token,
+      CLOUDPRESS_SITE_ID: env.SITE_ID || "",
+    },
+    stdin:  postBody,
+    files: {
+      "/wordpress/wp-config.php":     wpConfig,
+      "/wordpress/wp-content/db.php": dbPhp,
+    },
+    siteId:    env.SITE_ID || "",
+    skipCache: !isCacheable,
+  };
 
-  // 성공 캐시
-  if (request.method === "GET" && response.status === 200 && env.CACHE) {
-    const ct = response.headers.get("Content-Type") || "";
+  // PHP Runner 호출 (Service Binding)
+  const phpRes = await env.PHP_RUNNER.fetch(
+    new Request("https://php/run-wordpress", {
+      method:  "POST",
+      headers: { "Content-Type": "application/json" },
+      body:    JSON.stringify(payload),
+    })
+  );
+
+  // 미디어 업로드 미러링 (POST /wp-json/wp/v2/media)
+  if (path === "/wp-json/wp/v2/media" && method === "POST" && phpRes.status === 201 && ctx) {
+    ctx.waitUntil((async () => {
+      try {
+        const body = await phpRes.clone().json();
+        const sourceUrl = body?.source_url;
+        if (sourceUrl && mirror.enabled) {
+          const fileRes = await fetch(sourceUrl).catch(() => null);
+          if (fileRes?.ok) {
+            const buf  = await fileRes.arrayBuffer();
+            const now  = new Date();
+            const y    = now.getFullYear();
+            const m    = String(now.getMonth() + 1).padStart(2, "0");
+            const name = sourceUrl.split("/").pop() || "upload";
+            await mirror.put(`wp-content/uploads/${y}/${m}/${name}`, buf, `upload: ${name}`);
+          }
+        }
+      } catch (e) { console.error("[mirror-upload]", e.message); }
+    })());
+  }
+
+  // PHP 출력 KV 캐시 저장
+  if (phpRes.status === 200 && isCacheable && ctx) {
+    const ct = phpRes.headers.get("Content-Type") || "";
     if (ct.includes("text/html")) {
-      const html = await response.clone().text();
-      if (!html.includes("logged-in") && !url.pathname.startsWith("/wp-admin")) {
-        await setCached(env.CACHE, cacheKey, html, 3600);
-      }
+      ctx.waitUntil((async () => {
+        const html = await phpRes.clone().text();
+        if (!html.includes("wpadminbar") && !html.includes("wordpress_logged_in")) {
+          await kvSet(`php:${url.pathname}${url.search}`, html, 3600);
+        }
+      })());
     }
   }
-  return response;
+
+  return phpRes;
+}
+
+// ─── MIME 타입 (worker.js 내부용) ───────────────────────────────────────────
+function mimeByExt(path) {
+  const ext = path.split(".").pop()?.toLowerCase() || "";
+  return ({
+    css:"text/css;charset=utf-8", js:"application/javascript;charset=utf-8",
+    mjs:"application/javascript;charset=utf-8", json:"application/json;charset=utf-8",
+    xml:"application/xml;charset=utf-8", svg:"image/svg+xml",
+    png:"image/png", jpg:"image/jpeg", jpeg:"image/jpeg", gif:"image/gif",
+    webp:"image/webp", avif:"image/avif", ico:"image/x-icon",
+    woff:"font/woff", woff2:"font/woff2", ttf:"font/ttf",
+    eot:"application/vnd.ms-fontobject", otf:"font/otf",
+    pdf:"application/pdf", zip:"application/zip",
+    mp4:"video/mp4", webm:"video/webm", mp3:"audio/mpeg",
+    ogg:"audio/ogg", wav:"audio/wav", txt:"text/plain;charset=utf-8",
+  })[ext] || "application/octet-stream";
 }
 
 // ─── JWT 인증 ───────────────────────────────────────────────────────────────
@@ -788,9 +1000,9 @@ export default {
       return env.ASSETS.fetch(new Request(htmlUrl.toString(), request));
     }
 
-    // ── WordPress 사이트 서빙
+    // ── WordPress 사이트 서빙 (php-wasm + GitHub 미러링)
     if (env.GITHUB_OWNER && env.GITHUB_REPO) {
-      return handleWordPressRequest(request, env);
+      return handleWordPressRequest(request, env, ctx);
     }
 
     // ── 플랫폼 정적 파일 (폴백)

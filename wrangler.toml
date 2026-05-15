@@ -1,47 +1,59 @@
 # CloudPress — wrangler.toml
 # 플랫폼 메타데이터 Worker (Cloudflare Pages Functions)
-# 호스팅 방식: GitHub 레포(스토리지) → Cloudflare Pages(배포, 미러링)
-# DB: Cloudflare D1 (플랫폼 메타데이터)
-# Cache/Session: Cloudflare KV
+#
+# 호스팅 방식:
+#   GitHub 레포 (스토리지) → Cloudflare Pages (배포, 미러링)
+#   실제 업로드 시 모든 파일을 GitHub 레포에 미러링
+#
+# DB:    Cloudflare D1 (플랫폼 메타데이터)
+# Cache: Cloudflare KV (세션/PHP출력/정적자산)
+# PHP:   cloudpress-php Service Binding (php-wasm)
 
 name = "cloud-press"
 main = "worker.js"
 compatibility_date = "2025-04-01"
 compatibility_flags = ["nodejs_compat"]
 
-# ── 정적 파일 서빙 (CloudPress 대시보드 HTML/CSS/JS) ─────────────────────
+# ── 정적 파일 서빙 (CloudPress 대시보드 HTML/CSS/JS) ─────────────────────────
 [assets]
 directory = "."
 binding   = "ASSETS"
 
-# ── D1: 플랫폼 메타데이터 DB ─────────────────────────────────────────────
+# ── D1: 플랫폼 메타데이터 DB ─────────────────────────────────────────────────
 [[d1_databases]]
 binding       = "DB"
 database_name = "cloudpress-db"
 database_id   = "a04d0702-b6d8-49d3-8e57-b81ee5028ac7"
 
-# ── KV: 세션 관리 ────────────────────────────────────────────────────────
+# ── KV: 세션 관리 ────────────────────────────────────────────────────────────
 [[kv_namespaces]]
 binding = "SESSIONS"
 id      = "19e5e273e99941fbb963300e56dbdf9e"
 
-# ── KV: 페이지 캐시 ─────────────────────────────────────────────────────
+# ── KV: PHP 출력 캐시 + 정적 자산 캐시 ──────────────────────────────────────
 [[kv_namespaces]]
 binding = "CACHE"
 id      = "9b8370d20a9646b9aa73f63c9200379f"
 
-# ── KV: 기타 ─────────────────────────────────────────────────────────────
+# ── KV: 설치 상태 / 기타 ─────────────────────────────────────────────────────
 [[kv_namespaces]]
 binding = "KV"
 id      = "9b8370d20a9646b9aa73f63c9200379f"
 
-# ── 필수 secrets (wrangler secret put 명령으로 설정) ─────────────────────
+# ── PHP Runner: 진짜 WordPress PHP 실행 (php-wasm) ────────────────────────────
+# cloudpress-php Worker를 먼저 배포한 후 아래 주석을 해제하세요:
+#   wrangler deploy --config wrangler-php.toml
+[[services]]
+binding = "PHP_RUNNER"
+service = "cloudpress-php"
+
+# ── Secrets (wrangler secret put 명령으로 설정) ───────────────────────────────
 #
 #   wrangler secret put JWT_SECRET
 #     ← CloudPress 플랫폼 JWT 서명키
 #
 #   wrangler secret put GITHUB_TOKEN
-#     ← GitHub Personal Access Token (레포 생성·파일 업로드용)
+#     ← GitHub Personal Access Token (레포 생성·파일 미러링용)
 #     ← repo, workflow 권한 필요
 #
 #   wrangler secret put CF_API_TOKEN       (선택)
@@ -55,21 +67,23 @@ id      = "9b8370d20a9646b9aa73f63c9200379f"
 # 플랫폼 도메인 (Cloudflare Pages .pages.dev 또는 커스텀 도메인)
 PLATFORM_DOMAIN = "cloudpress.pages.dev"
 
+# WordPress 버전
+WP_VERSION = "6.7.2"
+
 [observability]
-enabled = false
+enabled            = false
 head_sampling_rate = 1
 
 [observability.logs]
-enabled = true
+enabled            = true
 head_sampling_rate = 1
-persist = true
-invocation_logs = true
+persist            = true
+invocation_logs    = true
 
 [observability.traces]
-enabled = false
-persist = true
+enabled            = false
+persist            = true
 head_sampling_rate = 1
-
 
 [dev]
 port           = 8788

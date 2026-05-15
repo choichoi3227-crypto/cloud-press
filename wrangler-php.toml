@@ -1,13 +1,43 @@
-# CloudPress PHP Runner Worker
-# wrangler deploy --config wrangler-php.toml
+# CloudPress PHP Runner Worker — wrangler-php.toml
+# 진짜 WordPress PHP를 php-wasm으로 실행하는 별도 Worker
+#
+# 배포: wrangler deploy --config wrangler-php.toml
+# 메인 Worker에서 Service Binding으로 호출됨
 
 name = "cloudpress-php"
 main = "php-runner.js"
 compatibility_date = "2025-04-01"
 compatibility_flags = ["nodejs_compat"]
 
+# php-wasm은 CPU 집약적 — 최대 CPU 시간 허용
 [limits]
 cpu_ms = 50000
 
 [dev]
 port = 8789
+local_protocol = "http"
+
+# ── KV: PHP 출력 캐시 & 정적 자산 캐시 ────────────────────────────────────────
+[[kv_namespaces]]
+binding = "CACHE"
+id      = "9b8370d20a9646b9aa73f63c9200379f"
+
+# ── 환경변수 ─────────────────────────────────────────────────────────────────
+[vars]
+PHP_VERSION = "8.2"
+WP_VERSION  = "6.7.2"
+
+# ── Secrets (wrangler secret put 으로 설정) ────────────────────────────────
+#
+# wrangler secret put GITHUB_TOKEN --config wrangler-php.toml
+#   ← GitHub Personal Access Token (사용자 레포 접근용)
+#   ← repo 권한 필요
+
+[observability]
+enabled = false
+
+[observability.logs]
+enabled          = true
+head_sampling_rate = 1
+persist          = true
+invocation_logs  = true

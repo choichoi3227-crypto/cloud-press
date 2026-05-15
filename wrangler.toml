@@ -65,7 +65,7 @@ service = "cloudpress-php"
 
 [vars]
 # 플랫폼 도메인 (Cloudflare Pages .pages.dev 또는 커스텀 도메인)
-PLATFORM_DOMAIN = "cloudpress.pages.dev"
+PLATFORM_DOMAIN = "cloud-press.co.kr"
 
 # WordPress 버전
 WP_VERSION = "6.7.2"

@@ -1,8 +1,7 @@
 /**
- * CloudPress WordPress Worker v6.0
+ * CloudPress WordPress Worker v6.1
  * ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
  * PHP-FREE WordPress SaaS Engine
- * - PHP/php-wasm 완전 제거 (CPU 제한 문제 해결)
  * - D1(SQLite) 기반 완전한 WordPress REST API 구현
  * - WordPress 코어 정적 자산 → WordPress/WordPress 공식 GitHub CDN
  * - 사용자 테마/플러그인 → 개인 GitHub 레포 or jsDelivr CDN
@@ -28,9 +27,9 @@ const _INJECTED_GITHUB_OWNER = "%%GITHUB_OWNER%%";
 const _INJECTED_GITHUB_REPO  = "%%GITHUB_REPO%%";
 
 // ─── WordPress 공식 코어 소스 ────────────────────────────────────────────────
-const WP_VER         = "6.7.2";
-const WP_CORE_CDN    = `https://cdn.jsdelivr.net/npm/wordpress-static@${WP_VER}`;
-const WP_GITHUB_RAW  = "https://raw.githubusercontent.com/WordPress/WordPress/master";
+const WP_VER        = "6.7.2";
+const WP_CORE_CDN   = `https://cdn.jsdelivr.net/npm/wordpress-static@${WP_VER}`;
+const WP_GITHUB_RAW = "https://raw.githubusercontent.com/WordPress/WordPress/master";
 
 // ─── 정적 파일 확장자 ────────────────────────────────────────────────────────
 const STATIC_EXT = /\.(css|js|jpg|jpeg|png|gif|webp|svg|ico|woff2?|ttf|eot|otf|map|txt|xml|json|zip|pdf|mp4|mp3|ogg|wav|webm|avif)$/i;
@@ -43,10 +42,9 @@ const CORS = {
 };
 
 // ─── 유틸 ────────────────────────────────────────────────────────────────────
-
 function siteId(env) { return env.SITE_ID || _INJECTED_SITE_ID; }
 function ghOwner(env) { return env.GITHUB_OWNER || _INJECTED_GITHUB_OWNER; }
-function ghRepo(env)  { return env.GITHUB_REPO  || _INJECTED_GITHUB_REPO;  }
+function ghRepo(env)  { return env.GITHUB_REPO  || _INJECTED_GITHUB_REPO; }
 function db(env)      { return env.DB || env.SITE_DB; }
 function kv(env)      { return env.CACHE || env.KV; }
 
@@ -72,19 +70,15 @@ function html(body, status = 200, extra = {}) {
     headers: { ...CORS, "Content-Type": "text/html; charset=utf-8", ...extra },
   });
 }
-function respond(body, status = 200, ct = "text/plain", extra = {}) {
-  return new Response(body, { status, headers: { ...CORS, "Content-Type": ct, ...extra } });
-}
 
 // ─── 간단한 JWT (HS256) ──────────────────────────────────────────────────────
-
 async function jwtSign(payload, secret) {
-  const header  = btoa(JSON.stringify({ alg: "HS256", typ: "JWT" })).replace(/=/g,"").replace(/\+/g,"-").replace(/\//g,"_");
-  const body    = btoa(JSON.stringify(payload)).replace(/=/g,"").replace(/\+/g,"-").replace(/\//g,"_");
-  const data    = `${header}.${body}`;
-  const key     = await crypto.subtle.importKey("raw", new TextEncoder().encode(secret), { name:"HMAC", hash:"SHA-256" }, false, ["sign"]);
-  const sig     = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(data));
-  const sigB64  = btoa(String.fromCharCode(...new Uint8Array(sig))).replace(/=/g,"").replace(/\+/g,"-").replace(/\//g,"_");
+  const header = btoa(JSON.stringify({ alg: "HS256", typ: "JWT" })).replace(/=/g,"").replace(/\+/g,"-").replace(/\//g,"_");
+  const body   = btoa(JSON.stringify(payload)).replace(/=/g,"").replace(/\+/g,"-").replace(/\//g,"_");
+  const data   = `${header}.${body}`;
+  const key    = await crypto.subtle.importKey("raw", new TextEncoder().encode(secret), { name:"HMAC", hash:"SHA-256" }, false, ["sign"]);
+  const sig    = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(data));
+  const sigB64 = btoa(String.fromCharCode(...new Uint8Array(sig))).replace(/=/g,"").replace(/\+/g,"-").replace(/\//g,"_");
   return `${data}.${sigB64}`;
 }
 
@@ -107,10 +101,8 @@ function getJwtSecret(env) {
 }
 
 async function getAuthUser(request, env) {
-  // 1) Authorization: Bearer <token>
   const authHeader = request.headers.get("Authorization") || "";
   let token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : null;
-  // 2) Cookie: wp_token=<token>
   if (!token) {
     const cookie = request.headers.get("Cookie") || "";
     const m = cookie.match(/(?:^|;\s*)wp_token=([^;]+)/);
@@ -120,19 +112,15 @@ async function getAuthUser(request, env) {
   return jwtVerify(token, getJwtSecret(env));
 }
 
-// ─── MD5 pure-JS 구현 (Cloudflare Workers는 crypto.subtle.digest("MD5") 미지원) ──
-// RFC 1321 기반 MD5. phpass($P$) 검증/생성에 사용.
-
+// ─── MD5 pure-JS (Cloudflare Workers는 crypto.subtle.digest("MD5") 미지원) ──
 function md5Hash(data) {
   const bytes = typeof data === "string" ? new TextEncoder().encode(data) : data;
-  // MD5 constants
   const T = new Uint32Array(64);
   for (let i = 0; i < 64; i++) T[i] = (Math.abs(Math.sin(i + 1)) * 0x100000000) >>> 0;
   const S = [7,12,17,22,7,12,17,22,7,12,17,22,7,12,17,22,
              5, 9,14,20,5, 9,14,20,5, 9,14,20,5, 9,14,20,
              4,11,16,23,4,11,16,23,4,11,16,23,4,11,16,23,
              6,10,15,21,6,10,15,21,6,10,15,21,6,10,15,21];
-  // Padding
   const msgLen = bytes.length;
   const bitLen = msgLen * 8;
   const padLen = ((msgLen % 64) < 56 ? 56 : 120) - (msgLen % 64);
@@ -142,7 +130,6 @@ function md5Hash(data) {
   const view = new DataView(padded.buffer);
   view.setUint32(msgLen + padLen,     bitLen >>> 0,        true);
   view.setUint32(msgLen + padLen + 4, Math.floor(bitLen / 0x100000000), true);
-  // Process
   let a0 = 0x67452301, b0 = 0xefcdab89, c0 = 0x98badcfe, d0 = 0x10325476;
   for (let i = 0; i < padded.length; i += 64) {
     const M = new Uint32Array(16);
@@ -150,10 +137,10 @@ function md5Hash(data) {
     let [a, b, c, d] = [a0, b0, c0, d0];
     for (let j = 0; j < 64; j++) {
       let f, g;
-      if      (j < 16) { f = (b & c) | (~b & d);           g = j; }
-      else if (j < 32) { f = (d & b) | (~d & c);           g = (5*j+1)%16; }
-      else if (j < 48) { f = b ^ c ^ d;                    g = (3*j+5)%16; }
-      else             { f = c ^ (b | ~d);                  g = (7*j)%16; }
+      if      (j < 16) { f = (b & c) | (~b & d);  g = j; }
+      else if (j < 32) { f = (d & b) | (~d & c);  g = (5*j+1)%16; }
+      else if (j < 48) { f = b ^ c ^ d;             g = (3*j+5)%16; }
+      else             { f = c ^ (b | ~d);           g = (7*j)%16; }
       f = (f + a + T[j] + M[g]) >>> 0;
       a = d; d = c; c = b;
       b = (b + ((f << S[j]) | (f >>> (32 - S[j])))) >>> 0;
@@ -168,7 +155,6 @@ function md5Hash(data) {
 }
 
 // ─── phpass 호환 비밀번호 검증/생성 ─────────────────────────────────────────
-
 const ITOA64 = "./0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
 
 function encode64(src, count) {
@@ -202,7 +188,6 @@ function phpassCheck(password, hash) {
     }
     return (hash.slice(0, 12) + encode64(h, 16)) === hash;
   }
-  // MD5 plain (legacy)
   if (hash.length === 32 && /^[0-9a-f]{32}$/.test(hash)) {
     const h = md5Hash(password);
     return Array.from(h).map(b => b.toString(16).padStart(2,"0")).join("") === hash;
@@ -211,7 +196,7 @@ function phpassCheck(password, hash) {
 }
 
 function phpassCreate(password) {
-  const countLog2 = 8; // 2^8 = 256 iterations
+  const countLog2 = 8;
   const chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789./";
   const rnd   = new Uint8Array(8);
   crypto.getRandomValues(rnd);
@@ -230,7 +215,6 @@ function phpassCreate(password) {
 }
 
 // ─── WordPress 설치 확인 ──────────────────────────────────────────────────────
-
 async function isWpInstalled(env) {
   const flag = await kvGet(env, `wp:installed:${siteId(env)}`);
   if (flag === "1") return true;
@@ -247,22 +231,18 @@ async function isWpInstalled(env) {
 }
 
 // ─── WordPress DB 자동 초기화 ────────────────────────────────────────────────
-// DB가 연결돼 있지만 테이블이 없을 때 자동으로 스키마+기본 데이터를 삽입합니다.
-
 async function autoInstallWordPress(env, url) {
   const d = db(env);
-  if (!d) return false; // DB 바인딩 자체가 없으면 불가
+  if (!d) return false;
 
-  const siteUrl   = `${url.protocol}//${url.host}`;
-  const sid       = siteId(env);
-  const now       = new Date().toISOString().replace("T", " ").slice(0, 19);
-  // 사용자가 호스팅 생성 시 입력한 관리자 정보를 Worker 환경변수에서 읽음
+  const siteUrl    = `${url.protocol}//${url.host}`;
+  const sid        = siteId(env);
+  const now        = new Date().toISOString().replace("T", " ").slice(0, 19);
   const adminUser  = env.WP_ADMIN_USER  || "admin";
   const adminPass  = env.WP_ADMIN_PASS  || crypto.randomUUID().slice(0, 12);
   const adminEmail = env.WP_ADMIN_EMAIL || `admin@${url.host}`;
 
   try {
-    // ── 1. 테이블 생성 ───────────────────────────────────────────────────────
     const schema = [
       `CREATE TABLE IF NOT EXISTS wp_options (
         option_id   INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -368,8 +348,6 @@ async function autoInstallWordPress(env, url) {
       await d.prepare(sql).run();
     }
 
-    // ── 2. 관리자 사용자 생성 ────────────────────────────────────────────────
-    // phpassCreate()로 정상 WordPress 호환 해시 생성
     const hashedPass = phpassCreate(adminPass);
     await d.prepare(
       `INSERT OR IGNORE INTO wp_users
@@ -377,17 +355,16 @@ async function autoInstallWordPress(env, url) {
        VALUES (?,?,?,?,?,?,0,?)`
     ).bind(adminUser, hashedPass, adminUser, adminEmail, siteUrl, now, adminUser).run();
 
-    const adminRow = await d.prepare("SELECT ID FROM wp_users WHERE user_login='admin' LIMIT 1").first();
+    const adminRow = await d.prepare("SELECT ID FROM wp_users WHERE user_login=? LIMIT 1").bind(adminUser).first();
     const adminId  = adminRow?.ID || 1;
 
-    // 사용자 메타 (역할)
     await d.prepare(`INSERT OR IGNORE INTO wp_usermeta (user_id, meta_key, meta_value) VALUES (?,?,?)`).bind(adminId, "wp_capabilities", `a:1:{s:13:"administrator";b:1;}`).run();
     await d.prepare(`INSERT OR IGNORE INTO wp_usermeta (user_id, meta_key, meta_value) VALUES (?,?,?)`).bind(adminId, "wp_user_level", "10").run();
     await d.prepare(`INSERT OR IGNORE INTO wp_usermeta (user_id, meta_key, meta_value) VALUES (?,?,?)`).bind(adminId, "admin_color", "fresh").run();
 
-    // ── 3. WordPress 기본 옵션 삽입 ──────────────────────────────────────────
     const options = [
       ["siteurl",          siteUrl],
+      ["home",             siteUrl],
       ["blogname",         "내 WordPress 사이트"],
       ["blogdescription",  "CloudPress로 만든 WordPress"],
       ["admin_email",      adminEmail],
@@ -406,7 +383,6 @@ async function autoInstallWordPress(env, url) {
       ["wp_installed_version", "6.7.2"],
       ["db_version",       "57155"],
       ["initial_db_version", "57155"],
-      ["_site_transient_update_core", ""],
       ["cp_auto_installed", "1"],
       ["cp_installed_at",  now],
       ["cp_admin_pass",    adminPass],
@@ -420,8 +396,7 @@ async function autoInstallWordPress(env, url) {
       ).bind(k, v).run();
     }
 
-    // ── 4. 기본 게시물/페이지 생성 ───────────────────────────────────────────
-    const helloPostId = await d.prepare(
+    await d.prepare(
       `INSERT OR IGNORE INTO wp_posts
         (post_author, post_date, post_date_gmt, post_content, post_title, post_status,
          post_name, post_modified, post_modified_gmt, post_type, guid, comment_status, ping_status)
@@ -445,12 +420,10 @@ async function autoInstallWordPress(env, url) {
       `${siteUrl}/?page_id=2`, "closed", "open"
     ).run();
 
-    // ── 5. 기본 카테고리 ─────────────────────────────────────────────────────
     await d.prepare(`INSERT OR IGNORE INTO wp_terms (term_id, name, slug, term_group) VALUES (1,'미분류','uncategorized',0)`).run();
     await d.prepare(`INSERT OR IGNORE INTO wp_term_taxonomy (term_taxonomy_id, term_id, taxonomy, description, parent, count) VALUES (1,1,'category','',0,1)`).run();
     await d.prepare(`INSERT OR IGNORE INTO wp_term_relationships (object_id, term_taxonomy_id) VALUES (1,1)`).run();
 
-    // ── 6. 샘플 댓글 ─────────────────────────────────────────────────────────
     await d.prepare(
       `INSERT OR IGNORE INTO wp_comments
         (comment_post_ID, comment_author, comment_author_email, comment_author_url,
@@ -462,9 +435,7 @@ async function autoInstallWordPress(env, url) {
       now, now, "1", "comment", 0
     ).run();
 
-    // ── 7. 설치 완료 플래그 ──────────────────────────────────────────────────
     await kvSet(env, `wp:installed:${sid}`, "1", 86400 * 30);
-
     console.log(`[CloudPress] WordPress 자동 설치 완료 (site: ${sid}, url: ${siteUrl})`);
     return true;
 
@@ -475,7 +446,6 @@ async function autoInstallWordPress(env, url) {
 }
 
 // ─── WP Option 헬퍼 ──────────────────────────────────────────────────────────
-
 async function getOption(env, name) {
   try {
     const r = await db(env).prepare("SELECT option_value FROM wp_options WHERE option_name=? LIMIT 1").bind(name).first();
@@ -490,28 +460,7 @@ async function setOption(env, name, value) {
   } catch {}
 }
 
-// ─── GitHub 자산 서빙 (테마/플러그인 from 개인 레포) ─────────────────────────
-
-async function serveGithubAsset(env, repoPath) {
-  const owner = ghOwner(env);
-  const repo  = ghRepo(env);
-  if (!owner || !repo) return null;
-  const token = env.GITHUB_TOKEN || "";
-  const url = `https://raw.githubusercontent.com/${owner}/${repo}/main/${repoPath}`;
-  const headers = { "User-Agent": "CloudPress/6.0" };
-  if (token) headers["Authorization"] = `Bearer ${token}`;
-  const res = await fetch(url, { headers, cf: { cacheEverything: true, cacheTtl: 3600 } });
-  if (!res.ok) return null;
-  const ct   = res.headers.get("Content-Type") || "application/octet-stream";
-  const body = await res.arrayBuffer();
-  return new Response(body, {
-    headers: { ...CORS, "Content-Type": ct, "Cache-Control": "public, max-age=3600", "X-Source": "github-user-repo" },
-  });
-}
-
-// ─── WordPress 코어 정적 자산 서빙 ──────────────────────────────────────────
-
-// 파일 확장자로 올바른 Content-Type 결정
+// ─── Content-Type 결정 ───────────────────────────────────────────────────────
 function mimeByExt(path) {
   if (path.endsWith(".css"))   return "text/css; charset=utf-8";
   if (path.endsWith(".js"))    return "application/javascript; charset=utf-8";
@@ -526,12 +475,31 @@ function mimeByExt(path) {
   if (path.endsWith(".ttf"))   return "font/ttf";
   if (path.endsWith(".json"))  return "application/json; charset=utf-8";
   if (path.endsWith(".xml"))   return "application/xml; charset=utf-8";
-  return null; // 서버 응답 그대로 사용
+  return null;
 }
 
+// ─── GitHub 자산 서빙 (테마/플러그인 from 개인 레포) ─────────────────────────
+async function serveGithubAsset(env, repoPath) {
+  const owner = ghOwner(env);
+  const repo  = ghRepo(env);
+  if (!owner || !repo) return null;
+  const token = env.GITHUB_TOKEN || "";
+  const url = `https://raw.githubusercontent.com/${owner}/${repo}/main/${repoPath}`;
+  const headers = { "User-Agent": "CloudPress/6.1" };
+  if (token) headers["Authorization"] = `Bearer ${token}`;
+  try {
+    const res = await fetch(url, { headers, cf: { cacheEverything: true, cacheTtl: 3600 } });
+    if (!res.ok) return null;
+    const ct   = mimeByExt(repoPath) || res.headers.get("Content-Type") || "application/octet-stream";
+    const body = await res.arrayBuffer();
+    return new Response(body, {
+      headers: { ...CORS, "Content-Type": ct, "Cache-Control": "public, max-age=3600", "X-Source": "github-user-repo" },
+    });
+  } catch { return null; }
+}
+
+// ─── WordPress 코어 정적 자산 서빙 ──────────────────────────────────────────
 async function serveCoreAsset(filePath) {
-  // jsDelivr CDN 우선 (빠름) - 올바른 Content-Type 서빙
-  // raw.githubusercontent.com은 text/plain으로 응답해 CSS/JS가 적용 안 됨
   const urls = [
     `${WP_CORE_CDN}/${filePath}`,
     `${WP_GITHUB_RAW}/${filePath}`,
@@ -541,7 +509,6 @@ async function serveCoreAsset(filePath) {
       const res = await fetch(url, { cf: { cacheEverything: true, cacheTtl: 86400 } });
       if (res.ok) {
         const body = await res.arrayBuffer();
-        // 확장자 기반 Content-Type 강제 설정 (raw.githubusercontent.com 대응)
         const ct = mimeByExt(filePath) || res.headers.get("Content-Type") || "application/octet-stream";
         return new Response(body, {
           headers: {
@@ -557,22 +524,18 @@ async function serveCoreAsset(filePath) {
 }
 
 // ─── WordPress REST API v2 구현 ───────────────────────────────────────────────
-
 class WpRestApi {
   constructor(env, user) {
     this.env  = env;
-    this.user = user; // authenticated user payload or null
+    this.user = user;
     this.d    = db(env);
   }
-
-  // ── Posts ────────────────────────────────────────────────────────────────
 
   async getPosts(params = {}) {
     const {
       per_page = 10, page = 1, status = "publish",
       type = "post", search = "", author = 0,
-      categories = "", tags = "", orderby = "date", order = "desc",
-      slug = "", _fields = "",
+      orderby = "date", order = "desc", slug = "",
     } = params;
 
     const offset = (parseInt(page)-1) * parseInt(per_page);
@@ -591,20 +554,16 @@ class WpRestApi {
       }
     }
     conditions.push("post_type=?"); binds.push(type);
-
-    if (slug) { conditions.push("post_name=?"); binds.push(slug); }
+    if (slug)   { conditions.push("post_name=?"); binds.push(slug); }
     if (search) { conditions.push("(post_title LIKE ? OR post_content LIKE ?)"); binds.push(`%${search}%`, `%${search}%`); }
     if (author) { conditions.push("post_author=?"); binds.push(parseInt(author)); }
 
-    const where = conditions.length ? "WHERE " + conditions.join(" AND ") : "";
+    const where    = conditions.length ? "WHERE " + conditions.join(" AND ") : "";
     const orderSql = `ORDER BY ${orderby === "title" ? "post_title" : "post_date"} ${order.toUpperCase() === "ASC" ? "ASC" : "DESC"}`;
 
     const countRow = await this.d.prepare(`SELECT COUNT(*) as cnt FROM wp_posts ${where}`).bind(...binds).first();
-    const total = countRow?.cnt || 0;
-
-    const rows = await this.d.prepare(
-      `SELECT * FROM wp_posts ${where} ${orderSql} LIMIT ? OFFSET ?`
-    ).bind(...binds, parseInt(per_page), offset).all();
+    const total    = countRow?.cnt || 0;
+    const rows     = await this.d.prepare(`SELECT * FROM wp_posts ${where} ${orderSql} LIMIT ? OFFSET ?`).bind(...binds, parseInt(per_page), offset).all();
 
     const posts = await Promise.all((rows.results || []).map(p => this._formatPost(p)));
     return { posts, total, pages: Math.ceil(total / parseInt(per_page)) };
@@ -626,8 +585,7 @@ class WpRestApi {
       title = "", content = "", excerpt = "", status = "draft",
       type = "post", slug = "", comment_status = "open",
       ping_status = "open", categories = [1], tags = [], meta = {},
-      featured_media = 0, parent = 0, menu_order = 0,
-      date = now, template = "",
+      parent = 0, menu_order = 0, date = now,
     } = data;
 
     const postName = slug || this._slugify(title || "post");
@@ -643,14 +601,11 @@ class WpRestApi {
       now, now, "", menu_order, parent
     ).run();
 
-    const postId = res.meta?.last_row_id;
+    const postId  = res.meta?.last_row_id;
     if (!postId) throw new Error("Insert failed");
-
-    // Update guid
     const siteUrl = await getOption(this.env, "siteurl") || "";
     await this.d.prepare("UPDATE wp_posts SET guid=? WHERE ID=?").bind(`${siteUrl}/?p=${postId}`, postId).run();
 
-    // Categories
     for (const catId of (Array.isArray(categories) ? categories : [1])) {
       const tt = await this.d.prepare("SELECT term_taxonomy_id FROM wp_term_taxonomy WHERE term_id=? AND taxonomy='category'").bind(catId).first();
       if (tt) {
@@ -658,12 +613,9 @@ class WpRestApi {
         await this.d.prepare("UPDATE wp_term_taxonomy SET count=count+1 WHERE term_taxonomy_id=?").bind(tt.term_taxonomy_id).run();
       }
     }
-
-    // Meta
     for (const [k, v] of Object.entries(meta)) {
       await this.d.prepare("INSERT INTO wp_postmeta(post_id,meta_key,meta_value) VALUES(?,?,?)").bind(postId, k, String(v)).run();
     }
-
     await this._invalidateCache();
     return this.getPost(postId);
   }
@@ -687,19 +639,13 @@ class WpRestApi {
 
     const keys = Object.keys(updates);
     const vals = Object.values(updates);
-    await this.d.prepare(
-      `UPDATE wp_posts SET ${keys.map(k=>`${k}=?`).join(",")} WHERE ID=?`
-    ).bind(...vals, parseInt(id)).run();
+    await this.d.prepare(`UPDATE wp_posts SET ${keys.map(k=>`${k}=?`).join(",")} WHERE ID=?`).bind(...vals, parseInt(id)).run();
 
-    // Meta
     if (data.meta) {
       for (const [k, v] of Object.entries(data.meta)) {
-        await this.d.prepare(
-          "INSERT INTO wp_postmeta(post_id,meta_key,meta_value) VALUES(?,?,?) ON CONFLICT DO NOTHING"
-        ).bind(parseInt(id), k, String(v)).run();
+        await this.d.prepare("INSERT INTO wp_postmeta(post_id,meta_key,meta_value) VALUES(?,?,?) ON CONFLICT DO NOTHING").bind(parseInt(id), k, String(v)).run();
       }
     }
-
     await this._invalidateCache();
     return this.getPost(id);
   }
@@ -720,59 +666,42 @@ class WpRestApi {
   async _formatPost(row) {
     if (!row) return null;
     const siteUrl = await getOption(this.env, "siteurl") || "";
-
-    // Meta
     const metaRows = await this.d.prepare("SELECT meta_key,meta_value FROM wp_postmeta WHERE post_id=?").bind(row.ID).all();
     const meta = {};
     for (const m of (metaRows.results || [])) meta[m.meta_key] = m.meta_value;
 
-    // Categories
     const catRows = await this.d.prepare(
-      `SELECT t.term_id, t.name, t.slug
-       FROM wp_terms t
+      `SELECT t.term_id, t.name, t.slug FROM wp_terms t
        JOIN wp_term_taxonomy tt ON t.term_id=tt.term_id
        JOIN wp_term_relationships tr ON tt.term_taxonomy_id=tr.term_taxonomy_id
        WHERE tr.object_id=? AND tt.taxonomy='category'`
     ).bind(row.ID).all();
 
-    // Tags
     const tagRows = await this.d.prepare(
-      `SELECT t.term_id, t.name, t.slug
-       FROM wp_terms t
+      `SELECT t.term_id, t.name, t.slug FROM wp_terms t
        JOIN wp_term_taxonomy tt ON t.term_id=tt.term_id
        JOIN wp_term_relationships tr ON tt.term_taxonomy_id=tr.term_taxonomy_id
        WHERE tr.object_id=? AND tt.taxonomy='post_tag'`
     ).bind(row.ID).all();
 
-    // Author
-    const author = await this.d.prepare("SELECT * FROM wp_users WHERE ID=?").bind(row.post_author).first();
-
-    const slug     = row.post_name || String(row.ID);
+    const author  = await this.d.prepare("SELECT * FROM wp_users WHERE ID=?").bind(row.post_author).first();
+    const slug    = row.post_name || String(row.ID);
     const postLink = `${siteUrl}/${slug}/`;
 
     return {
-      id:             row.ID,
-      date:           row.post_date,
-      date_gmt:       row.post_date_gmt,
-      modified:       row.post_modified,
-      modified_gmt:   row.post_modified_gmt,
-      slug,
-      status:         row.post_status,
-      type:           row.post_type,
-      link:           postLink,
-      title:          { rendered: row.post_title || "" },
-      content:        { rendered: this._renderBlocks(row.post_content || ""), raw: row.post_content || "", protected: false },
-      excerpt:        { rendered: row.post_excerpt || "", protected: false },
-      author:         row.post_author,
+      id: row.ID, date: row.post_date, date_gmt: row.post_date_gmt,
+      modified: row.post_modified, modified_gmt: row.post_modified_gmt,
+      slug, status: row.post_status, type: row.post_type, link: postLink,
+      title:   { rendered: row.post_title || "" },
+      content: { rendered: this._renderBlocks(row.post_content || ""), raw: row.post_content || "", protected: false },
+      excerpt: { rendered: row.post_excerpt || "", protected: false },
+      author: row.post_author,
       featured_media: parseInt(meta._thumbnail_id || 0),
-      comment_status: row.comment_status,
-      ping_status:    row.ping_status,
-      format:         "standard",
-      meta,
-      sticky:         false,
-      template:       meta._wp_page_template || "",
-      categories:     (catRows.results || []).map(c => c.term_id),
-      tags:           (tagRows.results || []).map(t => t.term_id),
+      comment_status: row.comment_status, ping_status: row.ping_status,
+      format: "standard", meta, sticky: false,
+      template: meta._wp_page_template || "",
+      categories: (catRows.results || []).map(c => c.term_id),
+      tags:       (tagRows.results || []).map(t => t.term_id),
       _embedded: {
         author: author ? [this._formatUser(author)] : [],
         "wp:term": [
@@ -783,11 +712,8 @@ class WpRestApi {
     };
   }
 
-  // ── Gutenberg 블록 렌더링 (기본 블록만) ─────────────────────────────────
-
   _renderBlocks(content) {
     if (!content) return "";
-    // 이미 HTML이면 그대로 반환, 블록 코멘트 제거
     return content
       .replace(/<!-- wp:[^>]+ \/-->/g, "")
       .replace(/<!-- wp:[^\n]* -->/g, "")
@@ -804,23 +730,13 @@ class WpRestApi {
       .slice(0, 200) || `post-${Date.now()}`;
   }
 
-  // ── Users ────────────────────────────────────────────────────────────────
-
   _formatUser(row) {
     return {
-      id:          row.ID,
-      name:        row.display_name || row.user_login,
-      url:         row.user_url || "",
-      description: "",
-      link:        "",
-      slug:        row.user_nicename || row.user_login,
-      avatar_urls: { 96: `https://www.gravatar.com/avatar/${row.user_email ? this._md5str(row.user_email) : ""}?s=96&d=mm` },
+      id: row.ID, name: row.display_name || row.user_login,
+      url: row.user_url || "", description: "", link: "",
+      slug: row.user_nicename || row.user_login,
+      avatar_urls: { 96: `https://www.gravatar.com/avatar/${(row.user_email||"").trim().toLowerCase()}?s=96&d=mm` },
     };
-  }
-
-  _md5str(s) {
-    // 간단 Gravatar용 - 실제 MD5 불필요, 이메일 해시
-    return s.trim().toLowerCase();
   }
 
   async getUsers(params = {}) {
@@ -835,7 +751,7 @@ class WpRestApi {
       ? (this.user ? await this.d.prepare("SELECT * FROM wp_users WHERE ID=?").bind(this.user.id).first() : null)
       : await this.d.prepare("SELECT * FROM wp_users WHERE ID=?").bind(parseInt(id)).first();
     if (!row) return null;
-    const caps = await this.d.prepare("SELECT meta_value FROM wp_usermeta WHERE user_id=? AND meta_key='wp_capabilities'").bind(row.ID).first();
+    const caps  = await this.d.prepare("SELECT meta_value FROM wp_usermeta WHERE user_id=? AND meta_key='wp_capabilities'").bind(row.ID).first();
     const roles = caps?.meta_value?.includes("administrator") ? ["administrator"] : ["subscriber"];
     return { ...this._formatUser(row), roles, capabilities: Object.fromEntries(roles.map(r=>[r,true])) };
   }
@@ -846,13 +762,11 @@ class WpRestApi {
     if (this.user.id !== userId && this.user.role !== "administrator") throw new Error("Forbidden");
 
     const updates = {};
-    if (data.name)         updates.display_name   = data.name;
-    if (data.email)        updates.user_email      = data.email;
-    if (data.url)          updates.user_url        = data.url;
-    if (data.description)  updates.user_url        = data.url; // store in meta
+    if (data.name)     updates.display_name = data.name;
+    if (data.email)    updates.user_email   = data.email;
+    if (data.url)      updates.user_url     = data.url;
     if (data.password) {
       updates.user_pass = phpassCreate(data.password);
-      // Invalidate sessions
       await this.d.prepare("DELETE FROM wp_usermeta WHERE user_id=? AND meta_key='session_tokens'").bind(userId).run();
     }
     if (Object.keys(updates).length) {
@@ -864,8 +778,6 @@ class WpRestApi {
     }
     return this.getUser(id);
   }
-
-  // ── Terms ─────────────────────────────────────────────────────────────────
 
   async getTerms(taxonomy, params = {}) {
     const { per_page = 100, page = 1, hide_empty = false, orderby = "name", order = "asc" } = params;
@@ -891,7 +803,6 @@ class WpRestApi {
     const termSlug = slug || this._slugify(name);
     const existing = await this.d.prepare("SELECT term_id FROM wp_terms WHERE slug=?").bind(termSlug).first();
     if (existing) {
-      // Check if taxonomy entry exists
       const tt = await this.d.prepare("SELECT * FROM wp_term_taxonomy WHERE term_id=? AND taxonomy=?").bind(existing.term_id, taxonomy).first();
       if (tt) return { id: existing.term_id, name, slug: termSlug, taxonomy, count: tt.count, description: tt.description || "", parent: tt.parent || 0 };
     }
@@ -899,14 +810,14 @@ class WpRestApi {
       ? { meta: { last_row_id: existing.term_id } }
       : await this.d.prepare("INSERT INTO wp_terms(name,slug,term_group) VALUES(?,?,0)").bind(name, termSlug).run();
     const termId = existing?.term_id || termRes.meta?.last_row_id;
-    const ttRes = await this.d.prepare("INSERT INTO wp_term_taxonomy(term_id,taxonomy,description,parent,count) VALUES(?,?,?,?,0)").bind(termId, taxonomy, description, parseInt(parent)).run();
+    await this.d.prepare("INSERT INTO wp_term_taxonomy(term_id,taxonomy,description,parent,count) VALUES(?,?,?,?,0)").bind(termId, taxonomy, description, parseInt(parent)).run();
     return { id: termId, name, slug: termSlug, taxonomy, count: 0, description, parent: parseInt(parent) };
   }
 
   async updateTerm(taxonomy, id, data) {
     if (!this.user) throw new Error("Unauthorized");
     const { name, slug, description, parent } = data;
-    if (name || slug)        await this.d.prepare("UPDATE wp_terms SET name=COALESCE(?,name), slug=COALESCE(?,slug) WHERE term_id=?").bind(name||null, slug||null, parseInt(id)).run();
+    if (name || slug) await this.d.prepare("UPDATE wp_terms SET name=COALESCE(?,name), slug=COALESCE(?,slug) WHERE term_id=?").bind(name||null, slug||null, parseInt(id)).run();
     if (description !== undefined || parent !== undefined) {
       await this.d.prepare("UPDATE wp_term_taxonomy SET description=COALESCE(?,description), parent=COALESCE(?,parent) WHERE term_id=? AND taxonomy=?")
         .bind(description??null, parent??null, parseInt(id), taxonomy).run();
@@ -923,14 +834,12 @@ class WpRestApi {
     return { deleted: true, previous: { id: parseInt(id) } };
   }
 
-  // ── Media ─────────────────────────────────────────────────────────────────
-
   async getMedia(params = {}) {
     const { per_page = 10, page = 1, media_type = "" } = params;
     const offset = (parseInt(page)-1)*parseInt(per_page);
-    const cond = media_type ? "AND post_mime_type LIKE ?" : "";
+    const cond  = media_type ? "AND post_mime_type LIKE ?" : "";
     const binds = media_type ? [`${media_type}%`] : [];
-    const rows = await this.d.prepare(
+    const rows  = await this.d.prepare(
       `SELECT * FROM wp_posts WHERE post_type='attachment' ${cond} ORDER BY post_date DESC LIMIT ? OFFSET ?`
     ).bind(...binds, parseInt(per_page), offset).all();
     return (rows.results || []).map(m => this._formatMedia(m));
@@ -938,34 +847,26 @@ class WpRestApi {
 
   async uploadMedia(env, request) {
     if (!this.user) throw new Error("Unauthorized");
-    const ct = request.headers.get("Content-Type") || "";
-    const cd = request.headers.get("Content-Disposition") || "";
-    const filenamem = cd.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/);
-    const filename = filenamem ? filenamem[1].replace(/['"]/g, "") : `upload-${Date.now()}`;
+    const ct  = request.headers.get("Content-Type") || "";
+    const cd  = request.headers.get("Content-Disposition") || "";
+    const fnm = cd.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/);
+    const filename = fnm ? fnm[1].replace(/['"]/g, "") : `upload-${Date.now()}`;
 
-    const body = await request.arrayBuffer();
-    const mimeType = ct.split(";")[0].trim() || "application/octet-stream";
-
-    // GitHub에 파일 저장
-    const owner = ghOwner(env);
-    const repo  = ghRepo(env);
-    const token = env.GITHUB_TOKEN;
-
-    const now = new Date();
-    const year = now.getFullYear();
-    const month = String(now.getMonth()+1).padStart(2,"0");
+    const body     = await request.arrayBuffer();
+    const owner    = ghOwner(env);
+    const repo     = ghRepo(env);
+    const token    = env.GITHUB_TOKEN;
+    const now      = new Date();
+    const year     = now.getFullYear();
+    const month    = String(now.getMonth()+1).padStart(2,"0");
     const repoPath = `wp-content/uploads/${year}/${month}/${filename}`;
-    let fileUrl = "";
+    let fileUrl    = "";
 
     if (owner && repo && token) {
       const b64 = btoa(String.fromCharCode(...new Uint8Array(body)));
       const res = await fetch(`https://api.github.com/repos/${owner}/${repo}/contents/${repoPath}`, {
         method: "PUT",
-        headers: {
-          "Authorization": `Bearer ${token}`,
-          "Content-Type": "application/json",
-          "User-Agent": "CloudPress/6.0",
-        },
+        headers: { "Authorization": `Bearer ${token}`, "Content-Type": "application/json", "User-Agent": "CloudPress/6.1" },
         body: JSON.stringify({ message: `Upload ${filename}`, content: b64 }),
       });
       if (res.ok) {
@@ -975,20 +876,18 @@ class WpRestApi {
     }
 
     const siteUrl = await getOption(env, "siteurl") || "";
-    const now2 = new Date().toISOString().slice(0,19).replace("T"," ");
-
+    const now2    = new Date().toISOString().slice(0,19).replace("T"," ");
     const res = await this.d.prepare(
       `INSERT INTO wp_posts
         (post_author, post_date, post_date_gmt, post_content, post_title, post_excerpt,
          post_status, comment_status, ping_status, post_name, post_type, post_mime_type,
          post_modified, post_modified_gmt, guid, menu_order)
-       VALUES (?,?,?,?,?,?,'inherit','open','open',?,?,'attachment',?,?,?,0) `
-    ).bind(this.user.id||1, now2, now2, "", filename, "", filename, "attachment", now2, now2, fileUrl || `${siteUrl}/${repoPath}`, now2).run();
+       VALUES (?,?,?,?,?,?,'inherit','open','open',?,'attachment',?,?,?,?,0)`
+    ).bind(this.user.id||1, now2, now2, "", filename, "", filename, ct.split(";")[0].trim()||"application/octet-stream", now2, now2, fileUrl||`${siteUrl}/${repoPath}`).run();
 
     const mediaId = res.meta?.last_row_id;
     await this.d.prepare("INSERT INTO wp_postmeta(post_id,meta_key,meta_value) VALUES(?,?,?)").bind(mediaId, "_wp_attached_file", repoPath).run();
     await this.d.prepare("INSERT INTO wp_postmeta(post_id,meta_key,meta_value) VALUES(?,?,?)").bind(mediaId, "_wp_attachment_metadata", JSON.stringify({ file: repoPath })).run();
-
     const row = await this.d.prepare("SELECT * FROM wp_posts WHERE ID=?").bind(mediaId).first();
     return this._formatMedia(row);
   }
@@ -996,33 +895,24 @@ class WpRestApi {
   _formatMedia(row) {
     if (!row) return null;
     return {
-      id: row.ID,
-      date: row.post_date,
-      slug: row.post_name,
-      status: row.post_status,
-      type: "attachment",
-      link: row.guid,
+      id: row.ID, date: row.post_date, slug: row.post_name,
+      status: row.post_status, type: "attachment", link: row.guid,
       title: { rendered: row.post_title },
       author: row.post_author,
       caption: { rendered: row.post_excerpt || "" },
       alt_text: "",
       media_type: (row.post_mime_type || "").startsWith("image") ? "image" : "file",
       mime_type: row.post_mime_type || "application/octet-stream",
-      media_details: {},
-      source_url: row.guid || "",
+      media_details: {}, source_url: row.guid || "",
     };
   }
-
-  // ── Comments ──────────────────────────────────────────────────────────────
 
   async getComments(params = {}) {
     const { post = 0, per_page = 10, page = 1, status = "approve" } = params;
     const offset = (parseInt(page)-1)*parseInt(per_page);
-    const cond = post ? "WHERE comment_post_ID=? AND comment_approved=?" : "WHERE comment_approved=?";
+    const cond  = post ? "WHERE comment_post_ID=? AND comment_approved=?" : "WHERE comment_approved=?";
     const binds = post ? [parseInt(post), status === "approve" ? "1" : status] : [status === "approve" ? "1" : status];
-    const rows = await this.d.prepare(
-      `SELECT * FROM wp_comments ${cond} ORDER BY comment_date DESC LIMIT ? OFFSET ?`
-    ).bind(...binds, parseInt(per_page), offset).all();
+    const rows  = await this.d.prepare(`SELECT * FROM wp_comments ${cond} ORDER BY comment_date DESC LIMIT ? OFFSET ?`).bind(...binds, parseInt(per_page), offset).all();
     return (rows.results || []).map(c => this._formatComment(c));
   }
 
@@ -1043,20 +933,13 @@ class WpRestApi {
 
   _formatComment(row) {
     return {
-      id: row.comment_ID,
-      post: row.comment_post_ID,
-      parent: row.comment_parent,
-      author: row.user_id || 0,
-      author_name: row.comment_author,
-      author_email: row.comment_author_email,
-      author_url: row.comment_author_url,
-      date: row.comment_date,
-      content: { rendered: row.comment_content },
+      id: row.comment_ID, post: row.comment_post_ID, parent: row.comment_parent,
+      author: row.user_id || 0, author_name: row.comment_author,
+      author_email: row.comment_author_email, author_url: row.comment_author_url,
+      date: row.comment_date, content: { rendered: row.comment_content },
       status: row.comment_approved === "1" ? "approved" : "hold",
     };
   }
-
-  // ── Settings ───────────────────────────────────────────────────────────────
 
   async getSettings() {
     if (!this.user) throw new Error("Unauthorized");
@@ -1089,14 +972,9 @@ class WpRestApi {
   async updateSettings(data) {
     if (!this.user) throw new Error("Unauthorized");
     const map = {
-      title:           "blogname",
-      description:     "blogdescription",
-      email:           "admin_email",
-      timezone:        "timezone_string",
-      date_format:     "date_format",
-      time_format:     "time_format",
-      posts_per_page:  "posts_per_page",
-      default_category:"default_category",
+      title:"blogname", description:"blogdescription", email:"admin_email",
+      timezone:"timezone_string", date_format:"date_format", time_format:"time_format",
+      posts_per_page:"posts_per_page", default_category:"default_category",
       permalink_structure:"permalink_structure",
     };
     for (const [k,v] of Object.entries(data)) {
@@ -1105,51 +983,35 @@ class WpRestApi {
     return this.getSettings();
   }
 
-  // ── Plugins ───────────────────────────────────────────────────────────────
-
   async getPlugins() {
     if (!this.user) throw new Error("Unauthorized");
     const raw = await getOption(this.env, "active_plugins") || "a:0:{}";
-    let active = [];
-    // Parse PHP serialized array (simple)
-    const m = raw.match(/s:\d+:"([^"]+)"/g);
-    if (m) active = m.map(x => x.match(/s:\d+:"([^"]+)"/)?.[1]).filter(Boolean);
-
-    // Also list from GitHub repo
+    const m   = raw.match(/s:\d+:"([^"]+)"/g) || [];
+    const active = m.map(x => x.match(/s:\d+:"([^"]+)"/)?.[1]).filter(Boolean);
+    const plugins = [];
     const owner = ghOwner(this.env);
     const repo  = ghRepo(this.env);
-    const plugins = [];
-
     if (owner && repo) {
       try {
         const res = await fetch(`https://api.github.com/repos/${owner}/${repo}/contents/wp-content/plugins`, {
-          headers: { "Authorization": `Bearer ${this.env.GITHUB_TOKEN}`, "User-Agent": "CloudPress/6.0" },
+          headers: { "Authorization": `Bearer ${this.env.GITHUB_TOKEN}`, "User-Agent": "CloudPress/6.1" },
         });
         if (res.ok) {
           const items = await res.json();
           for (const item of (Array.isArray(items) ? items : [])) {
             if (item.type === "dir") {
               plugins.push({
-                plugin:      `${item.name}/${item.name}.php`,
-                status:      active.includes(`${item.name}/${item.name}.php`) ? "active" : "inactive",
-                name:        item.name,
-                plugin_uri:  "",
-                author:      "",
-                author_uri:  "",
-                description: { rendered: "" },
-                version:     "",
-                network_only:false,
-                requires_wp: "6.0",
-                requires_php:"8.0",
-                textdomain:  item.name,
+                plugin: `${item.name}/${item.name}.php`,
+                status: active.includes(`${item.name}/${item.name}.php`) ? "active" : "inactive",
+                name: item.name, plugin_uri: "", author: "", author_uri: "",
+                description: { rendered: "" }, version: "", network_only: false,
+                requires_wp: "6.0", requires_php: "8.0", textdomain: item.name,
               });
             }
           }
         }
       } catch {}
     }
-
-    // Add active plugins not in repo
     for (const p of active) {
       if (!plugins.find(x => x.plugin === p)) {
         plugins.push({ plugin: p, status: "active", name: p.split("/")[0], description: { rendered: "" }, version: "" });
@@ -1160,8 +1022,8 @@ class WpRestApi {
 
   async activatePlugin(plugin) {
     if (!this.user) throw new Error("Unauthorized");
-    let raw = await getOption(this.env, "active_plugins") || "a:0:{}";
-    const m = raw.match(/s:\d+:"[^"]+"/g) || [];
+    const raw = await getOption(this.env, "active_plugins") || "a:0:{}";
+    const m   = raw.match(/s:\d+:"[^"]+"/g) || [];
     const current = m.map(x => x.match(/s:\d+:"([^"]+)"/)?.[1]).filter(Boolean);
     if (!current.includes(plugin)) {
       current.push(plugin);
@@ -1173,62 +1035,48 @@ class WpRestApi {
 
   async deactivatePlugin(plugin) {
     if (!this.user) throw new Error("Unauthorized");
-    let raw = await getOption(this.env, "active_plugins") || "a:0:{}";
-    const m = raw.match(/s:\d+:"[^"]+"/g) || [];
+    const raw = await getOption(this.env, "active_plugins") || "a:0:{}";
+    const m   = raw.match(/s:\d+:"[^"]+"/g) || [];
     const current = m.map(x => x.match(/s:\d+:"([^"]+)"/)?.[1]).filter(Boolean).filter(p => p !== plugin);
     const serialized = `a:${current.length}:{${current.map((p,i)=>`i:${i};s:${p.length}:"${p}";`).join("")}}`;
     await setOption(this.env, "active_plugins", serialized);
     return { plugin, status: "inactive" };
   }
 
-  // ── Themes ────────────────────────────────────────────────────────────────
-
   async getThemes() {
     if (!this.user) throw new Error("Unauthorized");
-    const activeTemplate  = await getOption(this.env, "template")   || "twentytwentyfour";
+    const activeTemplate   = await getOption(this.env, "template")   || "twentytwentyfour";
     const activeStylesheet = await getOption(this.env, "stylesheet") || "twentytwentyfour";
     const themes = [];
-
     const owner = ghOwner(this.env);
     const repo  = ghRepo(this.env);
     if (owner && repo) {
       try {
         const res = await fetch(`https://api.github.com/repos/${owner}/${repo}/contents/wp-content/themes`, {
-          headers: { "Authorization": `Bearer ${this.env.GITHUB_TOKEN}`, "User-Agent": "CloudPress/6.0" },
+          headers: { "Authorization": `Bearer ${this.env.GITHUB_TOKEN}`, "User-Agent": "CloudPress/6.1" },
         });
         if (res.ok) {
           const items = await res.json();
           for (const item of (Array.isArray(items) ? items : [])) {
             if (item.type === "dir") {
               themes.push({
-                stylesheet:      item.name,
-                template:        item.name,
-                name:            { rendered: item.name },
-                description:     { rendered: "" },
-                author:          { rendered: "" },
-                screenshot:      "",
-                status:          item.name === activeStylesheet ? "active" : "inactive",
-                is_block_theme:  false,
-                textdomain:      item.name,
+                stylesheet: item.name, template: item.name,
+                name: { rendered: item.name }, description: { rendered: "" },
+                author: { rendered: "" }, screenshot: "",
+                status: item.name === activeStylesheet ? "active" : "inactive",
+                is_block_theme: false, textdomain: item.name,
               });
             }
           }
         }
       } catch {}
     }
-
-    // Always include active theme
     if (!themes.find(t => t.stylesheet === activeStylesheet)) {
       themes.unshift({
-        stylesheet: activeStylesheet,
-        template:   activeTemplate,
-        name:       { rendered: activeStylesheet },
-        description:{ rendered: "" },
-        author:     { rendered: "" },
-        screenshot: "",
-        status:     "active",
-        is_block_theme: false,
-        textdomain: activeStylesheet,
+        stylesheet: activeStylesheet, template: activeTemplate,
+        name: { rendered: activeStylesheet }, description: { rendered: "" },
+        author: { rendered: "" }, screenshot: "", status: "active",
+        is_block_theme: false, textdomain: activeStylesheet,
       });
     }
     return themes;
@@ -1242,30 +1090,23 @@ class WpRestApi {
     return { stylesheet, template: stylesheet, status: "active" };
   }
 
-  // ── Cache invalidation ────────────────────────────────────────────────────
-
   async _invalidateCache() {
     try {
-      // Delete page cache keys
       const cache = kv(this.env);
       if (!cache) return;
       const list = await cache.list({ prefix: "page:" });
-      for (const key of (list.keys||[])) {
-        await cache.delete(key.name);
-      }
+      for (const key of (list.keys||[])) await cache.delete(key.name);
     } catch {}
   }
 }
 
-// ─── REST API ルーティング ───────────────────────────────────────────────────
-
+// ─── REST API 라우팅 ─────────────────────────────────────────────────────────
 async function handleRestApi(request, env, url) {
   const method = request.method.toUpperCase();
   const path   = url.pathname.replace(/^\/wp-json\/wp\/v2/, "").replace(/\/$/, "") || "/";
-  const params  = Object.fromEntries(url.searchParams.entries());
-
-  const user = await getAuthUser(request, env);
-  const api  = new WpRestApi(env, user);
+  const params = Object.fromEntries(url.searchParams.entries());
+  const user   = await getAuthUser(request, env);
+  const api    = new WpRestApi(env, user);
 
   let body = {};
   if (["POST","PUT","PATCH"].includes(method)) {
@@ -1281,7 +1122,7 @@ async function handleRestApi(request, env, url) {
   }
 
   try {
-    // ── /posts ────────────────────────────────────────────────────────────
+    // /posts
     if (path === "/posts" || path === "") {
       if (method === "GET") {
         const { posts, total, pages } = await api.getPosts({ ...params, type: params.type || "post" });
@@ -1289,16 +1130,14 @@ async function handleRestApi(request, env, url) {
       }
       if (method === "POST") {
         if (!user) return json({ code: "rest_not_logged_in", message: "Sorry, you are not allowed to create posts." }, 401);
-        const post = await api.createPost({ ...body, type: "post" });
-        return json(post, 201);
+        return json(await api.createPost({ ...body, type: "post" }), 201);
       }
     }
-
     const postMatch = path.match(/^\/posts\/(\d+)$/);
     if (postMatch) {
       const id = postMatch[1];
-      if (method === "GET")    return json(await api.getPost(id));
-      if (method === "POST" || method === "PUT" || method === "PATCH") {
+      if (method === "GET") return json(await api.getPost(id));
+      if (["POST","PUT","PATCH"].includes(method)) {
         if (!user) return json({ code: "rest_not_logged_in" }, 401);
         return json(await api.updatePost(id, body));
       }
@@ -1308,7 +1147,7 @@ async function handleRestApi(request, env, url) {
       }
     }
 
-    // ── /pages ────────────────────────────────────────────────────────────
+    // /pages
     if (path === "/pages") {
       if (method === "GET") {
         const { posts, total, pages } = await api.getPosts({ ...params, type: "page" });
@@ -1316,15 +1155,14 @@ async function handleRestApi(request, env, url) {
       }
       if (method === "POST") {
         if (!user) return json({ code: "rest_not_logged_in" }, 401);
-        const page = await api.createPost({ ...body, type: "page" });
-        return json(page, 201);
+        return json(await api.createPost({ ...body, type: "page" }), 201);
       }
     }
     const pageMatch = path.match(/^\/pages\/(\d+)$/);
     if (pageMatch) {
       const id = pageMatch[1];
-      if (method === "GET")    return json(await api.getPost(id));
-      if (method === "POST" || method === "PUT" || method === "PATCH") {
+      if (method === "GET") return json(await api.getPost(id));
+      if (["POST","PUT","PATCH"].includes(method)) {
         if (!user) return json({ code: "rest_not_logged_in" }, 401);
         return json(await api.updatePost(id, body));
       }
@@ -1334,41 +1172,35 @@ async function handleRestApi(request, env, url) {
       }
     }
 
-    // ── /media ────────────────────────────────────────────────────────────
+    // /media
     if (path === "/media") {
       if (method === "GET") return json(await api.getMedia(params));
       if (method === "POST") {
         if (!user) return json({ code: "rest_not_logged_in" }, 401);
-        const media = await api.uploadMedia(env, request);
-        return json(media, 201);
+        return json(await api.uploadMedia(env, request), 201);
       }
     }
-    const mediaMatch = path.match(/^\/media\/(\d+)$/);
-    if (mediaMatch) {
-      const m = await api.getMedia({ per_page: 1 });
-      return json(m[0] || null);
-    }
 
-    // ── /comments ─────────────────────────────────────────────────────────
+    // /comments
     if (path === "/comments") {
       if (method === "GET")  return json(await api.getComments(params));
       if (method === "POST") return json(await api.createComment(body), 201);
     }
 
-    // ── /users ────────────────────────────────────────────────────────────
+    // /users
     if (path === "/users") {
       if (method === "GET") return json(await api.getUsers(params));
     }
     const userMatch = path.match(/^\/users\/(me|\d+)$/);
     if (userMatch) {
       if (method === "GET") return json(await api.getUser(userMatch[1]));
-      if (method === "POST" || method === "PUT" || method === "PATCH") {
+      if (["POST","PUT","PATCH"].includes(method)) {
         if (!user) return json({ code: "rest_not_logged_in" }, 401);
         return json(await api.updateUser(userMatch[1], body));
       }
     }
 
-    // ── /categories / /tags ───────────────────────────────────────────────
+    // /categories /tags
     for (const [endpoint, taxonomy] of [["categories","category"],["tags","post_tag"]]) {
       if (path === `/${endpoint}`) {
         if (method === "GET")  return json(await api.getTerms(taxonomy, params));
@@ -1379,8 +1211,8 @@ async function handleRestApi(request, env, url) {
       }
       const termMatch = path.match(new RegExp(`^\\/${endpoint}\\/(\\d+)$`));
       if (termMatch) {
-        if (method === "GET")    return json((await api.getTerms(taxonomy, { per_page: 1 }))[0] || null);
-        if (method === "POST" || method === "PUT" || method === "PATCH") {
+        if (method === "GET") return json((await api.getTerms(taxonomy, { per_page: 1 }))[0] || null);
+        if (["POST","PUT","PATCH"].includes(method)) {
           if (!user) return json({ code: "rest_not_logged_in" }, 401);
           return json(await api.updateTerm(taxonomy, termMatch[1], body));
         }
@@ -1391,79 +1223,55 @@ async function handleRestApi(request, env, url) {
       }
     }
 
-    // ── /settings ─────────────────────────────────────────────────────────
+    // /settings
     if (path === "/settings") {
-      if (method === "GET")    return json(await api.getSettings());
-      if (method === "POST" || method === "PUT" || method === "PATCH") {
+      if (method === "GET") return json(await api.getSettings());
+      if (["POST","PUT","PATCH"].includes(method)) {
         if (!user) return json({ code: "rest_not_logged_in" }, 401);
         return json(await api.updateSettings(body));
       }
     }
 
-    // ── /plugins ──────────────────────────────────────────────────────────
+    // /plugins
     if (path === "/plugins") {
       if (method === "GET") return json(await api.getPlugins());
     }
     const pluginMatch = path.match(/^\/plugins\/(.+)$/);
     if (pluginMatch) {
       const pluginFile = decodeURIComponent(pluginMatch[1]);
-      if (method === "PUT" || method === "POST") {
+      if (["PUT","POST"].includes(method)) {
         if (!user) return json({ code: "rest_not_logged_in" }, 401);
         if (body.status === "active")   return json(await api.activatePlugin(pluginFile));
         if (body.status === "inactive") return json(await api.deactivatePlugin(pluginFile));
       }
     }
 
-    // ── /themes ───────────────────────────────────────────────────────────
+    // /themes
     if (path === "/themes") {
       if (method === "GET") return json(await api.getThemes());
     }
     const themeMatch = path.match(/^\/themes\/(.+)$/);
     if (themeMatch) {
-      if (method === "POST" || method === "PUT" || method === "PATCH") {
+      if (["POST","PUT","PATCH"].includes(method)) {
         if (!user) return json({ code: "rest_not_logged_in" }, 401);
         if (body.status === "active") return json(await api.activateTheme(decodeURIComponent(themeMatch[1])));
       }
     }
 
-    // ── /types ────────────────────────────────────────────────────────────
-    if (path === "/types") {
-      return json({
-        post:       { slug: "post", name: "Posts", rest_base: "posts" },
-        page:       { slug: "page", name: "Pages", rest_base: "pages" },
-        attachment: { slug: "attachment", name: "Media", rest_base: "media" },
-      });
-    }
+    // /types /taxonomies /statuses
+    if (path === "/types") return json({ post:{slug:"post",name:"Posts",rest_base:"posts"}, page:{slug:"page",name:"Pages",rest_base:"pages"}, attachment:{slug:"attachment",name:"Media",rest_base:"media"} });
+    if (path === "/taxonomies") return json({ category:{slug:"category",name:"Categories",rest_base:"categories"}, post_tag:{slug:"post_tag",name:"Tags",rest_base:"tags"} });
+    if (path === "/statuses") return json({ publish:{name:"Published",public:true,queryable:true,slug:"publish"}, draft:{name:"Draft",public:false,queryable:false,slug:"draft"}, private:{name:"Private",public:false,queryable:false,slug:"private"}, trash:{name:"Trash",public:false,queryable:false,slug:"trash"} });
 
-    // ── /taxonomies ───────────────────────────────────────────────────────
-    if (path === "/taxonomies") {
-      return json({
-        category: { slug: "category", name: "Categories", rest_base: "categories" },
-        post_tag: { slug: "post_tag", name: "Tags", rest_base: "tags" },
-      });
-    }
-
-    // ── /statuses ─────────────────────────────────────────────────────────
-    if (path === "/statuses") {
-      return json({
-        publish: { name: "Published", public: true, queryable: true, slug: "publish" },
-        draft:   { name: "Draft",     public: false, queryable: false, slug: "draft" },
-        private: { name: "Private",   public: false, queryable: false, slug: "private" },
-        trash:   { name: "Trash",     public: false, queryable: false, slug: "trash" },
-      });
-    }
-
-    // ── Root (/wp-json) ────────────────────────────────────────────────────
+    // /wp-json root
     const siteUrl = await getOption(env, "siteurl") || `${url.protocol}//${url.host}`;
     if (url.pathname === "/wp-json" || url.pathname === "/wp-json/") {
       return json({
-        name:        await getOption(env, "blogname") || "WordPress 사이트",
+        name: await getOption(env, "blogname") || "WordPress 사이트",
         description: await getOption(env, "blogdescription") || "",
-        url:         siteUrl,
-        home:        siteUrl,
-        gmt_offset:  9,
+        url: siteUrl, home: siteUrl, gmt_offset: 9,
         timezone_string: await getOption(env, "timezone_string") || "Asia/Seoul",
-        namespaces:  ["wp/v2", "cloudpress/v1"],
+        namespaces: ["wp/v2", "cloudpress/v1"],
         authentication: {},
         routes: {
           "/wp/v2/posts":      { namespace: "wp/v2", methods: ["GET","POST"] },
@@ -1479,7 +1287,7 @@ async function handleRestApi(request, env, url) {
       });
     }
 
-    // ── CloudPress 전용 API ────────────────────────────────────────────────
+    // CloudPress 전용 API
     if (url.pathname.startsWith("/wp-json/cloudpress/v1/")) {
       return handleCloudPressApi(request, env, url, user, body, params);
     }
@@ -1494,11 +1302,9 @@ async function handleRestApi(request, env, url) {
 }
 
 // ─── CloudPress 전용 REST API ────────────────────────────────────────────────
-
 async function handleCloudPressApi(request, env, url, user, body, params) {
   const path = url.pathname.replace(/^\/wp-json\/cloudpress\/v1/, "").replace(/\/$/, "");
 
-  // 인증 로그인
   if (path === "/token" && request.method === "POST") {
     const { username, password } = body;
     if (!username || !password) return json({ code: "missing_credentials", message: "아이디와 비밀번호를 입력하세요." }, 400);
@@ -1509,32 +1315,27 @@ async function handleCloudPressApi(request, env, url, user, body, params) {
     if (!ok) return json({ code: "incorrect_password", message: "비밀번호가 올바르지 않습니다." }, 401);
 
     const capsRow = await d.prepare("SELECT meta_value FROM wp_usermeta WHERE user_id=? AND meta_key='wp_capabilities'").bind(u.ID).first();
-    const role = capsRow?.meta_value?.includes("administrator") ? "administrator" : "subscriber";
-
-    const exp = Math.floor(Date.now()/1000) + 86400 * 30;
-    const token = await jwtSign({ id: u.ID, login: u.user_login, email: u.user_email, role, exp }, getJwtSecret(env));
+    const role    = capsRow?.meta_value?.includes("administrator") ? "administrator" : "subscriber";
+    const exp     = Math.floor(Date.now()/1000) + 86400 * 30;
+    const token   = await jwtSign({ id: u.ID, login: u.user_login, email: u.user_email, role, exp }, getJwtSecret(env));
 
     return json({
-      token,
-      user_email:       u.user_email,
-      user_nicename:    u.user_nicename || u.user_login,
-      user_display_name:u.display_name || u.user_login,
-      roles:            [role],
+      token, user_email: u.user_email,
+      user_nicename: u.user_nicename || u.user_login,
+      user_display_name: u.display_name || u.user_login,
+      roles: [role],
     }, 200, { "Set-Cookie": `wp_token=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=2592000` });
   }
 
-  // 로그아웃
-  if (path === "/token/logout" && (request.method === "POST" || request.method === "DELETE")) {
+  if (path === "/token/logout" && ["POST","DELETE"].includes(request.method)) {
     return json({ message: "로그아웃 완료" }, 200, { "Set-Cookie": "wp_token=; Path=/; HttpOnly; Max-Age=0" });
   }
 
-  // 현재 사용자 확인
   if (path === "/token/validate" && request.method === "POST") {
     if (!user) return json({ code: "jwt_auth_invalid_token", message: "유효하지 않은 토큰입니다." }, 401);
     return json({ code: "jwt_auth_valid_token", data: { status: 200 } });
   }
 
-  // GitHub에 파일 업로드 (테마/플러그인 설치)
   if (path === "/github-upload" && request.method === "POST") {
     if (!user || user.role !== "administrator") return json({ code: "rest_forbidden" }, 403);
     const { file_path, content_base64, commit_message = "Upload via CloudPress" } = body;
@@ -1545,7 +1346,7 @@ async function handleCloudPressApi(request, env, url, user, body, params) {
     if (!owner || !repo || !token) return json({ code: "github_not_configured", message: "GitHub 저장소가 설정되지 않았습니다." }, 503);
     const res = await fetch(`https://api.github.com/repos/${owner}/${repo}/contents/${file_path}`, {
       method: "PUT",
-      headers: { "Authorization": `Bearer ${token}`, "Content-Type": "application/json", "User-Agent": "CloudPress/6.0" },
+      headers: { "Authorization": `Bearer ${token}`, "Content-Type": "application/json", "User-Agent": "CloudPress/6.1" },
       body: JSON.stringify({ message: commit_message, content: content_base64 }),
     });
     if (!res.ok) {
@@ -1559,18 +1360,9 @@ async function handleCloudPressApi(request, env, url, user, body, params) {
 }
 
 // ─── WordPress 관리자 UI 렌더링 ──────────────────────────────────────────────
-
 async function buildAdminPage(env, url, user) {
-  const siteUrl    = await getOption(env, "siteurl") || `${url.protocol}//${url.host}`;
-  const blogname   = await getOption(env, "blogname") || "WordPress 사이트";
-  const adminPage  = url.pathname.replace(/^\/wp-admin\/?/, "") || "index.php";
-  const wpAdminUrl = `${siteUrl}/wp-admin/`;
-
-  // WordPress 관리자 스타일 (공식 CDN에서 불러옴)
-  // Worker 경로로 서빙 - Worker가 중간에서 올바른 Content-Type(text/css)으로 프록시
-  const wpAdminCss = `/wp-admin/css/wp-admin.min.css`;
-  const colorCss   = `/wp-admin/css/colors/fresh/colors.min.css`;
-  const commonCss  = `/wp-admin/css/common.min.css`;
+  const siteUrl  = await getOption(env, "siteurl") || `${url.protocol}//${url.host}`;
+  const blogname = await getOption(env, "blogname") || "WordPress 사이트";
 
   return `<!DOCTYPE html>
 <html lang="ko" class="wp-toolbar">
@@ -1579,1428 +1371,643 @@ async function buildAdminPage(env, url, user) {
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${blogname} — WordPress</title>
 <meta name="robots" content="noindex,nofollow">
-<link rel="stylesheet" href="${wpAdminCss}">
-<link rel="stylesheet" href="${colorCss}">
-<link rel="stylesheet" href="${commonCss}">
+<link rel="stylesheet" href="/wp-admin/css/wp-admin.min.css">
+<link rel="stylesheet" href="/wp-admin/css/colors/fresh/colors.min.css">
+<link rel="stylesheet" href="/wp-admin/css/common.min.css">
 <style>
-/* CloudPress 관리자 추가 스타일 */
 :root { --wp-admin-theme-color: #2271b1; --wp-admin-theme-color--rgb: 34,113,177; }
 #wpadminbar { position:fixed; top:0; left:0; right:0; z-index:99999; }
-#adminmenuwrap { position:fixed; top:32px; bottom:0; }
-#wpcontent, #wpfooter { margin-left: 160px; }
+#adminmenuwrap { position:fixed; top:32px; bottom:0; width:160px; }
+#wpcontent, #wpfooter { margin-left:160px; }
 @media screen and (max-width:782px) {
-  #adminmenuwrap { position:static; }
+  #adminmenuwrap { position:static; width:100%; }
   #wpcontent { margin-left:0; }
 }
-.cloudpress-notice { background:#fff3cd; border-left:4px solid #ffc107; padding:12px 16px; margin:20px 0; border-radius:4px; }
-.cloudpress-notice a { color:#2271b1; }
-#wpbody-content .wrap { padding:10px 20px; }
-.spinner { float:none !important; margin:0 !important; }
-/* 로딩 오버레이 */
-#cp-loading { position:fixed; inset:0; background:rgba(255,255,255,.7); z-index:999998; display:flex; align-items:center; justify-content:center; }
+.notice { background:#fff; border-left:4px solid #2271b1; padding:12px; margin:20px 0; }
+.notice-success { border-left-color:#00a32a; }
+.notice-error   { border-left-color:#d63638; }
+#wp-auth-check-wrap { display:none; }
+#cp-loading { position:fixed; inset:0; background:rgba(255,255,255,.8); z-index:999998; display:flex; align-items:center; justify-content:center; flex-direction:column; gap:12px; font-size:14px; color:#1d2327; }
 #cp-loading.hidden { display:none; }
 </style>
 </head>
 <body class="wp-core-ui js auto-fold branch-6-7 version-6-7-2 locale-ko_KR">
+<div id="cp-loading">
+  <div style="width:32px;height:32px;border:3px solid #e5e5e5;border-top-color:#2271b1;border-radius:50%;animation:spin .7s linear infinite;"></div>
+  <span>WordPress 불러오는 중...</span>
+</div>
+<style>@keyframes spin{to{transform:rotate(360deg)}}</style>
 
-<div id="cp-loading"><span class="spinner is-active" style="float:none;margin:0;width:40px;height:40px;background-size:40px;"></span></div>
-
-<div id="wpadminbar" class="nojq nojs">
-  <div class="quicklinks" id="wp-toolbar" role="navigation" aria-label="툴바">
-    <ul id="wp-admin-bar-root-default" class="ab-top-menu">
-      <li id="wp-admin-bar-wp-logo" class="menupop">
-        <a class="ab-item" href="${siteUrl}/" aria-label="WordPress 정보">
-          <span class="ab-icon" aria-hidden="true"></span>
-        </a>
-      </li>
-      <li id="wp-admin-bar-site-name" class="menupop">
-        <a class="ab-item" href="${siteUrl}/">${blogname}</a>
-      </li>
-    </ul>
-    <ul id="wp-admin-bar-top-secondary" class="ab-top-secondary ab-top-menu">
-      <li id="wp-admin-bar-my-account" class="menupop with-avatar">
-        <a href="${wpAdminUrl}profile.php" class="ab-item">
-          <span class="display-name">${user?.login || "관리자"}</span>
-        </a>
-      </li>
-      <li id="cp-logout">
-        <a class="ab-item" href="#" onclick="cpLogout();return false;" style="color:#fff;">로그아웃</a>
-      </li>
-    </ul>
-  </div>
+<div id="wpadminbar" style="height:32px;background:#1d2327;color:#fff;display:flex;align-items:center;padding:0 16px;gap:16px;font-size:13px;">
+  <a href="${siteUrl}" target="_blank" style="color:#a7aaad;text-decoration:none;">🏠 사이트 보기</a>
+  <span style="color:#a7aaad;">|</span>
+  <span style="color:#fff;font-weight:600;">${blogname}</span>
+  <span style="flex:1"></span>
+  <a href="#" id="wp-logout-btn" style="color:#a7aaad;text-decoration:none;font-size:12px;">로그아웃</a>
 </div>
 
-<div id="adminmenumain">
-  <div id="adminmenuback"></div>
-  <div id="adminmenuwrap">
-  <ul id="adminmenu">
-    ${buildAdminMenu(adminPage, wpAdminUrl)}
+<div id="adminmenuwrap" style="background:#1d2327;padding-top:8px;overflow-y:auto;">
+  <ul id="adminmenu" style="list-style:none;margin:0;padding:0;">
+    ${[
+      ["index.php","📊","알림판"],
+      ["edit.php","📝","글"],
+      ["edit.php?post_type=page","📄","페이지"],
+      ["upload.php","🖼","미디어"],
+      ["edit-comments.php","💬","댓글"],
+      ["themes.php","🎨","외모"],
+      ["plugins.php","🔌","플러그인"],
+      ["users.php","👥","사용자"],
+      ["options-general.php","⚙️","설정"],
+    ].map(([href, icon, label]) =>
+      `<li><a href="/wp-admin/${href}" style="display:flex;align-items:center;gap:10px;padding:8px 16px;color:#a7aaad;text-decoration:none;font-size:13px;">${icon} ${label}</a></li>`
+    ).join("")}
   </ul>
-  </div>
 </div>
 
-<div id="wpcontent" class="interface-interface-skeleton__content">
-  <div id="wpbody" role="main">
-    <div id="wpbody-content">
-      <div id="cp-admin-app" class="wrap">
-        <div id="cp-loading-inner" style="text-align:center;padding:40px;">
-          <span class="spinner is-active" style="float:none;margin:0 auto;display:block;width:40px;height:40px;background-size:40px;"></span>
-        </div>
-      </div>
+<div id="wpcontent" style="padding-top:32px;">
+  <div id="wpbody">
+    <div id="wpbody-content" style="padding:20px;">
+      <div id="cp-admin-app"></div>
     </div>
   </div>
-</div>
-
-<div id="wpfooter">
-  <p id="footer-left" class="alignleft">
-    <span id="footer-thankyou">WordPress <a href="https://ko.wordpress.org/" target="_blank">6.7.2</a> 기반 · CloudPress 제공</span>
-  </p>
-  <p id="footer-upgrade" class="alignright">버전 6.7.2</p>
-  <div class="clear"></div>
 </div>
 
 <script>
-// CloudPress Admin SPA
-const CP_SITE_URL = "${siteUrl}";
-const CP_ADMIN_URL = "${wpAdminUrl}";
-const CP_REST_URL = "${siteUrl}/wp-json/wp/v2";
-const CP_PAGE = "${adminPage}";
+const WP_API = '/wp-json';
+const CP_API = '/wp-json/cloudpress/v1';
+const siteUrl = '${siteUrl}';
 
-// Auth token
-function cpGetToken() { return document.cookie.match(/(?:^|;\\s*)wp_token=([^;]+)/)?.[1] ? decodeURIComponent(document.cookie.match(/(?:^|;\\s*)wp_token=([^;]+)/)[1]) : localStorage.getItem("cp_token"); }
-
-async function cpApi(endpoint, method = "GET", data = null) {
-  const token = cpGetToken();
-  const opts = { method, headers: { "Authorization": token ? "Bearer " + token : "", "Content-Type": "application/json" } };
-  if (data && method !== "GET") opts.body = JSON.stringify(data);
-  const res = await fetch(CP_REST_URL + endpoint, opts);
-  if (res.status === 401) { cpShowLogin(); return null; }
-  return res.ok ? res.json() : null;
-}
-async function cpApiCP(endpoint, method = "GET", data = null) {
-  const token = cpGetToken();
-  const opts = { method, headers: { "Authorization": token ? "Bearer " + token : "", "Content-Type": "application/json" } };
-  if (data && method !== "GET") opts.body = JSON.stringify(data);
-  const res = await fetch("${siteUrl}/wp-json/cloudpress/v1" + endpoint, opts);
-  if (res.status === 401) { cpShowLogin(); return null; }
-  return res.ok ? res.json() : null;
+// 인증 토큰 가져오기
+function getToken() {
+  return document.cookie.match(/(?:^|;\\s*)wp_token=([^;]+)/)?.[1];
 }
 
-function cpLogout() {
-  document.cookie = "wp_token=; Path=/; Max-Age=0";
-  localStorage.removeItem("cp_token");
-  location.href = "${siteUrl}/wp-login.php";
-}
-
-// 로그인 화면
-function cpShowLogin() {
-  document.getElementById("cp-admin-app").innerHTML = \`
-    <style>
-    .cp-login-wrap { max-width:360px; margin:60px auto; background:#fff; border:1px solid #c3c4c7; border-radius:4px; padding:26px; box-shadow:0 1px 3px rgba(0,0,0,.1); }
-    .cp-login-wrap h1 { font-size:18px; text-align:center; margin-bottom:20px; color:#1d2327; }
-    .cp-login-wrap label { display:block; font-weight:600; margin-bottom:4px; color:#2c3338; }
-    .cp-login-wrap input { width:100%; padding:8px 10px; border:1px solid #8c8f94; border-radius:4px; font-size:14px; margin-bottom:12px; box-sizing:border-box; }
-    .cp-login-wrap button { width:100%; padding:9px; background:#2271b1; color:#fff; border:none; border-radius:4px; font-size:14px; cursor:pointer; font-weight:600; }
-    .cp-login-wrap button:hover { background:#135e96; }
-    .cp-login-error { color:#d63638; font-size:13px; margin-bottom:10px; display:none; }
-    </style>
-    <div class="cp-login-wrap">
-      <h1>WordPress 로그인</h1>
-      <div class="cp-login-error" id="cp-login-error"></div>
-      <label>사용자 이름 또는 이메일</label>
-      <input type="text" id="cp-username" autocomplete="username">
-      <label>비밀번호</label>
-      <input type="password" id="cp-password" autocomplete="current-password">
-      <button onclick="cpDoLogin()">로그인</button>
-    </div>
-  \`;
-  document.getElementById("cp-loading").classList.add("hidden");
-}
-
-async function cpDoLogin() {
-  const u = document.getElementById("cp-username").value;
-  const p = document.getElementById("cp-password").value;
-  const e = document.getElementById("cp-login-error");
-  e.style.display = "none";
-  const res = await fetch("${siteUrl}/wp-json/cloudpress/v1/token", {
-    method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ username: u, password: p }),
+async function apiFetch(path, opts = {}) {
+  const token = getToken();
+  const res = await fetch(path, {
+    ...opts,
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { 'Authorization': 'Bearer ' + decodeURIComponent(token) } : {}),
+      ...(opts.headers || {}),
+    },
   });
-  const data = await res.json();
-  if (data.token) {
-    localStorage.setItem("cp_token", data.token);
-    location.reload();
-  } else {
-    e.textContent = data.message || "로그인 실패";
-    e.style.display = "block";
+  if (!res.ok) throw new Error((await res.json().catch(() => ({}))).message || res.statusText);
+  return res.json();
+}
+
+// 현재 페이지 감지
+const page = location.pathname.replace(/^\\/wp-admin\\//, '') || 'index.php';
+const searchP = new URLSearchParams(location.search);
+
+async function renderPage() {
+  const app = document.getElementById('cp-admin-app');
+  document.getElementById('cp-loading').classList.add('hidden');
+
+  if (page === 'index.php' || page === '') {
+    const [posts, pages, comments] = await Promise.all([
+      apiFetch(WP_API + '/wp/v2/posts?per_page=5').catch(() => []),
+      apiFetch(WP_API + '/wp/v2/pages?per_page=5').catch(() => []),
+      apiFetch(WP_API + '/wp/v2/comments?per_page=5').catch(() => []),
+    ]);
+    app.innerHTML = \`
+      <div class="wrap">
+        <h1>알림판</h1>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px;margin:20px 0;">
+          <div style="background:#fff;padding:20px;border:1px solid #c3c4c7;border-radius:4px;">
+            <div style="font-size:2rem;font-weight:700;color:#2271b1;">\${posts.length}</div>
+            <div style="color:#646970;">최근 글</div>
+          </div>
+          <div style="background:#fff;padding:20px;border:1px solid #c3c4c7;border-radius:4px;">
+            <div style="font-size:2rem;font-weight:700;color:#2271b1;">\${pages.length}</div>
+            <div style="color:#646970;">페이지</div>
+          </div>
+          <div style="background:#fff;padding:20px;border:1px solid #c3c4c7;border-radius:4px;">
+            <div style="font-size:2rem;font-weight:700;color:#2271b1;">\${comments.length}</div>
+            <div style="color:#646970;">댓글</div>
+          </div>
+        </div>
+        <div style="background:#fff;padding:20px;border:1px solid #c3c4c7;border-radius:4px;margin-top:16px;">
+          <h2 style="font-size:14px;margin:0 0 12px;">최근 글</h2>
+          \${posts.map(p => \`<div style="padding:8px 0;border-bottom:1px solid #f0f0f1;"><a href="\${p.link}" target="_blank">\${p.title.rendered}</a> — <span style="color:#646970;font-size:12px;">\${p.date?.slice(0,10)}</span></div>\`).join('') || '<p style="color:#646970;">글이 없습니다.</p>'}
+        </div>
+      </div>\`;
   }
-}
-
-// ────────────────────────────────────────────────────────────────
-// 페이지별 렌더링
-// ────────────────────────────────────────────────────────────────
-
-function cpRender(html) {
-  document.getElementById("cp-admin-app").innerHTML = html;
-  document.getElementById("cp-loading").classList.add("hidden");
-}
-
-function cpEscape(s) {
-  return String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
-}
-
-// ── 대시보드 ─────────────────────────────────────────────────────────────────
-async function renderDashboard() {
-  const [posts, pages, comments, settings] = await Promise.all([
-    cpApi("/posts?status=any&per_page=1"),
-    cpApi("/pages?status=any&per_page=1"),
-    cpApi("/comments?per_page=1"),
-    cpApi("/settings"),
-  ]);
-  cpRender(\`
-    <h1 class="wp-heading-inline">대시보드</h1>
-    <hr class="wp-header-end">
-    <div class="cloudpress-notice">
-      <strong>CloudPress WordPress SaaS</strong> — 모든 테마와 플러그인을 무료로 사용할 수 있습니다.
-      <a href="#" onclick="renderPlugins();return false;">플러그인 관리</a> · <a href="#" onclick="renderThemes();return false;">테마 관리</a>
-    </div>
-    <div id="dashboard-widgets-wrap">
-      <div id="dashboard-widgets" class="metabox-holder">
-        <div id="postbox-container-1" class="postbox-container" style="width:49%;float:left;margin-right:1%;">
-          <div class="postbox" id="dashboard_right_now">
-            <div class="postbox-header"><h2 class="hndle">현황</h2></div>
-            <div class="inside">
-              <div class="table table_content">
-                <p class="sub">콘텐츠</p>
-                <table>
-                  <tr><td class="b"><a href="#">${cpEscape(posts?.length || 0)}</a></td><td><a href="#">게시물</a></td></tr>
-                  <tr><td class="b"><a href="#">${cpEscape(pages?.length || 0)}</a></td><td><a href="#">페이지</a></td></tr>
-                  <tr><td class="b"><a href="#">${cpEscape(comments?.length || 0)}</a></td><td><a href="#">댓글</a></td></tr>
-                </table>
-              </div>
-              <div class="table table_discussion" style="margin-top:12px;">
-                <p class="sub">WordPress</p>
-                <p>테마: <strong>${cpEscape(settings?.stylesheet || "twentytwentyfour")}</strong></p>
-                <p>언어: <strong>한국어</strong></p>
-                <p>버전: <strong>6.7.2</strong></p>
-              </div>
-            </div>
-          </div>
-        </div>
-        <div id="postbox-container-2" class="postbox-container" style="width:49%;float:left;">
-          <div class="postbox">
-            <div class="postbox-header"><h2 class="hndle">빠른 초안</h2></div>
-            <div class="inside">
-              <input type="text" id="qd-title" placeholder="제목" style="width:100%;margin-bottom:8px;padding:6px;border:1px solid #ddd;border-radius:3px;">
-              <textarea id="qd-content" rows="4" placeholder="내용을 입력하세요..." style="width:100%;margin-bottom:8px;padding:6px;border:1px solid #ddd;border-radius:3px;resize:vertical;"></textarea>
-              <button class="button button-primary" onclick="cpSaveDraft()">초안으로 저장</button>
-              <span id="qd-result" style="margin-left:8px;color:#2271b1;"></span>
-            </div>
-          </div>
-        </div>
-        <div style="clear:both;"></div>
-      </div>
-    </div>
-  \`);
-}
-
-async function cpSaveDraft() {
-  const title = document.getElementById("qd-title").value;
-  const content = document.getElementById("qd-content").value;
-  if (!title) return;
-  const res = await cpApi("/posts", "POST", { title, content, status: "draft" });
-  if (res) {
-    document.getElementById("qd-result").textContent = "저장되었습니다!";
-    document.getElementById("qd-title").value = "";
-    document.getElementById("qd-content").value = "";
-    setTimeout(()=>document.getElementById("qd-result").textContent="", 3000);
+  else if (page === 'edit.php' || page.startsWith('edit.php')) {
+    const postType = searchP.get('post_type') || 'post';
+    const endpoint = postType === 'page' ? 'pages' : 'posts';
+    const items = await apiFetch(\`\${WP_API}/wp/v2/\${endpoint}?per_page=20&status=any\`).catch(() => []);
+    app.innerHTML = \`
+      <div class="wrap">
+        <h1>\${postType === 'page' ? '페이지 목록' : '글 목록'}
+          <a href="/wp-admin/post-new.php\${postType === 'page' ? '?post_type=page' : ''}" style="margin-left:12px;font-size:13px;background:#2271b1;color:#fff;padding:4px 12px;border-radius:3px;text-decoration:none;">새로 추가</a>
+        </h1>
+        <table style="width:100%;background:#fff;border:1px solid #c3c4c7;border-collapse:collapse;margin-top:16px;">
+          <thead><tr style="background:#f6f7f7;"><th style="padding:8px 12px;text-align:left;border-bottom:1px solid #c3c4c7;">제목</th><th style="padding:8px 12px;text-align:left;border-bottom:1px solid #c3c4c7;">상태</th><th style="padding:8px 12px;text-align:left;border-bottom:1px solid #c3c4c7;">날짜</th><th style="padding:8px 12px;border-bottom:1px solid #c3c4c7;">작업</th></tr></thead>
+          <tbody>
+            \${items.map(p => \`<tr>
+              <td style="padding:8px 12px;border-bottom:1px solid #f0f0f1;"><a href="/wp-admin/post.php?post=\${p.id}&action=edit">\${p.title.rendered || '(제목 없음)'}</a></td>
+              <td style="padding:8px 12px;border-bottom:1px solid #f0f0f1;">\${p.status}</td>
+              <td style="padding:8px 12px;border-bottom:1px solid #f0f0f1;">\${(p.date||'').slice(0,10)}</td>
+              <td style="padding:8px 12px;border-bottom:1px solid #f0f0f1;">
+                <a href="/wp-admin/post.php?post=\${p.id}&action=edit" style="margin-right:8px;">수정</a>
+                <a href="\${p.link}" target="_blank">보기</a>
+              </td>
+            </tr>\`).join('') || '<tr><td colspan="4" style="padding:20px;text-align:center;color:#646970;">항목이 없습니다.</td></tr>'}
+          </tbody>
+        </table>
+      </div>\`;
   }
-}
-
-// ── 게시물 목록 ───────────────────────────────────────────────────────────────
-async function renderPosts(type = "post", page = 1) {
-  const label = type === "page" ? "페이지" : "게시물";
-  const endpoint = type === "page" ? "/pages" : "/posts";
-  const data = await cpApi(\`\${endpoint}?per_page=20&page=\${page}&status=any&_embed\`);
-  if (!data) return;
-  const rows = (Array.isArray(data) ? data : []).map(p => \`
-    <tr id="post-\${p.id}" class="\${p.status}">
-      <td><input type="checkbox" name="post[]" value="\${p.id}"></td>
-      <td class="column-title has-row-actions">
-        <strong><a href="#" onclick="renderEditor(\${p.id}, '\${type}');return false;">\${cpEscape(p.title?.rendered || "(제목 없음)")}</a></strong>
-        <div class="row-actions">
-          <span class="edit"><a href="#" onclick="renderEditor(\${p.id}, '\${type}');return false;">수정</a></span> |
-          <span class="trash"><a href="#" onclick="cpDeletePost(\${p.id},'\${type}');return false;" style="color:#d63638;">휴지통으로 이동</a></span>
-          <span class="view"> | <a href="\${CP_SITE_URL}/\${p.slug}/" target="_blank">보기</a></span>
-        </div>
-      </td>
-      <td>\${cpEscape(p._embedded?.author?.[0]?.name || "")}</td>
-      <td>\${cpEscape(p.status === "publish" ? "게시됨" : p.status === "draft" ? "초안" : p.status)}</td>
-      <td>\${cpEscape((p.date||"").slice(0,10))}</td>
-    </tr>
-  \`).join("");
-  cpRender(\`
-    <h1 class="wp-heading-inline">${'${label}'}목록</h1>
-    <a href="#" class="page-title-action" onclick="renderEditor(null, '\${type}');return false;">새로 추가</a>
-    <hr class="wp-header-end">
-    <table class="wp-list-table widefat fixed striped table-view-list posts">
-      <thead><tr>
-        <th style="width:30px;"><input type="checkbox"></th>
-        <th class="column-title">제목</th>
-        <th>작성자</th>
-        <th>상태</th>
-        <th>날짜</th>
-      </tr></thead>
-      <tbody>\${rows || '<tr><td colspan="5" style="text-align:center;padding:20px;">게시물이 없습니다.</td></tr>'}</tbody>
-    </table>
-  \`);
-}
-
-async function cpDeletePost(id, type) {
-  if (!confirm("정말 휴지통으로 이동하시겠습니까?")) return;
-  await cpApi(\`/\${type === "page" ? "pages" : "posts"}/\${id}\`, "DELETE");
-  renderPosts(type);
-}
-
-// ── Gutenberg 에디터 ──────────────────────────────────────────────────────────
-async function renderEditor(postId, type = "post") {
-  let post = postId ? await cpApi(\`/\${type === "page" ? "pages" : "posts"}/\${postId}?context=edit\`) : null;
-  const title   = post?.title?.rendered || "";
-  const content = post?.content?.raw || post?.content?.rendered || "";
-  const status  = post?.status || "draft";
-  const slug    = post?.slug || "";
-  const cats    = await cpApi("/categories?per_page=100");
-  const postCats = post?.categories || [];
-
-  const catChecks = (cats||[]).map(c => \`
-    <label style="display:block;margin:4px 0;">
-      <input type="checkbox" name="cat" value="\${c.id}" \${postCats.includes(c.id)?"checked":""}>
-      \${cpEscape(c.name)} (\${c.count})
-    </label>\`).join("");
-
-  cpRender(\`
-    <div style="display:flex;gap:16px;align-items:flex-start;">
-      <!-- 에디터 메인 -->
-      <div style="flex:1;min-width:0;">
-        <div style="background:#fff;border:1px solid #c3c4c7;border-radius:4px;padding:20px;margin-bottom:16px;">
-          <input type="text" id="cp-post-title" value="\${cpEscape(title)}" placeholder="제목 추가"
-            style="width:100%;font-size:24px;font-weight:600;border:none;border-bottom:2px solid #e0e0e0;padding:8px 0;margin-bottom:16px;outline:none;color:#1d2327;">
-          <div id="cp-post-content-toolbar" style="border:1px solid #ddd;border-bottom:none;padding:6px;background:#f6f7f7;border-radius:4px 4px 0 0;display:flex;gap:4px;flex-wrap:wrap;">
-            <button type="button" onclick="cpFormat('bold')" class="button button-small" title="굵게"><strong>B</strong></button>
-            <button type="button" onclick="cpFormat('italic')" class="button button-small" title="기울임"><em>I</em></button>
-            <button type="button" onclick="cpFormat('underline')" class="button button-small" title="밑줄"><u>U</u></button>
-            <span style="border-left:1px solid #ccc;margin:0 4px;"></span>
-            <button type="button" onclick="cpFormat('insertUnorderedList')" class="button button-small">≡ 목록</button>
-            <button type="button" onclick="cpFormat('insertOrderedList')" class="button button-small">1. 번호</button>
-            <button type="button" onclick="cpInsertLink()" class="button button-small">🔗 링크</button>
-            <button type="button" onclick="cpInsertMedia()" class="button button-small">🖼 미디어</button>
-            <span style="border-left:1px solid #ccc;margin:0 4px;"></span>
-            <select onchange="cpFormatBlock(this.value);this.value='';" style="font-size:12px;padding:2px 4px;">
-              <option value="">단락 선택</option>
-              <option value="p">단락</option>
-              <option value="h2">제목 2</option>
-              <option value="h3">제목 3</option>
-              <option value="h4">제목 4</option>
-              <option value="pre">코드 블록</option>
-              <option value="blockquote">인용구</option>
-            </select>
-          </div>
-          <div id="cp-post-content" contenteditable="true"
-            style="min-height:400px;border:1px solid #ddd;padding:16px;outline:none;border-radius:0 0 4px 4px;font-size:15px;line-height:1.8;background:#fff;"
-            onkeydown="cpEditorKeydown(event)">\${content}</div>
-        </div>
-        <!-- 본문 SEO / 발췌 -->
-        <div style="background:#fff;border:1px solid #c3c4c7;border-radius:4px;padding:16px;margin-bottom:16px;">
-          <h3 style="margin:0 0 8px;font-size:13px;">발췌</h3>
-          <textarea id="cp-post-excerpt" rows="3" style="width:100%;padding:6px;border:1px solid #ddd;border-radius:3px;resize:vertical;">\${cpEscape(post?.excerpt?.raw || "")}</textarea>
-        </div>
-      </div>
-
-      <!-- 사이드바 -->
-      <div style="width:280px;flex-shrink:0;">
-        <!-- 발행 -->
-        <div class="postbox" style="margin-bottom:12px;">
-          <div class="postbox-header"><h2 class="hndle" style="font-size:13px;">게시</h2></div>
-          <div class="inside">
-            <div class="submitbox">
-              <div id="minor-publishing">
-                <label style="font-size:12px;font-weight:600;">상태:</label>
-                <select id="cp-post-status" style="margin-left:4px;font-size:12px;">
-                  <option value="draft" \${status==="draft"?"selected":""}>초안</option>
-                  <option value="publish" \${status==="publish"?"selected":""}>게시됨</option>
-                  <option value="private" \${status==="private"?"selected":""}>비공개</option>
-                  <option value="pending" \${status==="pending"?"selected":""}>검토 대기 중</option>
-                </select>
-                <p style="margin:8px 0 0;font-size:12px;">
-                  <label>고유주소: </label>
-                  <code id="cp-post-permalink" style="word-break:break-all;">\${CP_SITE_URL}/\${cpEscape(slug)}/</code>
-                </p>
-              </div>
-              <div id="major-publishing-actions" style="padding:8px 0 0;border-top:1px solid #ddd;margin-top:8px;">
-                <div id="publishing-action">
-                  <button class="button button-primary button-large" onclick="cpSavePost(\${postId || "null"}, '\${type}')">
-                    \${postId ? "업데이트" : "게시"}
-                  </button>
-                  \${postId ? \`<button class="button button-link" onclick="cpDeletePost(\${postId},'\${type}');renderPosts('\${type}');" style="margin-left:8px;color:#d63638;">휴지통</button>\` : ""}
-                </div>
-                <div id="save-action">
-                  <button class="button" onclick="cpSavePost(\${postId || "null"}, '\${type}', true)">초안 저장</button>
-                </div>
-              </div>
-              <span id="cp-save-result" style="display:block;margin-top:6px;font-size:12px;color:#2271b1;"></span>
-            </div>
-          </div>
-        </div>
-
-        <!-- 카테고리 -->
-        \${type !== "page" ? \`
-        <div class="postbox" style="margin-bottom:12px;">
-          <div class="postbox-header"><h2 class="hndle" style="font-size:13px;">카테고리</h2></div>
-          <div class="inside">
-            <div style="max-height:200px;overflow-y:auto;">\${catChecks || "카테고리 없음"}</div>
-            <hr>
-            <p style="font-size:12px;font-weight:600;">+ 새 카테고리 추가</p>
-            <input type="text" id="cp-new-cat" placeholder="새 카테고리 이름" style="width:100%;padding:4px;border:1px solid #ddd;border-radius:3px;font-size:12px;">
-            <button class="button" style="margin-top:4px;font-size:12px;" onclick="cpAddCategory()">추가</button>
-          </div>
-        </div>\` : ""}
-
-        <!-- 특성 이미지 -->
-        <div class="postbox">
-          <div class="postbox-header"><h2 class="hndle" style="font-size:13px;">특성 이미지</h2></div>
-          <div class="inside">
-            <div id="cp-featured-image-wrap">
-              \${post?.featured_media ? \`<img src="" id="cp-featured-img" style="width:100%;border-radius:4px;">\` : ""}
-              <a href="#" onclick="cpInsertMedia(true);return false;" style="font-size:12px;">\${post?.featured_media ? "특성 이미지 변경" : "특성 이미지 설정"}</a>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-  \`);
-}
-
-function cpFormat(cmd) { document.execCommand(cmd, false); document.getElementById("cp-post-content").focus(); }
-function cpFormatBlock(tag) { if(tag) { document.execCommand("formatBlock", false, tag); document.getElementById("cp-post-content").focus(); } }
-function cpEditorKeydown(e) {
-  if (e.key === "Tab") { e.preventDefault(); document.execCommand("insertText", false, "    "); }
-}
-function cpInsertLink() {
-  const url = prompt("링크 URL을 입력하세요:");
-  if (url) { document.execCommand("createLink", false, url); }
-}
-function cpInsertMedia(asFeatured = false) {
-  const input = document.createElement("input");
-  input.type = "file"; input.accept = "image/*,video/*,audio/*,application/pdf,.zip";
-  input.onchange = async (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-    const token = cpGetToken();
-    const fd = new FormData();
-    fd.append("file", file);
-    const res = await fetch(CP_REST_URL + "/media", {
-      method: "POST",
-      headers: { "Authorization": "Bearer " + token, "Content-Disposition": 'attachment; filename="' + file.name + '"' },
-      body: file,
-    });
-    if (res.ok) {
-      const media = await res.json();
-      if (asFeatured) {
-        document.getElementById("cp-featured-image-wrap").innerHTML = \`<img src="\${media.source_url}" style="width:100%;border-radius:4px;"><br><a href="#" onclick="cpInsertMedia(true);return false;" style="font-size:12px;">특성 이미지 변경</a>\`;
-        window._cpFeaturedMediaId = media.id;
-      } else {
-        document.execCommand("insertHTML", false, \`<img src="\${media.source_url}" alt="\${media.title?.rendered||""}" style="max-width:100%;">\`);
-      }
+  else if (page === 'post-new.php' || (page === 'post.php' && searchP.get('action') === 'edit')) {
+    const postId  = searchP.get('post');
+    const postType = searchP.get('post_type') || 'post';
+    let existing = { title: { rendered: '' }, content: { raw: '' }, status: 'draft' };
+    if (postId) {
+      const ep = postType === 'page' ? 'pages' : 'posts';
+      existing = await apiFetch(\`\${WP_API}/wp/v2/\${ep}/\${postId}\`).catch(() => existing);
     }
-  };
-  input.click();
-}
-
-async function cpSavePost(postId, type, asDraft = false) {
-  const title   = document.getElementById("cp-post-title").value;
-  const content = document.getElementById("cp-post-content").innerHTML;
-  const excerpt = document.getElementById("cp-post-excerpt")?.value || "";
-  const status  = asDraft ? "draft" : (document.getElementById("cp-post-status").value || "draft");
-  const endpoint = type === "page" ? "/pages" : "/posts";
-  const featured_media = window._cpFeaturedMediaId || undefined;
-
-  const data = { title, content, excerpt, status };
-  if (featured_media) data.featured_media = featured_media;
-
-  let res;
-  if (postId) {
-    res = await cpApi(\`\${endpoint}/\${postId}\`, "POST", data);
-  } else {
-    res = await cpApi(endpoint, "POST", data);
-  }
-  if (res) {
-    const el = document.getElementById("cp-save-result");
-    el.textContent = "✓ 저장되었습니다.";
-    if (!postId && res.id) {
-      setTimeout(() => renderEditor(res.id, type), 800);
-    } else {
-      setTimeout(() => el.textContent = "", 3000);
-    }
-  }
-}
-
-async function cpAddCategory() {
-  const name = document.getElementById("cp-new-cat").value;
-  if (!name) return;
-  await cpApi("/categories", "POST", { name });
-  document.getElementById("cp-new-cat").value = "";
-  renderEditor(null);
-}
-
-// ── 미디어 라이브러리 ─────────────────────────────────────────────────────────
-async function renderMedia() {
-  const media = await cpApi("/media?per_page=50");
-  const items = (Array.isArray(media) ? media : []).map(m => \`
-    <li style="position:relative;background:#f0f0f1;border-radius:4px;overflow:hidden;cursor:pointer;" title="\${cpEscape(m.title?.rendered)}">
-      \${m.media_type === "image"
-        ? \`<img src="\${cpEscape(m.source_url)}" style="width:100%;aspect-ratio:1;object-fit:cover;">\`
-        : \`<div style="padding:16px;text-align:center;font-size:12px;aspect-ratio:1;display:flex;align-items:center;justify-content:center;">📄 \${cpEscape(m.mime_type)}</div>\`}
-      <div style="position:absolute;bottom:0;left:0;right:0;background:rgba(0,0,0,.6);color:#fff;font-size:10px;padding:4px 6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">\${cpEscape(m.title?.rendered||m.slug)}</div>
-    </li>\`).join("");
-
-  cpRender(\`
-    <h1 class="wp-heading-inline">미디어 라이브러리</h1>
-    <hr class="wp-header-end">
-    <div style="margin-bottom:20px;background:#fff;border:2px dashed #c3c4c7;border-radius:4px;padding:30px;text-align:center;">
-      <p>여기에 파일을 드롭하거나 <label style="color:#2271b1;cursor:pointer;"><input type="file" multiple accept="image/*,video/*,audio/*" style="display:none;" onchange="cpUploadFiles(this.files)">파일 선택</label></p>
-      <div id="cp-upload-progress"></div>
-    </div>
-    <ul class="attachments ui-sortable" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px;list-style:none;margin:0;padding:0;">
-      \${items || "<li style='grid-column:1/-1;text-align:center;padding:40px;color:#666;'>업로드된 파일이 없습니다.</li>"}
-    </ul>
-  \`);
-}
-
-async function cpUploadFiles(files) {
-  const token = cpGetToken();
-  const prog = document.getElementById("cp-upload-progress");
-  for (const file of files) {
-    prog.textContent = \`'\${file.name}' 업로드 중...\`;
-    await fetch(CP_REST_URL + "/media", {
-      method: "POST",
-      headers: { "Authorization": "Bearer " + token, "Content-Disposition": 'attachment; filename="' + file.name + '"' },
-      body: file,
-    });
-  }
-  prog.textContent = "완료!";
-  setTimeout(() => renderMedia(), 500);
-}
-
-// ── 댓글 관리 ─────────────────────────────────────────────────────────────────
-async function renderComments() {
-  const comments = await cpApi("/comments?per_page=50&status=approve");
-  const rows = (Array.isArray(comments) ? comments : []).map(c => \`
-    <tr>
-      <td><input type="checkbox"></td>
-      <td>\${cpEscape(c.author_name)}<br><small>\${cpEscape(c.author_email)}</small></td>
-      <td>\${cpEscape(c.content?.rendered || "")}</td>
-      <td><a href="#">게시물 \${c.post}</a></td>
-      <td>\${cpEscape((c.date||"").slice(0,10))}</td>
-    </tr>\`).join("");
-
-  cpRender(\`
-    <h1>댓글</h1>
-    <hr class="wp-header-end">
-    <table class="wp-list-table widefat fixed striped comments">
-      <thead><tr>
-        <th style="width:30px;"><input type="checkbox"></th>
-        <th>작성자</th><th>댓글</th><th>게시물</th><th>날짜</th>
-      </tr></thead>
-      <tbody>\${rows || "<tr><td colspan='5' style='text-align:center;padding:20px;'>댓글이 없습니다.</td></tr>"}</tbody>
-    </table>
-  \`);
-}
-
-// ── 플러그인 관리 ─────────────────────────────────────────────────────────────
-async function renderPlugins() {
-  const plugins = await cpApi("/plugins");
-  const rows = (Array.isArray(plugins) ? plugins : []).map(p => {
-    const isActive = p.status === "active";
-    return \`<tr class="\${isActive ? "active" : "inactive"}">
-      <td><input type="checkbox"></td>
-      <td class="column-primary">
-        <strong>\${cpEscape(p.name || p.plugin)}</strong>
-        <p style="color:#666;font-size:12px;margin:4px 0;">\${cpEscape(p.description?.rendered || "")}</p>
-        <div class="row-actions">
-          \${isActive
-            ? \`<span class="deactivate"><a href="#" onclick="cpTogglePlugin('\${cpEscape(p.plugin)}', false);return false;" style="color:#d63638;">비활성화</a></span>\`
-            : \`<span class="activate"><a href="#" onclick="cpTogglePlugin('\${cpEscape(p.plugin)}', true);return false;">활성화</a></span>\`}
-          | <span class="delete"><a href="#" style="color:#d63638;" onclick="if(confirm('정말 삭제하시겠습니까?')) alert('GitHub 레포에서 직접 삭제하세요.');return false;">삭제</a></span>
+    app.innerHTML = \`
+      <div class="wrap">
+        <h1>\${postId ? '글 수정' : '새 글 추가'}</h1>
+        <div style="display:grid;grid-template-columns:1fr 280px;gap:16px;margin-top:16px;">
+          <div>
+            <input id="post-title" type="text" value="\${existing.title.rendered}" placeholder="제목 입력..." style="width:100%;padding:12px;font-size:20px;border:1px solid #8c8f94;border-radius:4px;margin-bottom:12px;box-sizing:border-box;">
+            <textarea id="post-content" style="width:100%;height:400px;padding:12px;border:1px solid #8c8f94;border-radius:4px;font-size:14px;font-family:monospace;box-sizing:border-box;">\${existing.content?.raw || ''}</textarea>
+          </div>
+          <div>
+            <div style="background:#fff;border:1px solid #c3c4c7;border-radius:4px;padding:16px;margin-bottom:16px;">
+              <h2 style="font-size:14px;margin:0 0 12px;">공개 설정</h2>
+              <select id="post-status" style="width:100%;padding:6px;margin-bottom:12px;">
+                <option value="publish" \${existing.status==='publish'?'selected':''}>공개</option>
+                <option value="draft"   \${existing.status==='draft'  ?'selected':''}>임시글</option>
+                <option value="private" \${existing.status==='private'?'selected':''}>비공개</option>
+              </select>
+              <button id="save-post" style="width:100%;padding:8px;background:#2271b1;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:14px;">\${existing.status === 'publish' ? '업데이트' : '발행'}</button>
+            </div>
+          </div>
         </div>
-      </td>
-      <td>\${cpEscape(p.version || "")}</td>
-      <td><span class="plugin-status-badge" style="padding:2px 8px;border-radius:3px;font-size:11px;background:\${isActive?"#00a32a":"#999"};color:#fff;">\${isActive?"활성화됨":"비활성화됨"}</span></td>
-    </tr>\`}).join("");
+      </div>\`;
 
-  cpRender(\`
-    <h1 class="wp-heading-inline">플러그인</h1>
-    <a class="page-title-action" href="#" onclick="cpUploadPlugin();return false;">플러그인 추가</a>
-    <hr class="wp-header-end">
-    <div class="cloudpress-notice">
-      <strong>플러그인 설치 방법:</strong> GitHub 저장소의 <code>wp-content/plugins/</code> 폴더에 플러그인 파일을 업로드하거나,
-      아래 "플러그인 추가" 버튼으로 ZIP 파일을 직접 업로드하세요. 모든 WordPress 플러그인이 무료로 사용 가능합니다.
-    </div>
-    <table class="wp-list-table widefat fixed striped plugins">
-      <thead><tr>
-        <th style="width:30px;"><input type="checkbox"></th>
-        <th>플러그인</th><th>버전</th><th>상태</th>
-      </tr></thead>
-      <tbody>\${rows || "<tr><td colspan='4' style='text-align:center;padding:20px;'>설치된 플러그인이 없습니다.<br>GitHub 저장소에 플러그인을 업로드하세요.</td></tr>"}</tbody>
-    </table>
-  \`);
-}
-
-async function cpTogglePlugin(plugin, activate) {
-  await cpApi(\`/plugins/\${encodeURIComponent(plugin)}\`, "PUT", { status: activate ? "active" : "inactive" });
-  renderPlugins();
-}
-
-function cpUploadPlugin() {
-  const input = document.createElement("input");
-  input.type = "file"; input.accept = ".zip";
-  input.onchange = async (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-    // Read zip as base64
-    const reader = new FileReader();
-    reader.onload = async (ev) => {
-      const b64 = ev.target.result.split(",")[1];
-      const pluginName = file.name.replace(/\\.zip$/, "");
-      const res = await cpApiCP("/github-upload", "POST", {
-        file_path: "wp-content/plugins/" + file.name,
-        content_base64: b64,
-        commit_message: "Install plugin: " + pluginName,
-      });
-      if (res?.success) {
-        alert(pluginName + " 플러그인이 업로드되었습니다. GitHub Actions가 처리 중입니다.");
-        renderPlugins();
-      } else {
-        alert("업로드 실패: " + (res?.message || "알 수 없는 오류"));
-      }
+    document.getElementById('save-post').onclick = async () => {
+      const title   = document.getElementById('post-title').value;
+      const content = document.getElementById('post-content').value;
+      const status  = document.getElementById('post-status').value;
+      const ep = postType === 'page' ? 'pages' : 'posts';
+      try {
+        const saved = postId
+          ? await apiFetch(\`\${WP_API}/wp/v2/\${ep}/\${postId}\`, { method:'POST', body: JSON.stringify({title,content,status}) })
+          : await apiFetch(\`\${WP_API}/wp/v2/\${ep}\`, { method:'POST', body: JSON.stringify({title,content,status}) });
+        alert('저장되었습니다!');
+        location.href = \`/wp-admin/post.php?post=\${saved.id}&action=edit\`;
+      } catch(e) { alert('저장 실패: ' + e.message); }
     };
-    reader.readAsDataURL(file);
-  };
-  input.click();
-}
+  }
+  else if (page === 'upload.php') {
+    const media = await apiFetch(\`\${WP_API}/wp/v2/media?per_page=20\`).catch(() => []);
+    app.innerHTML = \`
+      <div class="wrap">
+        <h1>미디어 라이브러리</h1>
+        <input type="file" id="media-upload" accept="image/*,video/*,audio/*" style="margin:16px 0;">
+        <button onclick="uploadMedia()" style="padding:6px 16px;background:#2271b1;color:#fff;border:none;border-radius:4px;cursor:pointer;">업로드</button>
+        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px;margin-top:20px;">
+          \${media.map(m => \`<div style="border:1px solid #c3c4c7;border-radius:4px;overflow:hidden;">
+            \${m.media_type==='image' ? \`<img src="\${m.source_url}" style="width:100%;height:120px;object-fit:cover;">\` : \`<div style="height:120px;background:#f6f7f7;display:flex;align-items:center;justify-content:center;font-size:32px;">📄</div>\`}
+            <div style="padding:8px;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">\${m.title.rendered}</div>
+          </div>\`).join('') || '<p style="color:#646970;">미디어가 없습니다.</p>'}
+        </div>
+      </div>\`;
 
-// ── 테마 관리 ─────────────────────────────────────────────────────────────────
-async function renderThemes() {
-  const themes = await cpApi("/themes");
-  const cards = (Array.isArray(themes) ? themes : []).map(t => {
-    const isActive = t.status === "active";
-    return \`<div class="theme \${isActive?"active":""}" style="border:2px solid \${isActive?"#2271b1":"#c3c4c7"};border-radius:4px;overflow:hidden;position:relative;background:#fff;">
-      <div class="theme-screenshot" style="background:#f0f0f1;aspect-ratio:4/3;display:flex;align-items:center;justify-content:center;font-size:40px;">🎨</div>
-      <div class="theme-id-container" style="padding:10px;">
-        <h3 class="theme-name">\${cpEscape(t.name?.rendered || t.stylesheet)}</h3>
-        \${isActive
-          ? \`<span class="button button-primary button-small disabled">현재 테마</span>
-             <a href="#" class="button button-small" onclick="renderEditor(null);return false;" style="margin-left:4px;">커스터마이즈</a>\`
-          : \`<button class="button button-primary button-small" onclick="cpActivateTheme('\${cpEscape(t.stylesheet)}')">활성화</button>\`}
-      </div>
-      \${isActive ? '<span class="active-badge" style="position:absolute;top:8px;left:8px;background:#2271b1;color:#fff;padding:2px 8px;border-radius:3px;font-size:11px;">현재 테마</span>' : ""}
-    </div>\`}).join("");
-
-  cpRender(\`
-    <h1 class="wp-heading-inline">테마</h1>
-    <a class="page-title-action" href="#" onclick="cpUploadTheme();return false;">새 테마 추가</a>
-    <hr class="wp-header-end">
-    <div class="cloudpress-notice">
-      <strong>테마 설치 방법:</strong> GitHub 저장소의 <code>wp-content/themes/</code> 폴더에 테마 파일을 업로드하거나,
-      "새 테마 추가" 버튼으로 ZIP 파일을 직접 업로드하세요. 모든 WordPress 테마가 무료로 사용 가능합니다.
-    </div>
-    <div class="theme-browser" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:16px;">
-      \${cards || "<p>설치된 테마가 없습니다.</p>"}
-    </div>
-  \`);
-}
-
-async function cpActivateTheme(stylesheet) {
-  await cpApi(\`/themes/\${encodeURIComponent(stylesheet)}\`, "POST", { status: "active" });
-  renderThemes();
-}
-
-function cpUploadTheme() {
-  const input = document.createElement("input");
-  input.type = "file"; input.accept = ".zip";
-  input.onchange = async (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = async (ev) => {
-      const b64 = ev.target.result.split(",")[1];
-      const themeName = file.name.replace(/\\.zip$/, "");
-      const res = await cpApiCP("/github-upload", "POST", {
-        file_path: "wp-content/themes/" + file.name,
-        content_base64: b64,
-        commit_message: "Install theme: " + themeName,
+    window.uploadMedia = async () => {
+      const file = document.getElementById('media-upload').files[0];
+      if (!file) return;
+      const token = getToken();
+      const res   = await fetch(\`\${WP_API}/wp/v2/media\`, {
+        method: 'POST',
+        headers: { 'Authorization': 'Bearer ' + decodeURIComponent(token), 'Content-Disposition': \`attachment; filename="\${file.name}"\`, 'Content-Type': file.type },
+        body: file,
       });
-      if (res?.success) {
-        alert(themeName + " 테마가 업로드되었습니다.");
-        renderThemes();
-      } else {
-        alert("업로드 실패: " + (res?.message || "알 수 없는 오류"));
-      }
+      if (res.ok) { alert('업로드 완료!'); location.reload(); }
+      else alert('업로드 실패');
     };
-    reader.readAsDataURL(file);
-  };
-  input.click();
-}
-
-// ── 설정 ──────────────────────────────────────────────────────────────────────
-async function renderSettings(section = "general") {
-  const settings = await cpApi("/settings");
-  if (!settings) return;
-
-  let content = "";
-  if (section === "general") {
-    content = \`
-      <table class="form-table" role="presentation">
-        <tr><th>사이트 제목</th><td><input type="text" id="s-blogname" value="\${cpEscape(settings.title)}" class="regular-text"></td></tr>
-        <tr><th>태그라인</th><td><input type="text" id="s-blogdescription" value="\${cpEscape(settings.description)}" class="regular-text"><p class="description">사이트를 간략히 설명해 주세요.</p></td></tr>
-        <tr><th>WordPress 주소</th><td><input type="text" id="s-siteurl" value="\${cpEscape(settings.url)}" class="regular-text" readonly></td></tr>
-        <tr><th>이메일 주소</th><td><input type="email" id="s-admin_email" value="\${cpEscape(settings.email)}" class="regular-text"></td></tr>
-        <tr><th>타임존</th>
-          <td><select id="s-timezone_string">
-            <option value="Asia/Seoul" \${settings.timezone==="Asia/Seoul"?"selected":""}>서울 (UTC+9)</option>
-            <option value="UTC" \${settings.timezone==="UTC"?"selected":""}>UTC</option>
-            <option value="America/New_York" \${settings.timezone==="America/New_York"?"selected":""}>뉴욕 (UTC-5)</option>
-          </select></td></tr>
-        <tr><th>날짜 형식</th><td><input type="text" id="s-date_format" value="\${cpEscape(settings.date_format)}" class="regular-text"></td></tr>
-        <tr><th>시간 형식</th><td><input type="text" id="s-time_format" value="\${cpEscape(settings.time_format)}" class="regular-text"></td></tr>
-      </table>
-      <button class="button button-primary" onclick="cpSaveSettings()">변경 사항 저장</button>
-      <span id="cp-settings-result" style="margin-left:8px;color:#2271b1;"></span>
-    \`;
-  } else if (section === "reading") {
-    content = \`
-      <table class="form-table">
-        <tr><th>페이지당 표시</th><td><input type="number" id="s-posts_per_page" value="\${settings.posts_per_page}" class="small-text"> 개 게시물</td></tr>
-      </table>
-      <button class="button button-primary" onclick="cpSaveSettings()">변경 사항 저장</button>
-    \`;
-  } else if (section === "permalink") {
-    content = \`
-      <p>고유주소 구조를 설정합니다.</p>
-      <table class="form-table">
-        <tr><th>고유주소 구조</th>
-          <td>
-            <label><input type="radio" name="perm" value="/%postname%/" \${settings.permalink_structure==="/%postname%/"?"checked":""}> <code>/%postname%/</code> (게시물 이름)</label><br>
-            <label><input type="radio" name="perm" value="/%year%/%monthnum%/%day%/%postname%/" \${settings.permalink_structure.includes("%year%")?"checked":""}> <code>/%year%/%monthnum%/%day%/%postname%/</code> (날짜와 이름)</label><br>
-            <label><input type="radio" name="perm" value="/?p=%post_id%" \${settings.permalink_structure==="/?p=%post_id%"?"checked":""}> <code>/?p=%post_id%</code> (기본)</label>
-          </td>
-        </tr>
-      </table>
-      <button class="button button-primary" onclick="cpSaveSettings()">변경 사항 저장</button>
-    \`;
   }
+  else if (page === 'edit-comments.php') {
+    const comments = await apiFetch(\`\${WP_API}/wp/v2/comments?per_page=20\`).catch(() => []);
+    app.innerHTML = \`
+      <div class="wrap">
+        <h1>댓글</h1>
+        <table style="width:100%;background:#fff;border:1px solid #c3c4c7;border-collapse:collapse;margin-top:16px;">
+          <thead><tr style="background:#f6f7f7;"><th style="padding:8px 12px;text-align:left;border-bottom:1px solid #c3c4c7;">작성자</th><th style="padding:8px 12px;text-align:left;border-bottom:1px solid #c3c4c7;">내용</th><th style="padding:8px 12px;text-align:left;border-bottom:1px solid #c3c4c7;">날짜</th></tr></thead>
+          <tbody>
+            \${comments.map(c => \`<tr><td style="padding:8px 12px;border-bottom:1px solid #f0f0f1;">\${c.author_name}</td><td style="padding:8px 12px;border-bottom:1px solid #f0f0f1;">\${c.content.rendered}</td><td style="padding:8px 12px;border-bottom:1px solid #f0f0f1;">\${(c.date||'').slice(0,10)}</td></tr>\`).join('') || '<tr><td colspan="3" style="padding:20px;text-align:center;color:#646970;">댓글이 없습니다.</td></tr>'}
+          </tbody>
+        </table>
+      </div>\`;
+  }
+  else if (page === 'options-general.php') {
+    const settings = await apiFetch(\`\${WP_API}/wp/v2/settings\`).catch(() => ({}));
+    app.innerHTML = \`
+      <div class="wrap">
+        <h1>일반 설정</h1>
+        <table style="background:#fff;border:1px solid #c3c4c7;border-collapse:collapse;width:100%;max-width:700px;margin-top:16px;">
+          \${[
+            ['사이트 제목','title','text',settings.title||''],
+            ['태그라인','description','text',settings.description||''],
+            ['관리자 이메일','email','email',settings.email||''],
+            ['타임존','timezone','text',settings.timezone||'Asia/Seoul'],
+            ['페이지당 글 수','posts_per_page','number',settings.posts_per_page||10],
+          ].map(([label,name,type,val]) => \`<tr>
+            <th style="padding:12px 16px;text-align:left;border-bottom:1px solid #f0f0f1;width:200px;background:#f6f7f7;">\${label}</th>
+            <td style="padding:12px 16px;border-bottom:1px solid #f0f0f1;"><input type="\${type}" id="s-\${name}" value="\${val}" style="padding:6px;border:1px solid #8c8f94;border-radius:4px;width:300px;"></td>
+          </tr>\`).join('')}
+        </table>
+        <p style="margin-top:16px;"><button id="save-settings" style="padding:8px 16px;background:#2271b1;color:#fff;border:none;border-radius:4px;cursor:pointer;">변경 사항 저장</button></p>
+      </div>\`;
 
-  cpRender(\`
-    <h1>설정 — \${section==="general"?"일반":section==="reading"?"읽기":section==="permalink"?"고유주소":"기타"}</h1>
-    <hr class="wp-header-end">
-    <form id="cp-settings-form" onsubmit="return false;">
-      \${content}
-    </form>
-  \`);
+    document.getElementById('save-settings').onclick = async () => {
+      const data = {};
+      ['title','description','email','timezone','posts_per_page'].forEach(k => {
+        const el = document.getElementById('s-' + k);
+        if (el) data[k] = k === 'posts_per_page' ? parseInt(el.value) : el.value;
+      });
+      try {
+        await apiFetch(\`\${WP_API}/wp/v2/settings\`, { method:'POST', body: JSON.stringify(data) });
+        alert('저장되었습니다!');
+      } catch(e) { alert('저장 실패: ' + e.message); }
+    };
+  }
+  else if (page === 'themes.php') {
+    const themes = await apiFetch(\`\${WP_API}/wp/v2/themes\`).catch(() => []);
+    app.innerHTML = \`
+      <div class="wrap">
+        <h1>테마</h1>
+        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:16px;margin-top:16px;">
+          \${themes.map(t => \`<div style="background:#fff;border:\${t.status==='active'?'2px solid #2271b1':'1px solid #c3c4c7'};border-radius:4px;overflow:hidden;">
+            <div style="padding:16px;">
+              <div style="font-weight:700;">\${t.name.rendered}</div>
+              \${t.status==='active' ? '<div style="color:#2271b1;font-size:12px;margin-top:4px;">✓ 활성화됨</div>' : \`<button onclick="activateTheme('\${t.stylesheet}')" style="margin-top:8px;padding:4px 12px;background:#f0f0f1;border:1px solid #c3c4c7;border-radius:3px;cursor:pointer;font-size:12px;">활성화</button>\`}
+            </div>
+          </div>\`).join('') || '<p style="color:#646970;">테마가 없습니다.</p>'}
+        </div>
+      </div>\`;
+
+    window.activateTheme = async (stylesheet) => {
+      try {
+        await apiFetch(\`\${WP_API}/wp/v2/themes/\${stylesheet}\`, { method:'POST', body: JSON.stringify({status:'active'}) });
+        alert('테마가 활성화되었습니다!');
+        location.reload();
+      } catch(e) { alert('실패: ' + e.message); }
+    };
+  }
+  else if (page === 'plugins.php') {
+    const plugins = await apiFetch(\`\${WP_API}/wp/v2/plugins\`).catch(() => []);
+    app.innerHTML = \`
+      <div class="wrap">
+        <h1>플러그인</h1>
+        <table style="width:100%;background:#fff;border:1px solid #c3c4c7;border-collapse:collapse;margin-top:16px;">
+          <thead><tr style="background:#f6f7f7;"><th style="padding:8px 12px;text-align:left;border-bottom:1px solid #c3c4c7;">플러그인</th><th style="padding:8px 12px;text-align:left;border-bottom:1px solid #c3c4c7;">상태</th><th style="padding:8px 12px;border-bottom:1px solid #c3c4c7;">작업</th></tr></thead>
+          <tbody>
+            \${plugins.map(p => \`<tr>
+              <td style="padding:8px 12px;border-bottom:1px solid #f0f0f1;font-weight:600;">\${p.name}</td>
+              <td style="padding:8px 12px;border-bottom:1px solid #f0f0f1;">\${p.status === 'active' ? '<span style="color:#00a32a;">활성화됨</span>' : '<span style="color:#646970;">비활성화됨</span>'}</td>
+              <td style="padding:8px 12px;border-bottom:1px solid #f0f0f1;">
+                \${p.status === 'active'
+                  ? \`<button onclick="togglePlugin('\${encodeURIComponent(p.plugin)}','inactive')" style="padding:4px 12px;cursor:pointer;">비활성화</button>\`
+                  : \`<button onclick="togglePlugin('\${encodeURIComponent(p.plugin)}','active')" style="padding:4px 12px;background:#2271b1;color:#fff;border:none;border-radius:3px;cursor:pointer;">활성화</button>\`}
+              </td>
+            </tr>\`).join('') || '<tr><td colspan="3" style="padding:20px;text-align:center;color:#646970;">플러그인이 없습니다. GitHub 레포에 wp-content/plugins/ 폴더를 추가하세요.</td></tr>'}
+          </tbody>
+        </table>
+      </div>\`;
+
+    window.togglePlugin = async (plugin, status) => {
+      try {
+        await apiFetch(\`\${WP_API}/wp/v2/plugins/\${plugin}\`, { method:'PUT', body: JSON.stringify({status}) });
+        location.reload();
+      } catch(e) { alert('실패: ' + e.message); }
+    };
+  }
+  else if (page === 'users.php') {
+    const users = await apiFetch(\`\${WP_API}/wp/v2/users\`).catch(() => []);
+    app.innerHTML = \`
+      <div class="wrap">
+        <h1>사용자</h1>
+        <table style="width:100%;background:#fff;border:1px solid #c3c4c7;border-collapse:collapse;margin-top:16px;">
+          <thead><tr style="background:#f6f7f7;"><th style="padding:8px 12px;text-align:left;border-bottom:1px solid #c3c4c7;">사용자</th><th style="padding:8px 12px;text-align:left;border-bottom:1px solid #c3c4c7;">이름</th></tr></thead>
+          <tbody>
+            \${users.map(u => \`<tr>
+              <td style="padding:8px 12px;border-bottom:1px solid #f0f0f1;">\${u.slug}</td>
+              <td style="padding:8px 12px;border-bottom:1px solid #f0f0f1;">\${u.name}</td>
+            </tr>\`).join('')}
+          </tbody>
+        </table>
+      </div>\`;
+  }
+  else {
+    app.innerHTML = \`<div class="wrap"><h1>페이지를 찾을 수 없습니다</h1><p><a href="/wp-admin/">알림판으로 이동</a></p></div>\`;
+  }
 }
 
-async function cpSaveSettings() {
-  const data = {};
-  ["blogname","blogdescription","admin_email","timezone_string","date_format","time_format","posts_per_page"].forEach(k => {
-    const el = document.getElementById("s-" + k);
-    if (el) data[k.replace("blogname","title").replace("blogdescription","description").replace("admin_email","email").replace("timezone_string","timezone")] = el.value;
-  });
-  const radios = document.querySelectorAll("[name='perm']");
-  for (const r of radios) { if (r.checked) { data.permalink_structure = r.value; break; } }
-  await cpApi("/settings", "POST", data);
-  const el = document.getElementById("cp-settings-result");
-  if (el) { el.textContent = "✓ 저장되었습니다."; setTimeout(()=>el.textContent="",3000); }
-}
+// 로그아웃
+document.getElementById('wp-logout-btn').onclick = async (e) => {
+  e.preventDefault();
+  await fetch(CP_API + '/token/logout', { method:'POST' });
+  location.href = '/wp-login.php';
+};
 
-// ── 사용자 ────────────────────────────────────────────────────────────────────
-async function renderUsers() {
-  const users = await cpApi("/users");
-  const rows = (Array.isArray(users) ? users : []).map(u => \`
-    <tr>
-      <td><input type="checkbox"></td>
-      <td class="column-username has-row-actions"><strong>\${cpEscape(u.name)}</strong>
-        <div class="row-actions"><span><a href="#">프로필 수정</a></span></div>
-      </td>
-      <td>\${cpEscape(u.roles?.join(", ") || "")}</td>
-      <td>-</td>
-    </tr>\`).join("");
-
-  cpRender(\`
-    <h1>사용자</h1>
-    <hr class="wp-header-end">
-    <table class="wp-list-table widefat fixed striped users">
-      <thead><tr>
-        <th style="width:30px;"><input type="checkbox"></th>
-        <th>사용자 이름</th><th>역할</th><th>게시물</th>
-      </tr></thead>
-      <tbody>\${rows || "<tr><td colspan='4' style='text-align:center;padding:20px;'>사용자가 없습니다.</td></tr>"}</tbody>
-    </table>
-  \`);
-}
-
-// ── 라우터 ────────────────────────────────────────────────────────────────────
-function cpRoute(page) {
-  history.pushState({page}, "", CP_ADMIN_URL + page);
-  cpDispatch(page);
-}
-
-function cpDispatch(page) {
-  const p = page || CP_PAGE;
-  if (!p || p === "index.php" || p === "") return renderDashboard();
-  if (p.startsWith("edit.php?post_type=page") || p === "edit-pages.php") return renderPosts("page");
-  if (p.startsWith("edit.php") || p === "edit-posts.php") return renderPosts("post");
-  if (p.startsWith("post-new.php?post_type=page")) return renderEditor(null, "page");
-  if (p.startsWith("post-new.php")) return renderEditor(null, "post");
-  if (p.startsWith("upload.php")) return renderMedia();
-  if (p.startsWith("edit-comments.php")) return renderComments();
-  if (p.startsWith("plugins.php")) return renderPlugins();
-  if (p.startsWith("themes.php")) return renderThemes();
-  if (p.startsWith("users.php")) return renderUsers();
-  if (p.startsWith("options-general.php")) return renderSettings("general");
-  if (p.startsWith("options-reading.php")) return renderSettings("reading");
-  if (p.startsWith("options-permalink.php")) return renderSettings("permalink");
-  if (p.startsWith("profile.php")) return renderUsers();
-  renderDashboard();
-}
-
-// ── 메뉴 링크 연결 ─────────────────────────────────────────────────────────────
-document.addEventListener("DOMContentLoaded", () => {
-  document.querySelectorAll("#adminmenu a[data-cp]").forEach(a => {
-    a.addEventListener("click", e => {
-      e.preventDefault();
-      document.querySelectorAll("#adminmenu li").forEach(li => li.classList.remove("current", "wp-has-current-submenu"));
-      a.closest("li.wp-has-submenu")?.classList.add("wp-has-current-submenu");
-      a.closest("li:not(.wp-has-submenu)")?.classList.add("current");
-      cpDispatch(a.dataset.cp);
+// 인증 확인 후 렌더링
+fetch(CP_API + '/token/validate', {
+  method: 'POST',
+  headers: getToken() ? { 'Authorization': 'Bearer ' + decodeURIComponent(getToken()) } : {},
+}).then(r => r.json()).then(d => {
+  if (d.code !== 'jwt_auth_valid_token') {
+    location.href = '/wp-login.php?redirect_to=' + encodeURIComponent(location.href);
+  } else {
+    renderPage().catch(e => {
+      console.error(e);
+      document.getElementById('cp-loading').classList.add('hidden');
+      document.getElementById('cp-admin-app').innerHTML = '<div class="wrap"><div class="notice notice-error"><p>오류: ' + e.message + '</p></div></div>';
     });
-  });
-
-  // 초기 페이지 렌더링
-  const token = cpGetToken();
-  if (!token) {
-    cpShowLogin();
-    return;
   }
-  // 토큰 검증
-  cpApiCP("/token/validate", "POST").then(r => {
-    if (!r || r.code !== "jwt_auth_valid_token") {
-      cpShowLogin();
-    } else {
-      cpDispatch(CP_PAGE);
-    }
-  });
-});
-
-window.onpopstate = (e) => { if(e.state?.page) cpDispatch(e.state.page); };
+}).catch(() => { location.href = '/wp-login.php'; });
 </script>
 </body>
 </html>`;
 }
 
-function buildAdminMenu(currentPage, wpAdminUrl) {
-  const items = [
-    { icon: "📊", label: "대시보드", page: "index.php", sub: [
-      { label: "홈", page: "index.php" },
-    ]},
-    { icon: "📝", label: "게시물", page: "edit.php", sub: [
-      { label: "모든 게시물", page: "edit.php" },
-      { label: "새 게시물 추가", page: "post-new.php" },
-      { label: "카테고리", page: "edit-tags.php?taxonomy=category" },
-      { label: "태그", page: "edit-tags.php?taxonomy=post_tag" },
-    ]},
-    { icon: "🖼", label: "미디어", page: "upload.php", sub: [
-      { label: "라이브러리", page: "upload.php" },
-      { label: "새 미디어 추가", page: "media-new.php" },
-    ]},
-    { icon: "📄", label: "페이지", page: "edit.php?post_type=page", sub: [
-      { label: "모든 페이지", page: "edit.php?post_type=page" },
-      { label: "새 페이지 추가", page: "post-new.php?post_type=page" },
-    ]},
-    { icon: "💬", label: "댓글", page: "edit-comments.php", sub: [] },
-    { icon: "🎨", label: "테마", page: "themes.php", sub: [
-      { label: "테마", page: "themes.php" },
-      { label: "커스터마이즈", page: "customize.php" },
-      { label: "위젯", page: "widgets.php" },
-      { label: "메뉴", page: "nav-menus.php" },
-    ]},
-    { icon: "🔌", label: "플러그인", page: "plugins.php", sub: [
-      { label: "설치된 플러그인", page: "plugins.php" },
-      { label: "새 플러그인 추가", page: "plugin-install.php" },
-    ]},
-    { icon: "👤", label: "사용자", page: "users.php", sub: [
-      { label: "모든 사용자", page: "users.php" },
-      { label: "새 사용자 추가", page: "user-new.php" },
-      { label: "내 프로필", page: "profile.php" },
-    ]},
-    { icon: "🛠", label: "도구", page: "tools.php", sub: [
-      { label: "사용 가능한 도구", page: "tools.php" },
-      { label: "가져오기", page: "import.php" },
-      { label: "내보내기", page: "export.php" },
-    ]},
-    { icon: "⚙️", label: "설정", page: "options-general.php", sub: [
-      { label: "일반", page: "options-general.php" },
-      { label: "쓰기", page: "options-writing.php" },
-      { label: "읽기", page: "options-reading.php" },
-      { label: "토론", page: "options-discussion.php" },
-      { label: "미디어", page: "options-media.php" },
-      { label: "고유주소", page: "options-permalink.php" },
-      { label: "개인정보", page: "options-privacy.php" },
-    ]},
-  ];
-
-  return items.map(item => {
-    const isCurrent = currentPage?.startsWith(item.page.split("?")[0]);
-    const subItems = item.sub.map(s =>
-      `<li class="${currentPage === s.page ? "current" : ""}">
-        <a href="#" data-cp="${s.page}" class="menu-item">${s.label}</a>
-      </li>`
-    ).join("");
-
-    return `<li class="wp-has-submenu wp-not-current-submenu menu-top menu-icon-${item.page.replace(/[^a-z]/g,"")} ${isCurrent ? "wp-has-current-submenu wp-menu-open" : ""}">
-      <a href="#" data-cp="${item.page}" class="wp-has-submenu wp-not-current-submenu menu-top menu-icon-${item.page.replace(/[^a-z]/g,"")} toplevel_page_${item.page.replace(/[^a-z]/g,"")}">
-        <div class="wp-menu-arrow"><div></div></div>
-        <div class="wp-menu-image dashicons-before" aria-hidden="true" style="font-style:normal;">${item.icon}</div>
-        <div class="wp-menu-name">${item.label}</div>
-      </a>
-      ${subItems ? `<ul class="wp-submenu wp-submenu-wrap">${subItems}</ul>` : ""}
-    </li>`;
-  }).join("");
+// ─── WordPress 로그인 페이지 ─────────────────────────────────────────────────
+function buildLoginPage(siteUrl, blogname, error = "") {
+  return `<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>로그인 — ${blogname}</title>
+<link rel="stylesheet" href="/wp-admin/css/wp-admin.min.css">
+<style>
+body { background:#f0f0f1; display:flex; align-items:center; justify-content:center; min-height:100vh; margin:0; font-family:-apple-system,BlinkMacSystemFont,sans-serif; }
+#login { width:320px; }
+#login h1 a { display:block; text-align:center; font-size:24px; font-weight:800; color:#1d2327; text-decoration:none; margin-bottom:20px; }
+#loginform { background:#fff; padding:26px; border:1px solid #c3c4c7; border-radius:4px; box-shadow:0 1px 3px rgba(0,0,0,.04); }
+#loginform label { display:block; font-size:14px; font-weight:600; margin-bottom:4px; }
+#loginform input[type=text],
+#loginform input[type=password] { width:100%; padding:8px; border:1px solid #8c8f94; border-radius:4px; font-size:15px; margin-bottom:14px; box-sizing:border-box; }
+#wp-submit { width:100%; padding:10px; background:#2271b1; color:#fff; border:none; border-radius:4px; cursor:pointer; font-size:14px; font-weight:600; }
+#wp-submit:hover { background:#135e96; }
+.login-error { background:#fff; border-left:4px solid #d63638; padding:12px; margin-bottom:16px; border-radius:4px; font-size:14px; }
+</style>
+</head>
+<body>
+<div id="login">
+  <h1><a href="${siteUrl}">${blogname}</a></h1>
+  ${error ? `<div class="login-error">${error}</div>` : ""}
+  <form id="loginform" method="post">
+    <label for="user_login">아이디 또는 이메일</label>
+    <input id="user_login" type="text" name="log" autocomplete="username" autofocus>
+    <label for="user_pass">비밀번호</label>
+    <input id="user_pass" type="password" name="pwd" autocomplete="current-password">
+    <input id="wp-submit" type="submit" value="로그인">
+  </form>
+</div>
+<script>
+document.getElementById('loginform').addEventListener('submit', async function(e) {
+  e.preventDefault();
+  const username = document.getElementById('user_login').value;
+  const password = document.getElementById('user_pass').value;
+  const btn      = document.getElementById('wp-submit');
+  btn.value = '로그인 중...'; btn.disabled = true;
+  try {
+    const res = await fetch('/wp-json/cloudpress/v1/token', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({username, password}),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.message || '로그인 실패');
+    const redirect = new URLSearchParams(location.search).get('redirect_to') || '/wp-admin/';
+    location.href = redirect;
+  } catch(err) {
+    document.querySelector('.login-error')?.remove();
+    const errDiv = document.createElement('div');
+    errDiv.className = 'login-error';
+    errDiv.textContent = err.message;
+    document.getElementById('loginform').before(errDiv);
+    btn.value = '로그인'; btn.disabled = false;
+  }
+});
+</script>
+</body>
+</html>`;
 }
 
-// ─── WordPress 로그인 페이지 ──────────────────────────────────────────────────
+// ─── 프론트엔드 WordPress 렌더링 ─────────────────────────────────────────────
+async function buildFrontPage(env, url) {
+  const siteUrl   = await getOption(env, "siteurl")         || `${url.protocol}//${url.host}`;
+  const blogname  = await getOption(env, "blogname")        || "WordPress 사이트";
+  const blogdesc  = await getOption(env, "blogdescription") || "";
 
-async function buildLoginPage(env, url, errorMsg = "") {
-  const siteUrl  = await getOption(env, "siteurl") || `${url.protocol}//${url.host}`;
-  const blogname = await getOption(env, "blogname") || "WordPress 사이트";
-  // Worker 경로로 서빙 - Worker가 중간에서 올바른 Content-Type(text/css)으로 프록시
-  const wpCoreCss = `/wp-login.css`;
+  const path    = url.pathname.replace(/\/$/, "") || "/";
+  const d       = db(env);
+
+  // 특정 페이지 slug 체크
+  if (path !== "/" && d) {
+    const post = await d.prepare(
+      "SELECT * FROM wp_posts WHERE post_name=? AND post_status='publish' LIMIT 1"
+    ).bind(path.replace(/^\//, "")).first().catch(() => null);
+    if (post) {
+      return buildPostHtml(post, siteUrl, blogname, blogdesc);
+    }
+  }
+
+  // 메인 페이지: 최근 글 목록
+  const posts = d ? (await d.prepare(
+    "SELECT * FROM wp_posts WHERE post_status='publish' AND post_type='post' ORDER BY post_date DESC LIMIT 10"
+  ).all().catch(() => ({ results: [] }))).results || [] : [];
+
+  const postsHtml = posts.length === 0
+    ? `<p style="color:#6b7280;padding:40px;text-align:center;">아직 작성된 글이 없습니다.</p>`
+    : posts.map(p => `
+        <article style="background:#fff;border-radius:8px;padding:24px;border:1px solid #e5e7eb;margin-bottom:16px;">
+          <h2 style="margin:0 0 8px;"><a href="/${p.post_name}/" style="color:#1d2327;text-decoration:none;">${p.post_title}</a></h2>
+          <div style="color:#6b7280;font-size:13px;margin-bottom:12px;">${(p.post_date||"").slice(0,10)}</div>
+          <div style="color:#374151;line-height:1.6;">${(p.post_excerpt || p.post_content || "").slice(0,200).replace(/<[^>]*>/g,"")}${p.post_content?.length > 200 ? "..." : ""}</div>
+          <a href="/${p.post_name}/" style="display:inline-block;margin-top:12px;color:#2271b1;text-decoration:none;font-size:14px;">더 읽기 →</a>
+        </article>`
+    ).join("");
 
   return `<!DOCTYPE html>
 <html lang="ko">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>로그인 &lsaquo; ${blogname} — WordPress</title>
-<link rel="stylesheet" href="${wpCoreCss}" id="login-css">
+<title>${blogname}</title>
+<meta name="description" content="${blogdesc}">
+<link rel="stylesheet" href="/wp-includes/css/dist/block-library/style.min.css">
 <style>
-.login #login { max-width:320px; padding:26px; }
-.login #loginform p.submit .button-primary { width:100%; float:none; font-size:14px; padding:8px; }
-body.login { background:#f0f0f1; }
-#login_error { margin-bottom:12px; }
+*{box-sizing:border-box}
+body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:#f9fafb;color:#1d2327;}
+header{background:#fff;border-bottom:1px solid #e5e7eb;padding:16px 0;}
+.container{max-width:800px;margin:0 auto;padding:0 16px;}
+nav a{color:#2271b1;text-decoration:none;margin-right:16px;font-size:14px;}
+nav a:hover{text-decoration:underline;}
+main{padding:32px 0;}
+footer{background:#fff;border-top:1px solid #e5e7eb;padding:16px;text-align:center;color:#6b7280;font-size:13px;margin-top:40px;}
 </style>
 </head>
-<body class="login no-js login-action-login wp-core-ui">
-<script>document.body.className = document.body.className.replace("no-js","js");</script>
-<div id="login">
-  <h1><a href="https://ko.wordpress.org/" title="WordPress 기반" tabindex="-1">WordPress</a></h1>
-  ${errorMsg ? `<div id="login_error" class="notice notice-error">${errorMsg}</div>` : ""}
-  <form name="loginform" id="loginform" action="${siteUrl}/wp-login.php" method="post">
-    <p>
-      <label for="user_login">사용자 이름 또는 이메일 주소</label>
-      <input type="text" name="log" id="user_login" class="input" value="" size="20" autocapitalize="none" autocomplete="username">
-    </p>
-    <p>
-      <label for="user_pass">비밀번호</label>
-      <input type="password" name="pwd" id="user_pass" class="input password-input" value="" size="20" autocomplete="current-password">
-    </p>
-    <p class="forgetmenot">
-      <label for="rememberme"><input name="rememberme" type="checkbox" id="rememberme" value="forever"> 로그인 상태 유지</label>
-    </p>
-    <p class="submit">
-      <input type="submit" name="wp-submit" id="wp-submit" class="button button-primary button-large" value="로그인">
-      <input type="hidden" name="redirect_to" value="${siteUrl}/wp-admin/">
-      <input type="hidden" name="testcookie" value="1">
-    </p>
-  </form>
-  <p id="nav">
-    <a href="${siteUrl}/wp-login.php?action=lostpassword">비밀번호를 잊으셨나요?</a>
-  </p>
-  <p id="backtoblog"><a href="${siteUrl}/">&larr; ${blogname}(으)로 이동</a></p>
-</div>
-<div class="language-switcher-section">
-  <form id="language-switcher" method="post">
-    <label for="language-switcher-locales">언어</label>
-    <select name="wp_lang" id="language-switcher-locales">
-      <option value="ko_KR" selected>한국어</option>
-      <option value="">English</option>
-    </select>
-    <input type="submit" class="button" value="변경">
-  </form>
-</div>
-<script>
-// wp-login.php POST 처리를 JS로 가로채기
-document.getElementById("loginform").addEventListener("submit", async function(e) {
-  e.preventDefault();
-  const username = document.getElementById("user_login").value;
-  const password = document.getElementById("user_pass").value;
-  const btn = document.getElementById("wp-submit");
-  btn.disabled = true; btn.value = "로그인 중...";
-
-  const res = await fetch("${siteUrl}/wp-json/cloudpress/v1/token", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ username, password }),
-    credentials: "include",
-  });
-  const data = await res.json();
-
-  if (data.token) {
-    localStorage.setItem("cp_token", data.token);
-    const redirect = new URLSearchParams(location.search).get("redirect_to") || "${siteUrl}/wp-admin/";
-    location.href = redirect;
-  } else {
-    btn.disabled = false; btn.value = "로그인";
-    let errEl = document.getElementById("login_error");
-    if (!errEl) {
-      errEl = document.createElement("div");
-      errEl.id = "login_error";
-      errEl.className = "notice notice-error";
-      document.getElementById("loginform").before(errEl);
-    }
-    errEl.textContent = data.message || "로그인 정보가 올바르지 않습니다.";
-  }
-});
-</script>
-</body>
-</html>`;
-}
-
-// ─── WordPress 프론트 렌더링 (SPA 방식) ──────────────────────────────────────
-
-async function buildFrontPage(env, url, request) {
-  const d         = db(env);
-  const siteUrl   = await getOption(env, "siteurl")        || `${url.protocol}//${url.host}`;
-  const blogname  = await getOption(env, "blogname")       || "WordPress 사이트";
-  const tagline   = await getOption(env, "blogdescription")|| "";
-  const template  = await getOption(env, "stylesheet")     || "twentytwentyfour";
-  const permalink = await getOption(env, "permalink_structure") || "/%postname%/";
-
-  // 페이지 캐시 확인
-  const cacheKey = `front:${url.pathname}${url.search}`;
-  const cached   = await kvGet(env, cacheKey);
-  if (cached) {
-    return new Response(cached, {
-      headers: { ...CORS, "Content-Type": "text/html; charset=utf-8", "X-Cache": "HIT", "Cache-Control": "public, max-age=60" },
-    });
-  }
-
-  // 테마 스타일시트 (GitHub 레포에서)
-  const owner = ghOwner(env);
-  const repo  = ghRepo(env);
-  const themeStyleUrl = (owner && repo)
-    ? `https://raw.githubusercontent.com/${owner}/${repo}/main/wp-content/themes/${template}/style.css`
-    : `${WP_GITHUB_RAW}/wp-content/themes/${template}/style.css`;
-
-  // 게시물 조회
-  let posts = [];
-  let currentPost = null;
-  const slug = url.pathname.replace(/^\/|\/$/g, "");
-
-  if (slug && slug !== "index") {
-    // 특정 포스트/페이지
-    try {
-      const row = await d.prepare("SELECT * FROM wp_posts WHERE (post_name=? OR ID=?) AND post_status='publish' LIMIT 1")
-        .bind(slug, isNaN(slug) ? 0 : parseInt(slug)).first();
-      if (row) currentPost = row;
-    } catch {}
-  }
-
-  if (!currentPost) {
-    // 게시물 목록
-    try {
-      const perPage = parseInt(await getOption(env, "posts_per_page") || "10");
-      const page = parseInt(url.searchParams.get("paged") || "1");
-      const offset = (page-1)*perPage;
-      const r = await d.prepare("SELECT * FROM wp_posts WHERE post_type='post' AND post_status='publish' ORDER BY post_date DESC LIMIT ? OFFSET ?")
-        .bind(perPage, offset).all();
-      posts = r.results || [];
-    } catch {}
-  }
-
-  // 테마 CSS 로드 시도 (KV 캐시)
-  let themeCss = await kvGet(env, `theme-css:${template}`);
-  if (!themeCss) {
-    try {
-      const res = await fetch(themeStyleUrl, { cf: { cacheEverything: true, cacheTtl: 3600 } });
-      if (res.ok) {
-        themeCss = await res.text();
-        await kvSet(env, `theme-css:${template}`, themeCss, 3600);
-      }
-    } catch {}
-  }
-
-  const postHtml = currentPost
-    ? `<article id="post-${currentPost.ID}" class="post-${currentPost.ID} ${currentPost.post_type} type-${currentPost.post_type} status-publish hentry">
-        <header class="entry-header">
-          <h1 class="entry-title">${currentPost.post_title}</h1>
-          <div class="entry-meta">
-            <time class="entry-date published" datetime="${currentPost.post_date}">${new Date(currentPost.post_date).toLocaleDateString("ko-KR", {year:"numeric",month:"long",day:"numeric"})}</time>
-          </div>
-        </header>
-        <div class="entry-content">${currentPost.post_content || ""}</div>
-      </article>`
-    : posts.map(p => `
-        <article id="post-${p.ID}" class="post-${p.ID} post type-post status-publish hentry">
-          <header class="entry-header">
-            <h2 class="entry-title"><a href="${siteUrl}/${p.post_name}/" rel="bookmark">${p.post_title}</a></h2>
-            <div class="entry-meta">
-              <time class="entry-date published" datetime="${p.post_date}">${new Date(p.post_date).toLocaleDateString("ko-KR", {year:"numeric",month:"long",day:"numeric"})}</time>
-            </div>
-          </header>
-          <div class="entry-summary"><p>${(p.post_excerpt || p.post_content || "").replace(/<[^>]+>/g,"").slice(0,200)}${(p.post_content||"").length > 200 ? "..." : ""}</p></div>
-          <footer class="entry-footer">
-            <a href="${siteUrl}/${p.post_name}/" class="more-link">더 읽기 <span class="meta-nav">&rarr;</span></a>
-          </footer>
-        </article>`).join("\n");
-
-  const body = `<!DOCTYPE html>
-<html lang="ko" class="${template}">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>${currentPost ? currentPost.post_title + " — " : ""}${blogname}</title>
-<meta name="description" content="${tagline}">
-<link rel="stylesheet" href="${siteUrl}/wp-content/themes/${template}/style.css" id="theme-css">
-<link rel="stylesheet" href="/wp-includes/css/dist/block-library/style.min.css" id="wp-block-library-css">
-<style>
-/* WordPress デフォルトスタイル */
-body { margin:0; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Oxygen,Ubuntu,sans-serif; }
-.wp-site-blocks { min-height:100vh; }
-#page { max-width:1200px; margin:0 auto; padding:0 20px; }
-#masthead { padding:20px 0; border-bottom:1px solid #eee; margin-bottom:30px; }
-#masthead .site-branding h1 { margin:0; font-size:28px; }
-#masthead .site-branding h1 a { text-decoration:none; color:inherit; }
-#masthead .site-description { margin:4px 0 0; color:#666; font-size:14px; }
-#primary { max-width:800px; }
-article { margin-bottom:40px; padding-bottom:40px; border-bottom:1px solid #eee; }
-.entry-title { margin:0 0 8px; font-size:22px; }
-.entry-title a { text-decoration:none; color:#1d2327; }
-.entry-meta { color:#666; font-size:13px; margin-bottom:12px; }
-.entry-content { line-height:1.8; font-size:16px; }
-.more-link { color:#2271b1; }
-#colophon { margin-top:40px; padding:20px 0; border-top:1px solid #eee; color:#666; font-size:13px; text-align:center; }
-#wp-admin-bar-root-default { display:none; }
-</style>
-${themeCss ? `<style id="theme-inline-css">/* Theme: ${template} */\n${themeCss.slice(0, 50000)}</style>` : ""}
-</head>
-<body class="home blog wp-embed-responsive ${template}">
-<div id="page" class="site">
-  <header id="masthead" class="site-header">
-    <div class="site-branding">
-      <h1 class="site-title"><a href="${siteUrl}/" rel="home">${blogname}</a></h1>
-      ${tagline ? `<p class="site-description">${tagline}</p>` : ""}
-    </div>
-    <nav id="site-navigation" class="main-navigation">
-      <a class="menu-toggle" href="#primary-menu">메뉴</a>
-      <div id="primary-menu">
-        <ul>
-          <li><a href="${siteUrl}/">홈</a></li>
-          <li><a href="${siteUrl}/wp-admin/">관리자</a></li>
-        </ul>
-      </div>
+<body>
+<header>
+  <div class="container" style="display:flex;align-items:center;justify-content:space-between;">
+    <a href="/" style="font-size:20px;font-weight:700;color:#1d2327;text-decoration:none;">${blogname}</a>
+    <nav>
+      <a href="/">홈</a>
+      <a href="/wp-admin/">관리자</a>
     </nav>
-  </header>
-  <div id="content" class="site-content">
-    <div id="primary" class="content-area">
-      <main id="main" class="site-main" role="main">
-        ${postHtml || '<p style="text-align:center;padding:40px;color:#666;">아직 게시물이 없습니다.</p>'}
-      </main>
-    </div>
   </div>
-  <footer id="colophon" class="site-footer">
-    <div class="site-info">
-      <a href="${siteUrl}/">${blogname}</a>의 WordPress 사이트 &mdash;
-      <a href="https://ko.wordpress.org/">WordPress</a> 기반
-    </div>
-  </footer>
-</div>
-<script src="/wp-includes/js/wp-embed.min.js" defer></script>
+</header>
+<main>
+  <div class="container">
+    ${blogdesc ? `<p style="color:#6b7280;margin-bottom:24px;">${blogdesc}</p>` : ""}
+    ${postsHtml}
+  </div>
+</main>
+<footer>
+  <p>${blogname} &mdash; Powered by <a href="https://cloudpress.site" style="color:#2271b1;">CloudPress</a></p>
+</footer>
 </body>
 </html>`;
-
-  // 페이지 캐시 저장
-  await kvSet(env, cacheKey, body, 300);
-
-  return new Response(body, {
-    headers: { ...CORS, "Content-Type": "text/html; charset=utf-8", "Cache-Control": "public, max-age=60" },
-  });
 }
 
-// ─── 메인 fetch 핸들러 ────────────────────────────────────────────────────────
-
-export default {
-  async fetch(request, env) {
-    const url    = new URL(request.url);
-    const method = request.method.toUpperCase();
-
-    // CORS 프리플라이트
-    if (method === "OPTIONS") {
-      return new Response(null, { status: 204, headers: CORS });
-    }
-
-    // 헬스체크
-    if (url.pathname === "/_health" || url.pathname === "/api/health") {
-      const installed = await isWpInstalled(env);
-      return json({
-        status:    "ok",
-        version:   "6.0.0",
-        engine:    "cloudpress-native-js",
-        php:       "none (native JS engine)",
-        wp_version:"6.7.2",
-        installed,
-        db:        !!(db(env)),
-        kv:        !!(kv(env)),
-        github:    !!(ghOwner(env) && ghRepo(env)),
-        siteId:    siteId(env),
-        ts:        new Date().toISOString(),
-      });
-    }
-
-    // ── REST API ─────────────────────────────────────────────────────────────
-    if (url.pathname.startsWith("/wp-json")) {
-      return handleRestApi(request, env, url);
-    }
-
-    // ── WordPress 설치 확인 + 자동 설치 ─────────────────────────────────────
-    let installed = await isWpInstalled(env);
-    if (!installed) {
-      // DB가 연결돼 있으면 즉시 자동 초기화 시도
-      if (db(env)) {
-        const ok = await autoInstallWordPress(env, url);
-        if (ok) {
-          installed = true;
-        } else {
-          return buildReadyPage(env, url);
-        }
-      } else {
-        return buildReadyPage(env, url);
-      }
-    }
-
-    // ── 관리자 UI ────────────────────────────────────────────────────────────
-    if (url.pathname.startsWith("/wp-admin")) {
-      const user = await getAuthUser(request, env);
-      if (!user && !url.pathname.includes("wp-login")) {
-        const loginUrl = `${url.protocol}//${url.host}/wp-login.php?redirect_to=${encodeURIComponent(url.href)}`;
-        return new Response(null, { status: 302, headers: { "Location": loginUrl } });
-      }
-      const adminHtml = await buildAdminPage(env, url, user);
-      return html(adminHtml);
-    }
-
-    // ── 로그인 페이지 ────────────────────────────────────────────────────────
-    if (url.pathname === "/wp-login.php") {
-      if (method === "POST") {
-        // POST 처리는 JS에서 cloudpress/v1/token으로 처리하므로
-        // 여기서는 그냥 로그인 페이지를 다시 보여줌
-        return html(await buildLoginPage(env, url));
-      }
-      return html(await buildLoginPage(env, url));
-    }
-
-    // ── wp-content/ 정적 자산 → GitHub 개인 레포 ────────────────────────────
-    if (url.pathname.startsWith("/wp-content/")) {
-      const repoPath = url.pathname.slice(1); // /wp-content/... → wp-content/...
-      // 먼저 개인 GitHub 레포 시도
-      if (ghOwner(env) && ghRepo(env)) {
-        const res = await serveGithubAsset(env, repoPath);
-        if (res) return res;
-      }
-      // 폴백: 공식 WordPress 코어 (기본 테마)
-      if (STATIC_EXT.test(url.pathname)) {
-        const coreRes = await serveCoreAsset(repoPath);
-        if (coreRes) return coreRes;
-      }
-      return respond("Not Found", 404);
-    }
-
-    // ── WordPress 코어 정적 자산 (wp-includes/, wp-admin/css 등) ─────────────
-    // 루트 정적 파일(wp-login.css 등) + 코어 정적 자산
-    if (STATIC_EXT.test(url.pathname) && (
-      url.pathname === "/wp-login.css" ||
-      url.pathname === "/wp-signup.css" ||
-      url.pathname.startsWith("/wp-includes/") ||
-      url.pathname.startsWith("/wp-admin/css/") ||
-      url.pathname.startsWith("/wp-admin/images/") ||
-      url.pathname.startsWith("/wp-admin/fonts/") ||
-      url.pathname.startsWith("/wp-admin/js/")
-    )) {
-      const corePath = url.pathname.replace(/^\//, "");
-      const cacheKey = `core-asset:${corePath}`;
-      const cached   = await kvGet(env, cacheKey);
-      if (cached) {
-        const ct = corePath.endsWith(".css") ? "text/css"
-                 : corePath.endsWith(".js")  ? "application/javascript"
-                 : "application/octet-stream";
-        return respond(cached, 200, ct, { "Cache-Control": "public, max-age=86400", "X-Cache": "KV-HIT" });
-      }
-      const res = await serveCoreAsset(corePath);
-      if (res) {
-        const ct = res.headers.get("Content-Type") || "application/octet-stream";
-        if (ct.includes("text")) {
-          const text = await res.clone().text();
-          await kvSet(env, cacheKey, text, 86400);
-        }
-        return res;
-      }
-      return respond("Not Found", 404);
-    }
-
-    // ── 피드 ─────────────────────────────────────────────────────────────────
-    if (url.pathname === "/feed" || url.pathname === "/feed/") {
-      return buildRSSFeed(env, url);
-    }
-
-    // ── sitemap ───────────────────────────────────────────────────────────────
-    if (url.pathname === "/sitemap.xml" || url.pathname === "/sitemap_index.xml") {
-      return buildSitemap(env, url);
-    }
-
-    // ── robots.txt ────────────────────────────────────────────────────────────
-    if (url.pathname === "/robots.txt") {
-      const siteUrl = await getOption(env, "siteurl") || `${url.protocol}//${url.host}`;
-      return respond(`User-agent: *\nDisallow: /wp-admin/\nAllow: /wp-admin/admin-ajax.php\nSitemap: ${siteUrl}/sitemap.xml\n`, 200, "text/plain");
-    }
-
-    // ── 프론트엔드 WordPress 사이트 ───────────────────────────────────────────
-    return buildFrontPage(env, url, request);
-  },
-};
-
-// ─── RSS 피드 ────────────────────────────────────────────────────────────────
-
-async function buildRSSFeed(env, url) {
-  const d        = db(env);
-  const siteUrl  = await getOption(env, "siteurl") || `${url.protocol}//${url.host}`;
-  const blogname = await getOption(env, "blogname") || "WordPress 사이트";
-  const tagline  = await getOption(env, "blogdescription") || "";
-
-  let posts = [];
-  try {
-    const r = await d.prepare("SELECT * FROM wp_posts WHERE post_type='post' AND post_status='publish' ORDER BY post_date DESC LIMIT 20").all();
-    posts = r.results || [];
-  } catch {}
-
-  const items = posts.map(p => `
-    <item>
-      <title><![CDATA[${p.post_title}]]></title>
-      <link>${siteUrl}/${p.post_name}/</link>
-      <pubDate>${new Date(p.post_date).toUTCString()}</pubDate>
-      <dc:creator><![CDATA[admin]]></dc:creator>
-      <description><![CDATA[${(p.post_excerpt || p.post_content || "").replace(/<[^>]+>/g,"").slice(0,500)}]]></description>
-      <content:encoded><![CDATA[${p.post_content || ""}]]></content:encoded>
-    </item>`).join("\n");
-
-  const rss = `<?xml version="1.0" encoding="UTF-8"?>
-<rss version="2.0"
-  xmlns:content="http://purl.org/rss/1.0/modules/content/"
-  xmlns:dc="http://purl.org/dc/elements/1.1/"
->
-<channel>
-  <title>${blogname}</title>
-  <link>${siteUrl}</link>
-  <description>${tagline}</description>
-  <language>ko-KR</language>
-  <generator>CloudPress WordPress 6.7.2</generator>
-  ${items}
-</channel>
-</rss>`;
-  return respond(rss, 200, "application/rss+xml; charset=utf-8");
-}
-
-// ─── Sitemap ─────────────────────────────────────────────────────────────────
-
-async function buildSitemap(env, url) {
-  const d       = db(env);
-  const siteUrl = await getOption(env, "siteurl") || `${url.protocol}//${url.host}`;
-  let urls = [`<url><loc>${siteUrl}/</loc><changefreq>daily</changefreq><priority>1.0</priority></url>`];
-  try {
-    const r = await d.prepare("SELECT post_name, post_modified FROM wp_posts WHERE post_status='publish' AND post_type IN ('post','page') ORDER BY post_modified DESC LIMIT 1000").all();
-    for (const p of (r.results || [])) {
-      urls.push(`<url><loc>${siteUrl}/${p.post_name}/</loc><lastmod>${(p.post_modified||"").slice(0,10)}</lastmod></url>`);
-    }
-  } catch {}
-  const xml = `<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">${urls.join("")}</urlset>`;
-  return respond(xml, 200, "application/xml; charset=utf-8");
-}
-
-// ─── 준비 중 페이지 (DB 미설치 시) ──────────────────────────────────────────
-
-function buildReadyPage(env, url) {
-  const hasDb     = !!(db(env));
-  const hasKv     = !!(kv(env));
-  const hasGithub = !!(ghOwner(env) && ghRepo(env));
-  const sid       = siteId(env);
-
-  // DB가 없는 경우: 설정 안내 (자동 설치 불가)
-  // DB가 있는 경우: autoInstallWordPress가 실패한 경우 (일시적 오류)
-  let status = hasDb
-    ? "WordPress DB 초기화에 실패했습니다. 잠시 후 다시 시도합니다."
-    : "D1 데이터베이스 바인딩이 필요합니다.";
-  let tips   = [];
-  if (!hasDb) { tips.push("CloudPress 대시보드 → 설정에서 Cloudflare API 키를 입력하면 D1이 자동 생성됩니다."); }
-  if (!hasGithub) { tips.push("GitHub 저장소를 연결하면 테마/플러그인을 무제한으로 사용할 수 있습니다."); }
-
-  // DB가 있으면 30초 후 재시도, 없으면 새로고침 없음
-  const refreshMeta = hasDb ? `<meta http-equiv="refresh" content="30">` : "";
-
-  return new Response(`<!DOCTYPE html>
+function buildPostHtml(post, siteUrl, blogname, blogdesc) {
+  return `<!DOCTYPE html>
 <html lang="ko">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-${refreshMeta}
-<title>CloudPress — WordPress 설정 필요</title>
+<title>${post.post_title} — ${blogname}</title>
+<link rel="stylesheet" href="/wp-includes/css/dist/block-library/style.min.css">
 <style>
-*{box-sizing:border-box;margin:0;padding:0}
-body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
-  background:linear-gradient(135deg,#0f0c29,#302b63,#24243e);
-  min-height:100vh;display:flex;align-items:center;justify-content:center}
-.card{background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.15);
-  border-radius:24px;padding:48px 40px;max-width:460px;width:92%;text-align:center}
-.logo{width:72px;height:72px;background:linear-gradient(135deg,#3b82f6,#8b5cf6);
-  border-radius:20px;margin:0 auto 24px;display:flex;align-items:center;
-  justify-content:center;font-size:36px}
-h1{color:#fff;font-size:20px;font-weight:800;margin-bottom:10px}
-p{color:rgba(255,255,255,.6);font-size:13px;line-height:1.7;margin-bottom:12px}
-.status{background:rgba(255,255,255,.05);border-radius:8px;padding:16px;margin:20px 0;text-align:left}
-.status-item{display:flex;align-items:center;gap:8px;margin-bottom:8px;font-size:12px;color:rgba(255,255,255,.7)}
-.status-item:last-child{margin-bottom:0}
-.dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
-.dot.ok{background:#22c55e} .dot.err{background:#ef4444} .dot.warn{background:#f59e0b}
-.bar-wrap{background:rgba(255,255,255,.1);border-radius:100px;height:6px;overflow:hidden;margin:20px 0}
-.bar{height:100%;background:linear-gradient(90deg,#3b82f6,#8b5cf6);border-radius:100px;
-  animation:slide 2s ease-in-out infinite}
-@keyframes slide{0%{width:10%;margin-left:0}50%{width:55%;margin-left:20%}100%{width:10%;margin-left:85%}}
-small{display:block;margin-top:14px;color:rgba(255,255,255,.25);font-size:11px}
-.tip{background:rgba(255,193,7,.1);border:1px solid rgba(255,193,7,.3);border-radius:8px;padding:10px;margin-top:8px;text-align:left;font-size:11px;color:rgba(255,255,255,.7)}
+*{box-sizing:border-box}
+body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:#f9fafb;color:#1d2327;}
+header{background:#fff;border-bottom:1px solid #e5e7eb;padding:16px 0;}
+.container{max-width:800px;margin:0 auto;padding:0 16px;}
+nav a{color:#2271b1;text-decoration:none;margin-right:16px;font-size:14px;}
+article{background:#fff;border-radius:8px;padding:32px;border:1px solid #e5e7eb;margin-top:24px;line-height:1.8;}
+article h1{margin-top:0;}
+.post-meta{color:#6b7280;font-size:13px;margin-bottom:24px;}
+footer{background:#fff;border-top:1px solid #e5e7eb;padding:16px;text-align:center;color:#6b7280;font-size:13px;margin-top:40px;}
 </style>
 </head>
 <body>
-  <div class="card">
-    <div class="logo">☁️</div>
-    <h1>WordPress 설정 필요</h1>
-    <p>${status}</p>
-    <div class="status">
-      <div class="status-item"><div class="dot ${hasDb?"ok":"err"}"></div>D1 데이터베이스: ${hasDb?"연결됨":"미연결"}</div>
-      <div class="status-item"><div class="dot ${hasKv?"ok":"warn"}"></div>KV 캐시: ${hasKv?"연결됨":"미연결"}</div>
-      <div class="status-item"><div class="dot ${hasGithub?"ok":"warn"}"></div>GitHub 저장소: ${hasGithub?"연결됨 ("+ghOwner(env)+"/"+ghRepo(env)+")":"미연결"}</div>
-      <div class="status-item"><div class="dot ok"></div>PHP 엔진: Native JS (PHP 불필요)</div>
-      <div class="status-item"><div class="dot ok"></div>Site ID: ${sid||"(생성 중)"}</div>
-    </div>
-    ${tips.map(t=>`<div class="tip">💡 ${t}</div>`).join("")}
-    <div class="bar-wrap"><div class="bar"></div></div>
-    <small>CloudPress v6.0 · WordPress 6.7.2 호환</small>
+<header>
+  <div class="container" style="display:flex;align-items:center;justify-content:space-between;">
+    <a href="/" style="font-size:20px;font-weight:700;color:#1d2327;text-decoration:none;">${blogname}</a>
+    <nav><a href="/">홈</a><a href="/wp-admin/">관리자</a></nav>
   </div>
+</header>
+<div class="container">
+  <article>
+    <h1>${post.post_title}</h1>
+    <div class="post-meta">${(post.post_date||"").slice(0,10)}</div>
+    <div>${post.post_content || ""}</div>
+  </article>
+  <p style="margin-top:16px;"><a href="/" style="color:#2271b1;text-decoration:none;">← 목록으로</a></p>
+</div>
+<footer>
+  <p>${blogname} &mdash; Powered by <a href="https://cloudpress.site" style="color:#2271b1;">CloudPress</a></p>
+</footer>
 </body>
-</html>`, { status: 503, headers: { ...CORS, "Content-Type": "text/html; charset=utf-8" } });
+</html>`;
 }
+
+// ─── 메인 fetch 핸들러 ────────────────────────────────────────────────────────
+export default {
+  async fetch(request, env, ctx) {
+    const url    = new URL(request.url);
+    const path   = url.pathname;
+    const method = request.method.toUpperCase();
+
+    // CORS Preflight
+    if (method === "OPTIONS") {
+      return new Response(null, { status: 204, headers: CORS });
+    }
+
+    // ── WordPress 코어 정적 자산 (wp-admin/*, wp-includes/*) ────────────────
+    if (STATIC_EXT.test(path)) {
+      // 1) 사용자 GitHub 레포에서 서빙 (테마/플러그인)
+      if (path.startsWith("/wp-content/")) {
+        const repoPath = path.replace(/^\//, "");
+        const ghRes    = await serveGithubAsset(env, repoPath);
+        if (ghRes) return ghRes;
+      }
+      // 2) WordPress 공식 코어에서 서빙
+      const corePath = path.replace(/^\//, "");
+      const coreRes  = await serveCoreAsset(corePath);
+      if (coreRes) return coreRes;
+
+      return new Response("Not Found", { status: 404, headers: CORS });
+    }
+
+    // ── REST API ─────────────────────────────────────────────────────────────
+    if (path.startsWith("/wp-json")) {
+      // DB가 없으면 아직 프로비저닝 중
+      const d = db(env);
+      if (!d) return json({ error: "Database not ready. Please wait for provisioning to complete." }, 503);
+
+      // DB 있고 WordPress 미설치시 자동 설치
+      const installed = await isWpInstalled(env);
+      if (!installed) {
+        const ok = await autoInstallWordPress(env, url);
+        if (!ok) return json({ error: "WordPress installation failed." }, 500);
+      }
+      return handleRestApi(request, env, url);
+    }
+
+    // ── WordPress 관리자 ──────────────────────────────────────────────────────
+    if (path.startsWith("/wp-admin")) {
+      const d = db(env);
+      if (!d) return html(`<html><body><h1>프로비저닝 중...</h1><p>잠시 후 다시 시도해 주세요.</p><script>setTimeout(()=>location.reload(),5000)</script></body></html>`);
+
+      const installed = await isWpInstalled(env);
+      if (!installed) {
+        const ok = await autoInstallWordPress(env, url);
+        if (!ok) return html(`<html><body><h1>WordPress 초기화 실패</h1><p>D1 데이터베이스 바인딩을 확인해 주세요.</p></body></html>`, 500);
+      }
+
+      const user = await getAuthUser(request, env);
+      const page = await buildAdminPage(env, url, user);
+      return html(page);
+    }
+
+    // ── WordPress 로그인 ──────────────────────────────────────────────────────
+    if (path === "/wp-login.php" || path === "/wp-login") {
+      const siteUrl  = `${url.protocol}//${url.host}`;
+      const blogname = await getOption(env, "blogname").catch(() => "WordPress");
+      return html(buildLoginPage(siteUrl, blogname || "WordPress"));
+    }
+
+    // ── 사이트맵 ─────────────────────────────────────────────────────────────
+    if (path === "/sitemap.xml" || path === "/sitemap") {
+      const siteUrl = `${url.protocol}//${url.host}`;
+      const d = db(env);
+      const posts = d ? (await d.prepare("SELECT post_name, post_modified FROM wp_posts WHERE post_status='publish' ORDER BY post_modified DESC LIMIT 100").all().catch(() => ({ results: [] }))).results || [] : [];
+      const urls = posts.map(p => `  <url><loc>${siteUrl}/${p.post_name}/</loc><lastmod>${(p.post_modified||"").slice(0,10)}</lastmod></url>`).join("\n");
+      return new Response(`<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n  <url><loc>${siteUrl}/</loc></url>\n${urls}\n</urlset>`, {
+        headers: { "Content-Type": "application/xml; charset=utf-8" },
+      });
+    }
+
+    // ── 프론트엔드 WordPress ─────────────────────────────────────────────────
+    const d = db(env);
+    if (!d) {
+      return html(`<!DOCTYPE html><html lang="ko"><head><meta charset="UTF-8"><title>CloudPress</title></head><body style="font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;background:#f9fafb;">
+      <div style="text-align:center;"><h1 style="color:#2271b1;">🚀 CloudPress</h1><p style="color:#6b7280;">사이트를 준비 중입니다. 잠시 후 다시 시도해 주세요.</p><script>setTimeout(()=>location.reload(),10000)</script></div></body></html>`);
+    }
+
+    const installed = await isWpInstalled(env);
+    if (!installed) {
+      await autoInstallWordPress(env, url);
+    }
+
+    const frontPage = await buildFrontPage(env, url);
+    return html(frontPage);
+  },
+};

@@ -299,16 +299,87 @@ async function runWordPress(request, env, ctx, phpFile) {
   const repo   = getGhRepo(env);
   const token  = getGhToken(env);
 
-  // PHP_RUNNER 바인딩이 없으면 간단한 안내 페이지 반환
+  // ── PHP_RUNNER 바인딩이 없는 경우: _cache/ 정적 HTML → GitHub Pages → KV 순 폴백 ──
   if (!env.PHP_RUNNER) {
-    // GitHub Pages 폴백 시도
-    const fallback = await tryGithubPagesFallback(env, url.pathname, "PHP_RUNNER 없음");
-    if (fallback) return fallback;
-    // KV 캐시 시도
-    const saved = await serveSavedCache(env, url.pathname, url.search);
-    if (saved) return saved;
-    return errorPage(503, "PHP Runner 설정 필요",
-      "cloudpress-php Worker가 배포되지 않았습니다. 관리자에게 문의하세요.");
+    // 1. KV PHP 캐시 (빠른 응답)
+    const kvSaved = await serveSavedCache(env, url.pathname, url.search);
+    if (kvSaved) return kvSaved;
+
+    // 2. GitHub _cache/ 정적 HTML (GitHub Actions가 생성)
+    const isCacheablePath = method === "GET"
+      && !SKIP_CACHE_PATHS.some(p => url.pathname.startsWith(p))
+      && !(request.headers.get("Cookie") || "").includes("wordpress_logged_in");
+
+    if (isCacheablePath && owner && repo) {
+      const cachePath = (url.pathname === "/" || url.pathname === "")
+        ? "_cache/index.html"
+        : `_cache${url.pathname.endsWith("/") ? url.pathname : url.pathname + "/"}index.html`;
+      const ghCacheRes = await fetchFromGitHub(env, cachePath);
+      if (ghCacheRes) {
+        const html = await ghCacheRes.text();
+        if (ctx) ctx.waitUntil(kvSet(env, `php:${siteId}:${url.pathname}${url.search}`, html, 1800));
+        return new Response(html, {
+          headers: {
+            "Content-Type":  "text/html; charset=utf-8",
+            "Cache-Control": "public, s-maxage=30, stale-while-revalidate=1800",
+            "X-Cache":       "GH-STATIC",
+            ...SECURITY_HEADERS,
+          },
+        });
+      }
+    }
+
+    // 3. GitHub Pages 폴백
+    const ghFallback = await tryGithubPagesFallback(env, url.pathname, "PHP_RUNNER 없음");
+    if (ghFallback) return ghFallback;
+
+    // 4. 설치 안내 (아직 GitHub Actions 미완료)
+    const repoUrl    = owner && repo ? `https://github.com/${owner}/${repo}` : "";
+    const actionsUrl = repoUrl ? `${repoUrl}/actions/workflows/install-wordpress.yml` : "";
+    return new Response(`<!DOCTYPE html>
+<html lang="ko"><head><meta charset="UTF-8"><meta http-equiv="refresh" content="30">
+<title>WordPress 준비 중</title>
+<style>
+*{box-sizing:border-box}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Malgun Gothic,sans-serif;
+  background:#f0f0f1;display:flex;align-items:center;justify-content:center;
+  min-height:100vh;margin:0;padding:20px}
+.card{background:#fff;border:1px solid #c3c4c7;border-radius:4px;
+  max-width:520px;width:100%;padding:40px;text-align:center}
+.badge{background:#f0b849;color:#fff;font-size:11px;font-weight:700;
+  padding:3px 10px;border-radius:3px;display:inline-block;margin-bottom:14px}
+h1{color:#1d2327;font-size:20px;font-weight:600;margin:0 0 10px}
+p{color:#646970;font-size:14px;line-height:1.6;margin:0 0 14px}
+a.btn{display:inline-block;background:#2271b1;color:#fff;text-decoration:none;
+  padding:8px 18px;border-radius:3px;font-size:13px;font-weight:600;margin:4px}
+.steps{text-align:left;background:#f6f7f7;border-radius:4px;padding:14px 18px;
+  margin:14px 0;font-size:13px;color:#3c434a;line-height:2}
+.note{font-size:12px;color:#a7aaad;margin-top:14px}
+</style></head>
+<body><div class="card">
+<div class="badge">WORDPRESS INSTALLING</div>
+<h1>⚙️ WordPress 설치 진행 중</h1>
+<p>GitHub Actions가 WordPress 6.7.2를 자동으로 설치하고 있습니다.<br>
+완료 후 이 페이지가 자동으로 갱신됩니다.</p>
+<ol class="steps">
+  <li>✅ GitHub 레포지토리 생성</li>
+  <li>⏳ WordPress 6.7.2 전체 파일 설치 중...</li>
+  <li>⏳ 데이터베이스 초기화 중...</li>
+  <li>⏳ 정적 캐시 생성 중...</li>
+</ol>
+${actionsUrl ? `<a class="btn" href="${actionsUrl}" target="_blank">🔄 설치 진행상황 보기</a>` : ""}
+${repoUrl ? ` <a class="btn" style="background:#6e7d88" href="${repoUrl}" target="_blank">📁 GitHub 레포 보기</a>` : ""}
+<p class="note">30초마다 자동 새로고침됩니다</p>
+</div></body></html>`,
+      {
+        status: 503,
+        headers: {
+          "Content-Type":  "text/html; charset=utf-8",
+          "Cache-Control": "no-store",
+          "Retry-After":   "30",
+        },
+      }
+    );
   }
 
   // wp-config.php를 GitHub 레포에서 읽기 (캐시 우회)
@@ -386,12 +457,36 @@ async function runWordPress(request, env, ctx, phpFile) {
     });
     phpRes = await env.PHP_RUNNER.fetch(phpReq);
   } catch (err) {
-    // PHP_RUNNER 장애 시 폴백
-    const ghFallback = await tryGithubPagesFallback(env, url.pathname, err);
-    if (ghFallback) return ghFallback;
+    console.error("[PHP_RUNNER] 호출 실패:", String(err?.message || err));
+
+    // 1. KV PHP 캐시 (stale)
     const kvFallback = await serveSavedCache(env, url.pathname, url.search);
     if (kvFallback) return kvFallback;
-    return errorPage(502, "서비스 일시 중단", "잠시 후 다시 시도해주세요. 문제가 지속되면 관리자에게 문의하세요.");
+
+    // 2. GitHub _cache/ 정적 HTML
+    if (method === "GET" && !SKIP_CACHE_PATHS.some(p => url.pathname.startsWith(p)) && owner && repo) {
+      const cachePath = (url.pathname === "/" || url.pathname === "")
+        ? "_cache/index.html"
+        : "_cache" + (url.pathname.endsWith("/") ? url.pathname : url.pathname + "/") + "index.html";
+      const ghCacheRes = await fetchFromGitHub(env, cachePath);
+      if (ghCacheRes) {
+        const html = await ghCacheRes.text();
+        return new Response(html, {
+          headers: {
+            "Content-Type":  "text/html; charset=utf-8",
+            "Cache-Control": "public, s-maxage=30, stale-while-revalidate=900",
+            "X-Cache":       "GH-STATIC-FALLBACK",
+            ...SECURITY_HEADERS,
+          },
+        });
+      }
+    }
+
+    // 3. GitHub Pages 폴백
+    const ghFallback = await tryGithubPagesFallback(env, url.pathname, err);
+    if (ghFallback) return ghFallback;
+
+    return errorPage(502, "서비스 일시 중단", "잠시 후 다시 시도해주세요.");
   }
 
   // 캐시 가능 여부 판단

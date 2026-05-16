@@ -1499,26 +1499,16 @@ async function deployPhpRunnerWorker({
   };
 
   const metaPart =
-    `--${boundary}
-` +
-    `Content-Disposition: form-data; name="metadata"
-` +
-    `Content-Type: application/json
-
-` +
-    JSON.stringify(metadataObj) + `
-`;
+    `--${boundary}\r\n` +
+    `Content-Disposition: form-data; name="metadata"\r\n` +
+    `Content-Type: application/json\r\n\r\n` +
+    JSON.stringify(metadataObj) + `\r\n`;
 
   const srcPart =
-    `--${boundary}
-` +
-    `Content-Disposition: form-data; name="php-runner.js"; filename="php-runner.js"
-` +
-    `Content-Type: application/javascript+module
-
-` +
-    workerSource + `
-`;
+    `--${boundary}\r\n` +
+    `Content-Disposition: form-data; name="php-runner.js"; filename="php-runner.js"\r\n` +
+    `Content-Type: application/javascript+module\r\n\r\n` +
+    workerSource + `\r\n`;
 
   const body = metaPart + srcPart + `--${boundary}--`;
 
@@ -1529,6 +1519,7 @@ async function deployPhpRunnerWorker({
       : { "Authorization": `Bearer ${cfToken}` }),
   };
 
+  await log(`  PHP Runner 배포 시작: ${workerName} (소스 ${workerSource.length}bytes)`);
   const res = await fetch(
     `https://api.cloudflare.com/client/v4/accounts/${cfAccountId}/workers/scripts/${workerName}`,
     { method: "PUT", headers, body }
@@ -1538,8 +1529,8 @@ async function deployPhpRunnerWorker({
     await log(`  ✅ PHP Runner Worker 배포 완료: ${workerName}`);
     return { ok: true };
   } else {
-    const err = data?.errors?.[0]?.message || "알 수 없는 오류";
-    await log(`  ⚠️ PHP Runner Worker 배포 실패: ${err}`, "warn");
+    const errDetail = JSON.stringify(data?.errors || data);
+    await log(`  ⚠️ PHP Runner Worker 배포 실패 [${res.status}]: ${errDetail}`, "warn");
     return null;
   }
 }
@@ -1554,13 +1545,32 @@ async function deployWorker({
 }) {
   const boundary = `----FormBoundary${Math.random().toString(36).slice(2)}`;
 
+  // phpRunnerExists: PHP Runner가 실제로 배포됐는지 먼저 확인
+  let phpRunnerExists = false;
+  try {
+    const checkRes = await fetch(
+      `https://api.cloudflare.com/client/v4/accounts/${cfAccountId}/workers/scripts/${workerName}-php`,
+      {
+        method: "GET",
+        headers: cfEmail
+          ? { "X-Auth-Email": cfEmail, "X-Auth-Key": cfToken }
+          : { "Authorization": `Bearer ${cfToken}` },
+      }
+    );
+    phpRunnerExists = checkRes.ok;
+    await log(`  PHP Runner 존재 확인: ${phpRunnerExists ? "✅ 있음" : "❌ 없음 (Service Binding 제외)"}`);
+  } catch (e) {
+    await log(`  PHP Runner 확인 실패: ${e.message}`, "warn");
+  }
+
   const bindings = [
     ...(kvCacheId ? [{ type: "kv_namespace", name: "CACHE", namespace_id: kvCacheId }] : []),
     { type: "plain_text", name: "SITE_ID",      text: siteId },
     { type: "plain_text", name: "GH_OWNER",     text: ghOwner || "" },
     { type: "plain_text", name: "GH_REPO",      text: ghRepo  || "" },
     { type: "plain_text", name: "GH_PAGES_URL", text: ghPagesUrl || "" },
-    { type: "service", name: "PHP_RUNNER", service: `${workerName}-php` },
+    // PHP Runner가 실제 배포된 경우에만 Service Binding 추가 (없으면 배포 오류 방지)
+    ...(phpRunnerExists ? [{ type: "service", name: "PHP_RUNNER", service: `${workerName}-php` }] : []),
   ];
 
   const metadataObj = {
@@ -1591,6 +1601,7 @@ async function deployWorker({
       : { "Authorization": `Bearer ${cfToken}` }),
   };
 
+  await log(`  메인 Worker 배포 시작: ${workerName} (bindings: ${bindings.map(b=>b.name).join(", ")})`);
   const res = await fetch(
     `https://api.cloudflare.com/client/v4/accounts/${cfAccountId}/workers/scripts/${workerName}`,
     { method: "PUT", headers, body }
@@ -1598,11 +1609,12 @@ async function deployWorker({
   const data = await res.json().catch(() => ({}));
 
   if (!res.ok) {
-    await log(`Worker 배포 실패: ${JSON.stringify(data?.errors)}`, "error");
+    const errDetail = JSON.stringify(data?.errors || data);
+    await log(`  ❌ 메인 Worker 배포 실패 [${res.status}]: ${errDetail}`, "error");
     return null;
   }
 
-  await log(`  ✅ Worker 배포 완료: ${workerName}`);
+  await log(`  ✅ 메인 Worker(미러링) 배포 완료: ${workerName}`);
 
   // workers.dev 도메인 활성화
   await cfReq(cfToken, "POST",

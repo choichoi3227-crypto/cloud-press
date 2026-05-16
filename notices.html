@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-5852370252252543"
+     crossorigin="anonymous"></script>
+    <!-- Google tag (gtag.js) -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-P4KZKY20ES"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+  gtag('config', 'G-P4KZKY20ES');
+</script>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CloudPress | 공지사항</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="/style.css">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" rel="stylesheet">
+    <style>
+        body { background-color: #050505; color: white; }
+        .notice-card { transition: background 0.2s, transform 0.15s; }
+        .notice-card:hover { background: rgba(255,255,255,0.05); transform: translateY(-1px); }
+    </style>
+</head>
+<body class="bg-[#050505] text-white">
+
+    <header class="p-5 border-b border-white/10 sticky top-0 bg-[#050505]/90 backdrop-blur-lg z-50">
+        <div class="max-w-7xl mx-auto flex justify-between items-center">
+            <a href="/" class="text-2xl font-black tracking-tighter text-blue-500">CLOUD<span class="text-white">PRESS</span></a>
+            <nav class="hidden md:flex gap-8 items-center text-sm font-medium text-gray-400">
+                <a href="/features" class="hover:text-white transition">기능</a>
+                <a href="/pricing" class="hover:text-white transition">요금제</a>
+                <a href="/about" class="hover:text-white transition">소개</a>
+                <a href="/notices" class="text-white font-bold">공지사항</a>
+                <a href="/faq" class="hover:text-white transition">FAQ</a>
+                <a href="/contact" class="hover:text-white transition">문의하기</a>
+
+                <div id="nav-guest" class="flex items-center gap-3">
+                    <a href="/login" class="hover:text-white transition">로그인</a>
+                    <a href="/signup" class="bg-blue-600 px-5 py-2 rounded-full text-white font-bold hover:bg-blue-500 transition">무료 시작</a>
+                </div>
+
+                <div id="nav-user" class="hidden relative">
+                    <button id="profile-btn" onclick="toggleProfileMenu()"
+                        class="flex items-center gap-2 bg-white/5 hover:bg-white/10 border border-white/10 rounded-full pl-3 pr-4 py-2 transition">
+                        <div id="avatar-circle"
+                            class="w-7 h-7 rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center text-xs font-bold text-white flex-shrink-0">
+                        </div>
+                        <span id="nav-email" class="text-sm text-white max-w-[120px] truncate"></span>
+                        <i class="fas fa-chevron-down text-xs text-gray-400 ml-1"></i>
+                    </button>
+                    <div id="profile-dropdown"
+                        class="absolute right-0 top-full mt-2 w-52 bg-[#111] border border-white/10 rounded-2xl shadow-2xl overflow-hidden hidden">
+                        <div class="px-4 py-3 border-b border-white/5">
+                            <div class="text-xs text-gray-500">로그인됨</div>
+                            <div id="dropdown-email" class="text-sm font-medium text-white mt-0.5 truncate"></div>
+                        </div>
+                        <div class="py-1">
+                            <a href="/dashboard" class="flex items-center gap-3 px-4 py-2.5 text-sm text-gray-300 hover:bg-white/5 hover:text-white transition">
+                                <i class="fas fa-tachometer-alt w-4 text-blue-400"></i> 콘솔 이동하기
+                            </a>
+                            <a href="/account" class="flex items-center gap-3 px-4 py-2.5 text-sm text-gray-300 hover:bg-white/5 hover:text-white transition">
+                                <i class="fas fa-user-circle w-4 text-gray-400"></i> 내 정보 관리
+                            </a>
+                        </div>
+                        <div class="border-t border-white/5 py-1">
+                            <button onclick="doLogout()" class="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-red-400 hover:bg-red-900/20 transition">
+                                <i class="fas fa-sign-out-alt w-4"></i> 로그아웃
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </nav>
+
+            <button id="mobileMenuBtn" class="md:hidden text-gray-400 hover:text-white p-2">
+                <i class="fas fa-bars text-xl"></i>
+            </button>
+        </div>
+
+        <div id="mobileMenu" class="hidden md:hidden border-t border-white/10 mt-3 pt-3 pb-2 px-4 space-y-1">
+            <a href="/features" class="block px-3 py-2 rounded-lg text-gray-400 hover:text-white hover:bg-white/5 transition text-sm">기능</a>
+            <a href="/pricing" class="block px-3 py-2 rounded-lg text-gray-400 hover:text-white hover:bg-white/5 transition text-sm">요금제</a>
+            <a href="/about" class="block px-3 py-2 rounded-lg text-gray-400 hover:text-white hover:bg-white/5 transition text-sm">소개</a>
+            <a href="/notices" class="block px-3 py-2 rounded-lg text-white bg-white/5 text-sm font-bold">공지사항</a>
+            <a href="/faq" class="block px-3 py-2 rounded-lg text-gray-400 hover:text-white hover:bg-white/5 transition text-sm">FAQ</a>
+            <a href="/contact" class="block px-3 py-2 rounded-lg text-gray-400 hover:text-white hover:bg-white/5 transition text-sm">문의하기</a>
+            <div class="border-t border-white/10 pt-2 mt-2 space-y-1" id="mobile-guest">
+                <a href="/login"  class="block px-3 py-2 text-gray-400 hover:text-white text-sm">로그인</a>
+                <a href="/signup" class="block px-3 py-2 bg-blue-600 text-white rounded-xl font-bold text-center text-sm hover:bg-blue-500 transition">무료 시작</a>
+            </div>
+            <div class="border-t border-white/10 pt-2 mt-2 space-y-1 hidden" id="mobile-user">
+                <a href="/dashboard" class="block px-3 py-2 text-gray-300 hover:text-white text-sm"><i class="fas fa-tachometer-alt mr-2 text-blue-400"></i>콘솔 이동하기</a>
+                <button onclick="doLogout()" class="w-full text-left px-3 py-2 text-red-400 text-sm"><i class="fas fa-sign-out-alt mr-2"></i>로그아웃</button>
+            </div>
+        </div>
+    </header>
+
+    <!-- 히어로 -->
+    <section class="max-w-4xl mx-auto px-6 py-16 text-center">
+        <div class="inline-flex items-center gap-2 bg-blue-600/10 border border-blue-500/20 rounded-full px-4 py-1.5 text-blue-400 text-xs font-bold mb-6">
+            <i class="fas fa-bullhorn"></i> NOTICES
+        </div>
+        <h1 class="text-4xl md:text-5xl font-black mb-4">공지사항</h1>
+        <p class="text-gray-400 text-lg">CloudPress 서비스 업데이트, 점검 일정, 중요 안내를 확인하세요.</p>
+    </section>
+
+    <!-- 필터 -->
+    <div class="max-w-4xl mx-auto px-6 mb-8">
+        <div class="flex gap-2 flex-wrap">
+            <button onclick="filterNotices('all')" id="filter-all"
+                class="filter-btn px-4 py-2 rounded-full text-sm font-bold border border-white/20 bg-white/10 text-white transition">
+                전체
+            </button>
+            <button onclick="filterNotices('info')" id="filter-info"
+                class="filter-btn px-4 py-2 rounded-full text-sm font-bold border border-blue-500/30 text-blue-300 hover:bg-blue-900/20 transition">
+                <i class="fas fa-info-circle mr-1"></i> 안내
+            </button>
+            <button onclick="filterNotices('success')" id="filter-success"
+                class="filter-btn px-4 py-2 rounded-full text-sm font-bold border border-green-500/30 text-green-300 hover:bg-green-900/20 transition">
+                <i class="fas fa-check-circle mr-1"></i> 완료
+            </button>
+            <button onclick="filterNotices('warning')" id="filter-warning"
+                class="filter-btn px-4 py-2 rounded-full text-sm font-bold border border-yellow-500/30 text-yellow-300 hover:bg-yellow-900/20 transition">
+                <i class="fas fa-exclamation-triangle mr-1"></i> 경고
+            </button>
+            <button onclick="filterNotices('danger')" id="filter-danger"
+                class="filter-btn px-4 py-2 rounded-full text-sm font-bold border border-red-500/30 text-red-300 hover:bg-red-900/20 transition">
+                <i class="fas fa-fire mr-1"></i> 긴급
+            </button>
+        </div>
+    </div>
+
+    <!-- 공지 목록 -->
+    <main class="max-w-4xl mx-auto px-6 pb-20">
+        <div id="notice-list" class="space-y-3">
+            <div class="text-center py-16 text-gray-600">
+                <i class="fas fa-spinner fa-spin text-3xl mb-4 block"></i>
+                불러오는 중...
+            </div>
+        </div>
+    </main>
+
+    <!-- 공지 상세 모달 -->
+    <div id="notice-modal" class="hidden fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
+        <div class="bg-[#111] border border-white/10 rounded-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
+            <div class="p-6 border-b border-white/10 flex items-center justify-between">
+                <div class="flex items-center gap-2" id="modal-type-badge"></div>
+                <button onclick="closeModal()" class="text-gray-400 hover:text-white transition"><i class="fas fa-times text-xl"></i></button>
+            </div>
+            <div class="p-6 space-y-4">
+                <h2 class="text-xl font-bold" id="modal-title"></h2>
+                <p class="text-gray-300 text-sm leading-relaxed whitespace-pre-wrap" id="modal-content"></p>
+                <p class="text-xs text-gray-600" id="modal-date"></p>
+            </div>
+        </div>
+    </div>
+
+    <footer class="border-t border-white/10 py-10 px-6 text-center text-gray-600 text-sm">
+        <a href="/" class="text-blue-500 font-black">CLOUD<span class="text-white">PRESS</span></a>
+        <p class="mt-2">© 2025 CloudPress. All rights reserved.</p>
+    </footer>
+
+    <script>
+    const TYPE_MAP = {
+        info:    { label: '안내',  icon: 'info-circle',          cls: 'text-blue-300',   bg: 'bg-blue-900/20 border-blue-500/30',   bar: 'bg-blue-500' },
+        success: { label: '완료',  icon: 'check-circle',         cls: 'text-green-300',  bg: 'bg-green-900/20 border-green-500/30', bar: 'bg-green-500' },
+        warning: { label: '경고',  icon: 'exclamation-triangle', cls: 'text-yellow-300', bg: 'bg-yellow-900/20 border-yellow-500/30', bar: 'bg-yellow-500' },
+        danger:  { label: '긴급',  icon: 'fire',                 cls: 'text-red-300',    bg: 'bg-red-900/20 border-red-500/30',     bar: 'bg-red-500' },
+    };
+
+    let allNotices = [];
+    let currentFilter = 'all';
+
+    function escHtml(s) {
+        if (!s) return '';
+        return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    }
+
+    function fmtDate(d) {
+        if (!d) return '-';
+        return new Date(d).toLocaleDateString('ko-KR', { year:'numeric', month:'long', day:'numeric', hour:'2-digit', minute:'2-digit' });
+    }
+
+    async function loadNotices() {
+        try {
+            const res = await fetch('/api/admin/notices?public=1');
+            const data = await res.json();
+            allNotices = data.notices || [];
+            renderList();
+        } catch {
+            document.getElementById('notice-list').innerHTML =
+                '<div class="text-center py-16 text-red-400"><i class="fas fa-exclamation-circle text-3xl mb-3 block"></i>공지사항을 불러오지 못했습니다.</div>';
+        }
+    }
+
+    function filterNotices(type) {
+        currentFilter = type;
+        document.querySelectorAll('.filter-btn').forEach(btn => {
+            btn.classList.remove('bg-white/10', 'text-white', 'border-white/20');
+        });
+        const activeBtn = document.getElementById('filter-' + type);
+        if (activeBtn) {
+            activeBtn.classList.add('bg-white/10', 'text-white', 'border-white/20');
+        }
+        renderList();
+    }
+
+    function renderList() {
+        const list = document.getElementById('notice-list');
+        const filtered = currentFilter === 'all'
+            ? allNotices
+            : allNotices.filter(n => n.type === currentFilter);
+
+        if (!filtered.length) {
+            list.innerHTML = '<div class="text-center py-16 text-gray-600"><i class="fas fa-bullhorn text-4xl mb-4 block opacity-30"></i>공지사항이 없습니다.</div>';
+            return;
+        }
+
+        list.innerHTML = filtered.map(n => {
+            const t = TYPE_MAP[n.type] || TYPE_MAP.info;
+            return `<div class="notice-card border border-white/10 rounded-2xl overflow-hidden cursor-pointer" onclick="openModal(${n.id})">
+                <div class="h-0.5 ${t.bar}"></div>
+                <div class="p-5 flex items-start gap-4">
+                    <div class="w-10 h-10 rounded-xl border ${t.bg} flex items-center justify-center flex-shrink-0 mt-0.5">
+                        <i class="fas fa-${t.icon} ${t.cls}"></i>
+                    </div>
+                    <div class="flex-1 min-w-0">
+                        <div class="flex items-center gap-2 mb-1.5 flex-wrap">
+                            <span class="text-xs px-2 py-0.5 rounded-full border ${t.bg} ${t.cls} font-bold">${t.label}</span>
+                            <span class="text-xs text-gray-600">${fmtDate(n.created_at)}</span>
+                        </div>
+                        <h3 class="font-bold text-white mb-1 text-sm md:text-base">${escHtml(n.title)}</h3>
+                        <p class="text-gray-500 text-xs md:text-sm line-clamp-2">${escHtml(n.content)}</p>
+                    </div>
+                    <i class="fas fa-chevron-right text-gray-600 text-xs mt-2 flex-shrink-0"></i>
+                </div>
+            </div>`;
+        }).join('');
+    }
+
+    function openModal(id) {
+        const n = allNotices.find(x => x.id === id);
+        if (!n) return;
+        const t = TYPE_MAP[n.type] || TYPE_MAP.info;
+        document.getElementById('modal-type-badge').innerHTML =
+            `<i class="fas fa-${t.icon} ${t.cls}"></i><span class="text-sm font-bold ${t.cls}">${t.label}</span>`;
+        document.getElementById('modal-title').textContent   = n.title;
+        document.getElementById('modal-content').textContent = n.content;
+        document.getElementById('modal-date').textContent    = fmtDate(n.created_at);
+        document.getElementById('notice-modal').classList.remove('hidden');
+    }
+
+    function closeModal() {
+        document.getElementById('notice-modal').classList.add('hidden');
+    }
+
+    // 네비게이션 인증 상태
+    (function() {
+        const token = localStorage.getItem('token') || localStorage.getItem('auth_token');
+        if (!token) return;
+        fetch('/api/me', { headers: { 'Authorization': 'Bearer ' + token } })
+            .then(r => r.ok ? r.json() : null)
+            .then(data => {
+                if (!data?.email) return;
+                document.getElementById('nav-guest').classList.add('hidden');
+                document.getElementById('nav-user').classList.remove('hidden');
+                document.getElementById('mobile-guest').classList.add('hidden');
+                document.getElementById('mobile-user').classList.remove('hidden');
+                const email = data.email;
+                document.getElementById('nav-email').textContent = email;
+                document.getElementById('dropdown-email').textContent = email;
+                document.getElementById('avatar-circle').textContent = email[0].toUpperCase();
+            }).catch(() => {});
+    })();
+
+    function toggleProfileMenu() {
+        document.getElementById('profile-dropdown').classList.toggle('hidden');
+    }
+
+    function doLogout() {
+        localStorage.removeItem('token');
+        localStorage.removeItem('auth_token');
+        window.location.href = '/';
+    }
+
+    document.getElementById('mobileMenuBtn').addEventListener('click', () => {
+        document.getElementById('mobileMenu').classList.toggle('hidden');
+    });
+
+    document.addEventListener('click', e => {
+        const dropdown = document.getElementById('profile-dropdown');
+        const btn = document.getElementById('profile-btn');
+        if (dropdown && !dropdown.contains(e.target) && btn && !btn.contains(e.target)) {
+            dropdown.classList.add('hidden');
+        }
+    });
+
+    // 모달 배경 클릭 닫기
+    document.getElementById('notice-modal').addEventListener('click', function(e) {
+        if (e.target === this) closeModal();
+    });
+
+    loadNotices();
+    </script>
+</body>
+</html>

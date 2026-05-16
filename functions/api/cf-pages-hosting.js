@@ -603,28 +603,28 @@ export async function provisionCloudflarePagesHosting({
 
       if (deployed) {
         workerDomain = deployed.workerDomain;
-
-        // D1 스키마 초기화
-        if (d1Id) {
-          await log("▶ D1 WordPress 스키마 초기화 중...");
-          const schemaResult = await initD1Schema({
-            cfToken, cfAccountId, cfEmail,
-            d1Id,
-            dbPrefix,
-            adminUser: wpAdminUser,
-            adminPass: wpAdminPass,
-            adminEmail,
-            siteName,
-            siteUrl: workerDomain || siteUrl,
-            log,
-          });
-          if (schemaResult) {
-            await log("✅ WordPress 스키마 초기화 완료");
-          } else {
-            await log("⚠️ D1 스키마 초기화 실패 (수동 설정 필요)", "warn");
-          }
-        }
       }
+    }
+  }
+
+  // ── 5-1. D1 스키마 초기화 (Worker 배포 여부와 무관하게 실행) ──────────────
+  if (cfToken && cfAccountId && d1Id) {
+    await log("▶ D1 WordPress 스키마 초기화 중...");
+    const schemaResult = await initD1Schema({
+      cfToken, cfAccountId, cfEmail,
+      d1Id,
+      dbPrefix,
+      adminUser: wpAdminUser,
+      adminPass: wpAdminPass,
+      adminEmail,
+      siteName,
+      siteUrl: workerDomain || siteUrl,
+      log,
+    });
+    if (schemaResult) {
+      await log("✅ WordPress 스키마 초기화 완료");
+    } else {
+      await log("⚠️ D1 스키마 초기화 실패 (수동 설정 필요)", "warn");
     }
   }
 
@@ -799,12 +799,20 @@ async function initD1Schema({
 }) {
   if (!cfToken || !cfAccountId || !d1Id) return false;
 
-  const passHash = phpassCreate(adminPass);
+  // undefined 값 방어 — SQL 문자열에 'undefined'가 삽입되는 것을 방지
+  const safeAdminUser  = adminUser  || "admin";
+  const safeAdminPass  = adminPass  || randomPass(16);
+  const safeAdminEmail = adminEmail || "admin@example.com";
+  const safeSiteName   = siteName   || "CloudPress Site";
+  const safeSiteUrl    = siteUrl    || "https://example.com";
+  const safeDbPrefix   = dbPrefix   || "wp_";
+
+  const passHash = phpassCreate(safeAdminPass);
   const now = new Date().toISOString().replace("T", " ").slice(0, 19);
 
   // WordPress 필수 테이블 생성 SQL
-  const schemaSqls = buildWordPressD1SchemaSqls({ dbPrefix });
-  const initSqls   = buildWordPressInitSqls({ dbPrefix, adminUser, passHash, adminEmail, siteName, siteUrl, now });
+  const schemaSqls = buildWordPressD1SchemaSqls({ dbPrefix: safeDbPrefix });
+  const initSqls   = buildWordPressInitSqls({ dbPrefix: safeDbPrefix, adminUser: safeAdminUser, passHash, adminEmail: safeAdminEmail, siteName: safeSiteName, siteUrl: safeSiteUrl, now });
 
   const allSqls = [...schemaSqls, ...initSqls];
 
@@ -952,7 +960,14 @@ function buildWordPressD1SchemaSqls({ dbPrefix }) {
 }
 
 function buildWordPressInitSqls({ dbPrefix, adminUser, passHash, adminEmail, siteName, siteUrl, now }) {
-  const p = dbPrefix;
+  // undefined 값이 SQL에 삽입되지 않도록 방어
+  const p            = dbPrefix   || "wp_";
+  adminUser  = adminUser  || "admin";
+  passHash   = passHash   || "";
+  adminEmail = adminEmail || "admin@example.com";
+  siteName   = siteName   || "CloudPress Site";
+  siteUrl    = siteUrl    || "https://example.com";
+  now        = now        || new Date().toISOString().replace("T", " ").slice(0, 19);
   return [
     // 관리자 사용자
     `INSERT OR IGNORE INTO ${p}users (user_login, user_pass, user_nicename, user_email, user_url, user_registered, user_status, display_name)

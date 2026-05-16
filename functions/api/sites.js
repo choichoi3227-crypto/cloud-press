@@ -263,9 +263,17 @@ export async function onRequestPost(context) {
         return;
       }
 
-      const { owner, repoName, pagesUrl, pagesProject, cfDomain,
-              d1Id, kvSessionsId, kvCacheId, workerName } = result;
-      const primaryDomain = cfDomain || pagesUrl || null;
+      // provisionCloudflarePagesHosting 반환값 키와 일치시킴
+      const {
+        workerName,
+        workerDomain,
+        cfPagesUrl,
+        githubOwner,
+        githubRepo,
+        d1Id,
+        kvCacheId,
+      } = result;
+      const primaryDomain = workerDomain || cfPagesUrl || null;
 
       await env.DB.prepare(`
         UPDATE sites SET
@@ -275,17 +283,23 @@ export async function onRequestPost(context) {
           plan = ?, status = 'active'
         WHERE id = ?
       `).bind(
-        primaryDomain, owner, repoName, pagesUrl, pagesProject,
-        workerName || null, d1Id || null, kvSessionsId || null,
+        primaryDomain        || null,
+        githubOwner          || null,
+        githubRepo           || null,
+        cfPagesUrl           || null,
+        workerName           || null,
+        workerName           || null,
+        d1Id                 || null,
+        kvCacheId            || null,
         plan, id
       ).run();
 
       await log("✅ 프로비저닝 완료!");
-      await log(`Pages : ${pagesUrl}`);
-      await log(`GitHub: https://github.com/${owner}/${repoName}`);
-      if (d1Id)         await log(`D1    : ${d1Id}`);
-      if (kvSessionsId) await log(`KV    : ${kvSessionsId}`);
-      if (workerName)   await log(`Worker: ${workerName}`);
+      await log(`URL   : ${primaryDomain || "설정 필요"}`);
+      if (githubOwner && githubRepo) await log(`GitHub: https://github.com/${githubOwner}/${githubRepo}`);
+      if (d1Id)       await log(`D1    : ${d1Id}`);
+      if (kvCacheId)  await log(`KV    : ${kvCacheId}`);
+      if (workerName) await log(`Worker: ${workerName}`);
 
     } catch (e) {
       console.error("[Provision] FATAL:", e?.message, e?.stack);

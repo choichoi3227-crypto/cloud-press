@@ -559,16 +559,43 @@ export default {
     const stale=await kvGet(env,\`php:\${siteId}:\${path}\${url.search}\`);
     if(stale)return new Response(stale,{status:200,headers:{"Content-Type":"text/html;charset=utf-8","Cache-Control":"public,max-age=30","X-Fallback":"kv-stale",...SEC_HEADERS}});
 
-    // 8. 모든 폴백 실패 → WordPress 설치 진행 중 안내
+    // 8. 모든 폴백 실패 → 설치 상태에 따라 안내 화면 표시
     const repoUrl    = (getOwner(env) && getRepo(env)) ? \`https://github.com/\${getOwner(env)}/\${getRepo(env)}\` : "";
     const actionsUrl = repoUrl ? \`\${repoUrl}/actions/workflows/install-wordpress.yml\` : "";
+    const ghPagesActionsUrl = repoUrl ? \`\${repoUrl}/actions/workflows/gh-pages-fallback.yml\` : "";
 
-    return new Response(\`<!DOCTYPE html>
+    // _db/wordpress.db 존재 여부로 설치 완료 판단
+    let wpInstalled = false;
+    try {
+      const dbRes = await ghFetch(env, "_db/wordpress.db");
+      wpInstalled = !!dbRes;
+    } catch {}
+
+    const commonCss = "*{box-sizing:border-box}body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Malgun Gothic,sans-serif;background:#f0f0f1;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;padding:20px}.card{background:#fff;border:1px solid #c3c4c7;border-radius:4px;max-width:520px;width:100%;padding:40px;text-align:center}.badge{font-size:11px;font-weight:700;padding:3px 10px;border-radius:3px;display:inline-block;margin-bottom:14px}h1{color:#1d2327;font-size:20px;font-weight:600;margin:0 0 10px}p{color:#646970;line-height:1.6;margin:0 0 14px;font-size:14px}a.btn{display:inline-block;background:#2271b1;color:#fff;text-decoration:none;padding:8px 18px;border-radius:3px;font-size:13px;font-weight:600;margin:4px}.steps{text-align:left;background:#f6f7f7;border-radius:4px;padding:14px 18px;margin:14px 0;font-size:13px;color:#3c434a;line-height:2}.note{font-size:12px;color:#a7aaad;margin-top:14px}";
+
+    const statusHtml = wpInstalled
+      ? \`<!DOCTYPE html>
+<html lang="ko"><head><meta charset="UTF-8"><meta http-equiv="refresh" content="20">
+<title>캐시 생성 중</title><style>\${commonCss}</style></head>
+<body><div class="card">
+<div class="badge" style="background:#00a32a;color:#fff">ALMOST READY</div>
+<h1>🎉 WordPress 설치 완료!</h1>
+<p>정적 캐시를 생성하고 있습니다. 잠시 후 사이트가 열립니다.</p>
+<ol class="steps">
+  <li>✅ GitHub 레포지토리 생성</li>
+  <li>✅ WordPress 최신버전 설치 완료</li>
+  <li>✅ 데이터베이스 초기화 완료</li>
+  <li>⏳ 정적 캐시 생성 중...</li>
+</ol>
+\${ghPagesActionsUrl?\`<a class="btn" href="\${ghPagesActionsUrl}" target="_blank">🔄 캐시 생성 진행상황 보기</a>\`:""}
+\${repoUrl?\` <a class="btn" style="background:#6e7d88" href="\${repoUrl}" target="_blank">📁 GitHub 레포 보기</a>\`:""}
+<p class="note">20초마다 자동 새로고침됩니다</p>
+</div></body></html>\`
+      : \`<!DOCTYPE html>
 <html lang="ko"><head><meta charset="UTF-8"><meta http-equiv="refresh" content="30">
-<title>WordPress 준비 중</title>
-<style>*{box-sizing:border-box}body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Malgun Gothic,sans-serif;background:#f0f0f1;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;padding:20px}.card{background:#fff;border:1px solid #c3c4c7;border-radius:4px;max-width:520px;width:100%;padding:40px;text-align:center}.badge{background:#f0b849;color:#fff;font-size:11px;font-weight:700;padding:3px 10px;border-radius:3px;display:inline-block;margin-bottom:14px}h1{color:#1d2327;font-size:20px;font-weight:600;margin:0 0 10px}p{color:#646970;line-height:1.6;margin:0 0 14px;font-size:14px}a.btn{display:inline-block;background:#2271b1;color:#fff;text-decoration:none;padding:8px 18px;border-radius:3px;font-size:13px;font-weight:600;margin:4px}.steps{text-align:left;background:#f6f7f7;border-radius:4px;padding:14px 18px;margin:14px 0;font-size:13px;color:#3c434a;line-height:2}.note{font-size:12px;color:#a7aaad;margin-top:14px}</style>
-</head><body><div class="card">
-<div class="badge">WORDPRESS INSTALLING</div>
+<title>WordPress 준비 중</title><style>\${commonCss}</style></head>
+<body><div class="card">
+<div class="badge" style="background:#f0b849;color:#fff">WORDPRESS INSTALLING</div>
 <h1>⚙️ WordPress 설치 진행 중</h1>
 <p>GitHub Actions가 WordPress 최신버전을 자동으로 설치하고 있습니다.</p>
 <ol class="steps">
@@ -580,7 +607,9 @@ export default {
 \${actionsUrl?\`<a class="btn" href="\${actionsUrl}" target="_blank">🔄 설치 진행상황 보기</a>\`:""}
 \${repoUrl?\` <a class="btn" style="background:#6e7d88" href="\${repoUrl}" target="_blank">📁 GitHub 레포 보기</a>\`:""}
 <p class="note">30초마다 자동 새로고침됩니다</p>
-</div></body></html>\`,
+</div></body></html>\`;
+
+    return new Response(statusHtml,
       {status:503,headers:{"Content-Type":"text/html;charset=utf-8","Cache-Control":"no-store","Retry-After":"30",...SEC_HEADERS}});
   },
 };`;
@@ -952,6 +981,9 @@ on:
   schedule:
     - cron: '0 */3 * * *'  # 3시간마다 정적 캐시 갱신
   workflow_dispatch:
+  workflow_run:
+    workflows: ["🚀 WordPress 설치 + SQLite DB 초기화"]
+    types: [completed]
 
 permissions:
   contents: write

@@ -1278,10 +1278,7 @@ function buildPhpRunnerReadme() {
 `;
 }
 
-// ─── re-export: GitHub Pages 호스팅용 함수들 (github-pages-hosting.js에서 공유) ─
-export { buildWordPressD1SchemaSqls, buildWordPressInitSqls } from "./cf-pages-hosting-sql.js";
-
-// ─── 내부 SQL 빌더 (하위 호환) ───────────────────────────────────────────────
+// ─── SQL 빌더 (내부 함수 — 하위 호환) ───────────────────────────────────────────────
 function buildWordPressD1SchemaSqls({ dbPrefix }) {
   const p = dbPrefix;
   return [

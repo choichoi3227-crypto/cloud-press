@@ -18,7 +18,7 @@
  *   L3: stale-while-revalidate (오래된 캐시도 즉시 반환 후 백그라운드 갱신)
  */
 
-const WP_VERSION    = "6.7.2";
+const WP_VERSION    = "latest";
 const WP_CORE_CDN   = `https://cdn.jsdelivr.net/npm/wordpress-static@${WP_VERSION}`;
 const WP_GITHUB_RAW = "https://raw.githubusercontent.com/WordPress/WordPress/master";
 

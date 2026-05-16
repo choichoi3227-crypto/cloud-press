@@ -466,31 +466,13 @@ async function handleWordPressRequest(request, env, ctx) {
     });
   }
 
-  // ── PHP 실행 (php-wasm) ───────────────────────────────────────────────────
-  if (!env.PHP_RUNNER) {
-    return new Response(`<!DOCTYPE html><html lang="ko"><head><meta charset="UTF-8"><title>PHP Runner 필요</title>
-<style>body{font-family:sans-serif;max-width:640px;margin:80px auto;padding:24px;background:#0a0a0a;color:#e5e5e5}h1{color:#f87171}
-pre{background:#1c1c1c;padding:16px;border-radius:8px;font-size:13px;color:#86efac;line-height:1.6;overflow:auto}</style></head><body>
-<h1>⚙️ PHP Runner Worker 설정 필요</h1>
-<p>진짜 WordPress PHP 실행을 위해 <code>cloudpress-php</code> worker를 먼저 배포하세요.</p>
-<pre># 1단계: PHP Runner Worker 배포
-wrangler deploy --config wrangler-php.toml
-
-# 2단계: wrangler.toml [[services]] 바인딩 활성화 (이미 활성화됨)
-
-# 3단계: 메인 Worker 재배포
-wrangler deploy</pre></body></html>`,
-      { status: 503, headers: { "Content-Type": "text/html; charset=utf-8" } }
-    );
-  }
-
-  // PHP 캐시 스킵 조건
+  // ── PHP 캐시 스킵 조건 ───────────────────────────────────────────────────
   const SKIP_CACHE = ["/wp-admin", "/wp-login.php", "/cart", "/checkout", "/my-account", "/wp-cron.php"];
   const isCacheable = method === "GET"
     && !SKIP_CACHE.some(s => path.startsWith(s))
     && !(request.headers.get("Cookie") || "").includes("wordpress_logged_in");
 
-  // KV PHP 캐시 조회
+  // ── KV PHP 캐시 조회 (PHP_RUNNER 유무 관계없이 항상 확인) ─────────────────
   if (isCacheable) {
     const cached = await kvGet(`php:${url.pathname}${url.search}`);
     if (cached) {
@@ -505,7 +487,108 @@ wrangler deploy</pre></body></html>`,
     }
   }
 
-  // PHP 환경변수 구성
+  // ── GitHub _cache/ 정적 HTML 서빙 헬퍼 (PHP Runner 없어도 동작) ──────────
+  const serveStaticCache = async () => {
+    if (!mirror.enabled) return null;
+    const cachePath = (path === "/" || path === "")
+      ? "_cache/index.html"
+      : `_cache${path.endsWith("/") ? path : path + "/"}index.html`;
+    const r = await mirror.get(cachePath);
+    if (!r) return null;
+    const html = await r.text();
+    if (ctx && isCacheable) {
+      ctx.waitUntil(kvSet(`php:${url.pathname}${url.search}`, html, 1800));
+    }
+    return new Response(html, {
+      headers: {
+        "Content-Type":  "text/html; charset=utf-8",
+        "Cache-Control": "public, s-maxage=30, stale-while-revalidate=1800",
+        "X-Cache":       "GH-STATIC",
+        "X-Content-Type-Options": "nosniff",
+      },
+    });
+  };
+
+  // ── GitHub Pages 폴백 서빙 헬퍼 ─────────────────────────────────────────
+  const serveGhPages = async () => {
+    const ghPagesUrl = env.GH_PAGES_URL || "";
+    if (!ghPagesUrl) return null;
+    try {
+      const r = await fetch(`${ghPagesUrl}${path}`, {
+        cf: { cacheEverything: true, cacheTtl: 300 },
+        headers: { "User-Agent": "CloudPress-Fallback/5.0" },
+      });
+      if (!r.ok) return null;
+      const html = await r.text();
+      return new Response(html, {
+        headers: {
+          "Content-Type":  "text/html; charset=utf-8",
+          "Cache-Control": "public, max-age=60",
+          "X-Fallback":    "github-pages",
+          "X-Content-Type-Options": "nosniff",
+        },
+      });
+    } catch { return null; }
+  };
+
+  // ── PHP_RUNNER가 없는 경우: 정적 캐시 → GitHub Pages 순으로 폴백 ─────────
+  if (!env.PHP_RUNNER) {
+    const staticRes = await serveStaticCache();
+    if (staticRes) return staticRes;
+
+    const ghRes = await serveGhPages();
+    if (ghRes) return ghRes;
+
+    // 정적 캐시도 없으면 WordPress 설치 안내 (GitHub Actions 실행 유도)
+    const repoUrl = mirror.enabled
+      ? `https://github.com/${mirror.owner}/${mirror.repo}`
+      : "";
+    const actionsUrl = repoUrl
+      ? `${repoUrl}/actions/workflows/install-wordpress.yml`
+      : "";
+    return new Response(`<!DOCTYPE html>
+<html lang="ko"><head><meta charset="UTF-8"><meta http-equiv="refresh" content="30">
+<title>WordPress 준비 중</title>
+<style>
+*{box-sizing:border-box}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Malgun Gothic,sans-serif;
+  background:#f0f0f1;display:flex;align-items:center;justify-content:center;
+  min-height:100vh;margin:0;padding:20px}
+.card{background:#fff;border:1px solid #c3c4c7;border-radius:4px;
+  max-width:520px;width:100%;padding:40px;text-align:center}
+.icon{font-size:48px;margin-bottom:16px}
+h1{color:#1d2327;font-size:20px;font-weight:600;margin:0 0 10px}
+p{color:#646970;line-height:1.6;margin:0 0 16px;font-size:14px}
+.badge{display:inline-block;background:#f0b849;color:#fff;font-size:11px;
+  font-weight:700;padding:3px 10px;border-radius:3px;margin-bottom:14px;letter-spacing:.5px}
+a.btn{display:inline-block;background:#2271b1;color:#fff;text-decoration:none;
+  padding:8px 18px;border-radius:3px;font-size:13px;font-weight:600;margin:4px}
+.steps{text-align:left;background:#f6f7f7;border-radius:4px;padding:16px 20px;
+  margin:16px 0;font-size:13px;color:#3c434a;line-height:2}
+.steps li{margin:0}
+</style></head>
+<body><div class="card">
+<div class="icon">⚙️</div>
+<div class="badge">WORDPRESS INITIALIZING</div>
+<h1>WordPress 설치를 완료하는 중입니다</h1>
+<p>GitHub Actions 워크플로우가 WordPress를 자동으로 설치합니다.<br>
+완료 후 이 페이지가 자동으로 갱신됩니다. (30초마다)</p>
+<ol class="steps">
+  <li>✅ GitHub 레포지토리 생성 완료</li>
+  <li>⏳ GitHub Actions: WordPress 6.7.2 설치 중...</li>
+  <li>⏳ GitHub Actions: 정적 캐시 생성 중...</li>
+</ol>
+${actionsUrl ? `<a class="btn" href="${actionsUrl}" target="_blank">🔄 Actions 진행상황 보기</a>` : ""}
+${repoUrl ? `<a class="btn" style="background:#6e7d88" href="${repoUrl}" target="_blank">📁 GitHub 레포 보기</a>` : ""}
+<p style="margin-top:16px;font-size:12px;color:#a7aaad">
+  CloudPress · 페이지는 30초 후 자동 새로고침됩니다
+</p>
+</div></body></html>`,
+      { status: 503, headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" } }
+    );
+  }
+
+  // ── PHP 환경변수 구성 ────────────────────────────────────────────────────
   const siteUrl = `${url.protocol}//${url.host}`;
   let postBody  = "";
   if (["POST", "PUT", "PATCH"].includes(method)) {
@@ -544,7 +627,7 @@ wrangler deploy</pre></body></html>`,
       PHP_SELF:       phpFile,
       GATEWAY_INTERFACE: "CGI/1.1",
       SERVER_PROTOCOL:   "HTTP/1.1",
-      SERVER_SOFTWARE:   "CloudPress/4.0",
+      SERVER_SOFTWARE:   "CloudPress/5.0",
       HTTP_COOKIE:          request.headers.get("Cookie")            || "",
       HTTP_USER_AGENT:      request.headers.get("User-Agent")        || "CloudPress",
       HTTP_ACCEPT:          request.headers.get("Accept")            || "*/*",
@@ -555,7 +638,6 @@ wrangler deploy</pre></body></html>`,
       CONTENT_TYPE:         request.headers.get("Content-Type")      || "",
       CONTENT_LENGTH:       String(postBody.length),
       QUERY_STRING:         url.search.replace(/^\?/, ""),
-      // GitHub 미러 정보 (PHP Runner가 코어 파일 fetching에 활용)
       GITHUB_OWNER: mirror.owner,
       GITHUB_REPO:  mirror.repo,
       GITHUB_TOKEN: mirror.token,
@@ -570,16 +652,60 @@ wrangler deploy</pre></body></html>`,
     skipCache: !isCacheable,
   };
 
-  // PHP Runner 호출 (Service Binding)
-  const phpRes = await env.PHP_RUNNER.fetch(
-    new Request("https://php/run-wordpress", {
-      method:  "POST",
-      headers: { "Content-Type": "application/json" },
-      body:    JSON.stringify(payload),
-    })
-  );
+  // ── PHP Runner 호출 (Service Binding) ────────────────────────────────────
+  let phpRes = null;
+  try {
+    phpRes = await env.PHP_RUNNER.fetch(
+      new Request("https://php/run-wordpress", {
+        method:  "POST",
+        headers: { "Content-Type": "application/json" },
+        body:    JSON.stringify(payload),
+      })
+    );
+  } catch (e) {
+    console.error("[PHP_RUNNER] 호출 실패:", e.message);
+  }
 
-  // 미디어 업로드 미러링 (POST /wp-json/wp/v2/media)
+  // PHP Runner 실패(5xx, 예외) → _cache/ 정적 HTML 폴백
+  if (!phpRes || phpRes.status >= 500) {
+    const staticRes = await serveStaticCache();
+    if (staticRes) return staticRes;
+
+    const ghRes = await serveGhPages();
+    if (ghRes) return ghRes;
+
+    // 모든 폴백 실패: KV stale 캐시 최후 시도
+    const stale = await kvGet(`php:${url.pathname}${url.search}`);
+    if (stale) {
+      return new Response(stale, {
+        headers: {
+          "Content-Type":  "text/html; charset=utf-8",
+          "Cache-Control": "public, max-age=30",
+          "X-Fallback":    "kv-stale",
+        },
+      });
+    }
+
+    return new Response(`<!DOCTYPE html>
+<html lang="ko"><head><meta charset="UTF-8"><meta http-equiv="refresh" content="15">
+<title>일시적 오류</title>
+<style>body{font-family:sans-serif;background:#f0f0f1;display:flex;align-items:center;
+  justify-content:center;min-height:100vh;margin:0}.card{background:#fff;border:1px solid #c3c4c7;
+  border-radius:4px;max-width:440px;padding:40px;text-align:center}
+.badge{background:#d63638;color:#fff;font-size:11px;font-weight:700;
+  padding:3px 10px;border-radius:3px;display:inline-block;margin-bottom:14px}
+h1{color:#1d2327;font-size:20px;margin:0 0 10px}
+p{color:#646970;font-size:14px;line-height:1.6;margin:0}</style>
+</head><body><div class="card">
+<div class="badge">ERROR</div>
+<h1>⚠️ 일시적 오류</h1>
+<p>WordPress 실행 중 오류가 발생했습니다.<br>15초 후 자동으로 다시 시도합니다.</p>
+</div></body></html>`,
+      { status: 502, headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" } }
+    );
+  }
+
+  // ── 미디어 업로드 미러링 (POST /wp-json/wp/v2/media) ────────────────────
   if (path === "/wp-json/wp/v2/media" && method === "POST" && phpRes.status === 201 && ctx) {
     ctx.waitUntil((async () => {
       try {
@@ -600,7 +726,7 @@ wrangler deploy</pre></body></html>`,
     })());
   }
 
-  // PHP 출력 KV 캐시 저장
+  // ── PHP 출력 KV 캐시 저장 ────────────────────────────────────────────────
   if (phpRes.status === 200 && isCacheable && ctx) {
     const ct = phpRes.headers.get("Content-Type") || "";
     if (ct.includes("text/html")) {

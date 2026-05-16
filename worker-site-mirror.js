@@ -31,7 +31,7 @@ const GH_OWNER     = "%%GH_OWNER%%";
 const GH_REPO      = "%%GH_REPO%%";
 const GH_BRANCH    = "main";
 const GH_PAGES_URL = "%%GH_PAGES_URL%%"; // GitHub Pages 폴백 URL
-const WP_VERSION   = "6.7.2";
+const WP_VERSION   = "latest";
 
 // ─── 정적 파일 확장자 ────────────────────────────────────────────────────────
 const STATIC_EXT = /\.(css|js|jpg|jpeg|png|gif|webp|avif|svg|ico|woff2?|ttf|eot|otf|map|txt|xml|json|pdf|zip|mp4|mp3|ogg|wav|webm|gz|tar)$/i;
@@ -130,7 +130,7 @@ async function fetchFromGitHub(env, filePath, noCache = false) {
 // ─── WordPress 코어 정적 자산 fetch (jsDelivr CDN → GitHub Raw → 공식) ───────
 async function fetchWpCore(filePath) {
   // 1. jsDelivr CDN (빠른 글로벌 엣지)
-  const cdnUrl = `https://cdn.jsdelivr.net/gh/WordPress/WordPress@${WP_VERSION}/${filePath}`;
+  const cdnUrl = `https://cdn.jsdelivr.net/gh/WordPress/WordPress@master/${filePath}`;
   try {
     const res = await fetch(cdnUrl, { cf: { cacheEverything: true, cacheTtl: 86400 * 7 } });
     if (res.ok) return res;
@@ -359,11 +359,11 @@ a.btn{display:inline-block;background:#2271b1;color:#fff;text-decoration:none;
 <body><div class="card">
 <div class="badge">WORDPRESS INSTALLING</div>
 <h1>⚙️ WordPress 설치 진행 중</h1>
-<p>GitHub Actions가 WordPress 6.7.2를 자동으로 설치하고 있습니다.<br>
+<p>GitHub Actions가 WordPress 최신버전을 자동으로 설치하고 있습니다.<br>
 완료 후 이 페이지가 자동으로 갱신됩니다.</p>
 <ol class="steps">
   <li>✅ GitHub 레포지토리 생성</li>
-  <li>⏳ WordPress 6.7.2 전체 파일 설치 중...</li>
+  <li>⏳ WordPress 최신버전 전체 파일 설치 중...</li>
   <li>⏳ 데이터베이스 초기화 중...</li>
   <li>⏳ 정적 캐시 생성 중...</li>
 </ol>

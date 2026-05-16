@@ -1,5 +1,5 @@
 /**
- * CloudPress — cf-pages-hosting.js v6.0
+ * CloudPress — cf-pages-hosting.js v7.0
  * ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
  * 진짜 WordPress 호스팅 프로비저닝 (D1 완전 제거 버전)
  *
@@ -859,10 +859,24 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
+      - name: CF_API_TOKEN secret 확인
+        run: |
+          if [ -z "\$CLOUDFLARE_API_TOKEN" ]; then
+            echo "❌ CF_API_TOKEN secret이 설정되지 않았습니다."
+            echo "   레포 Settings → Secrets and variables → Actions → New repository secret"
+            echo "   Name: CF_API_TOKEN  |  Value: Cloudflare API 토큰 (Workers:Edit 권한 필요)"
+            echo "   Name: CF_ACCOUNT_ID |  Value: Cloudflare 계정 ID"
+            echo "   토큰 발급: https://dash.cloudflare.com/profile/api-tokens"
+            exit 1
+          fi
+          echo "✅ CF_API_TOKEN 확인 완료"
+        env:
+          CLOUDFLARE_API_TOKEN: \${{ secrets.CF_API_TOKEN }}
       - name: php-runner Worker 배포
         run: npx wrangler deploy --config wrangler-php.toml
         env:
           CLOUDFLARE_API_TOKEN: \${{ secrets.CF_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: \${{ secrets.CF_ACCOUNT_ID }}
 
   deploy-worker:
     name: 메인 Worker 배포
@@ -877,15 +891,18 @@ jobs:
         run: echo "\${{ secrets.GH_TOKEN }}" | npx wrangler secret put GITHUB_TOKEN
         env:
           CLOUDFLARE_API_TOKEN: \${{ secrets.CF_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: \${{ secrets.CF_ACCOUNT_ID }}
         continue-on-error: true
       - name: 메인 Worker 배포
         run: npx wrangler deploy
         env:
           CLOUDFLARE_API_TOKEN: \${{ secrets.CF_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: \${{ secrets.CF_ACCOUNT_ID }}
       - name: php-runner GITHUB_TOKEN secret 설정
         run: echo "\${{ secrets.GH_TOKEN }}" | npx wrangler secret put GITHUB_TOKEN --config wrangler-php.toml
         env:
           CLOUDFLARE_API_TOKEN: \${{ secrets.CF_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: \${{ secrets.CF_ACCOUNT_ID }}
         continue-on-error: true
 `;
 }
@@ -916,8 +933,13 @@ jobs:
 
       - name: PHP 8.2 + WordPress 의존성 설치
         run: |
+          # Ubuntu 24.04 (noble) 기본 저장소에는 php8.2 패키지가 없음 → ondrej/php PPA 추가
+          sudo apt-get update -qq
+          sudo apt-get install -y software-properties-common
+          sudo add-apt-repository -y ppa:ondrej/php
+          sudo apt-get update -qq
           sudo apt-get install -y php8.2-cli php8.2-sqlite3 php8.2-mbstring php8.2-xml php8.2-curl php8.2-gd sqlite3
-          echo "✅ PHP 설치 완료: $(php -v | head -1)"
+          echo "✅ PHP 설치 완료: $(php8.2 -v | head -1)"
 
       - name: WordPress 코어 다운로드 (없으면)
         run: |

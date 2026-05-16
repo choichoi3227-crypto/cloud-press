@@ -473,6 +473,13 @@ export async function provisionCloudflarePagesHosting({
   // ── 4. GitHub 레포 생성 + WordPress 파일 push ─────────────────────────────
   let githubRepoUrl = null;
 
+  // siteUrl을 함수 스코프에 미리 정의 (GitHub 블록 밖에서도 참조 가능)
+  const siteUrl = initialDomain
+    ? `https://${initialDomain}`
+    : cfAccountId
+      ? `https://${workerName}.${shortId}.workers.dev`
+      : `https://${repoName}.workers.dev`;
+
   if (ghToken && owner) {
     await log("▶ GitHub 레포 생성 중...");
     const created = await createGitHubRepo({ ghToken, owner, repoName, log });
@@ -481,11 +488,6 @@ export async function provisionCloudflarePagesHosting({
       await log("▶ WordPress 파일 GitHub 레포에 push 중...");
 
       // wp-config.php 생성 (자동 생성 자격증명 사용)
-      const siteUrl = initialDomain
-        ? `https://${initialDomain}`
-        : cfAccountId
-          ? `https://${workerName}.${shortId}.workers.dev`
-          : `https://${repoName}.workers.dev`;
 
       const wpConfigContent = buildWpConfig({
         siteId,

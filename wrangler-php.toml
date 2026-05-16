@@ -9,7 +9,7 @@
 
 name = "cloudpress-php"
 main = "php-runner.js"
-compatibility_date = "2025-04-01"
+compatibility_date = "2026-05-14"
 compatibility_flags = ["nodejs_compat"]
 
 # php-wasm은 CPU 집약적 — 최대 CPU 시간 허용
@@ -28,7 +28,7 @@ id      = "9b8370d20a9646b9aa73f63c9200379f"
 
 # ── 환경변수 ──────────────────────────────────────────────────────────────────
 [vars]
-WP_VERSION  = "6.7.2"
+WP_VERSION  = "latest"
 
 # ── Secrets (wrangler secret put 으로 설정) ────────────────────────────────────
 #

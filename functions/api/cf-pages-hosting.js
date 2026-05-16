@@ -1084,7 +1084,7 @@ jobs:
           if [ -f "wp-config.php" ]; then
             SITEURL=$(grep -i "siteurl" wp-config.php | grep -o "http[s]*://[^'"]*" | head -1 || true)
           fi
-          SITEURL="${WP_SITEURL:-${SITEURL:-http://localhost:8888}}"
+          SITEURL="\${WP_SITEURL:-\${SITEURL:-http://localhost:8888}}"
           WP_HOST=$(echo "$SITEURL" | sed 's|^http[s]*://||' | sed 's|/.*||')
           echo "🚀 PHP 내장 서버 시작 (host: $WP_HOST)"
 
@@ -1103,9 +1103,9 @@ jobs:
             grep -o '<loc>[^<]*</loc>' /tmp/sitemap.xml | sed 's|<loc>||;s|</loc>||' | head -50 | while IFS= read -r loc_url; do
               rel_path=$(echo "$loc_url" | sed "s|$SITEURL||" | sed 's|http://localhost:8888||')
               if [ -n "$rel_path" ] && [ "$rel_path" != "/" ]; then
-                mkdir -p "_cache${rel_path}"
+                mkdir -p "_cache\${rel_path}"
                 curl -sf -L --max-time 20 -H "Host: $WP_HOST" \
-                  "http://localhost:8888${rel_path}" -o "_cache${rel_path}index.html" 2>/dev/null || true
+                  "http://localhost:8888\${rel_path}" -o "_cache\${rel_path}index.html" 2>/dev/null || true
                 echo "  ✅ 캐시: $rel_path"
               fi
             done
@@ -1113,7 +1113,7 @@ jobs:
 
           kill $SERVER_PID 2>/dev/null || true
           CACHE_COUNT=$(find _cache -name "*.html" | wc -l)
-          echo "✅ 정적 캐시 생성: ${CACHE_COUNT}개 페이지"
+          echo "✅ 정적 캐시 생성: \${CACHE_COUNT}개 페이지"
 
       - name: _cache/ 커밋 & 푸시
         run: |

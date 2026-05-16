@@ -1,7 +1,7 @@
 {
   "name": "cloud-press",
   "version": "4.0.0",
-  "description": "서버리스 WordPress 호스팅 — php-wasm + Cloudflare Pages + GitHub 미러링",
+  "description": "서버리스 WordPress 호스팅 — php-wasm + Cloudflare Workers + GitHub 미러링",
   "private": true,
   "type": "module",
   "scripts": {
@@ -10,6 +10,7 @@
     "deploy": "npm run deploy:php && npm run deploy:main",
     "deploy:main": "wrangler deploy",
     "deploy:php": "wrangler deploy --config wrangler-php.toml",
+    "deploy:all": "npm run deploy:php && npm run deploy:main",
     "db:init": "wrangler d1 execute cloudpress-db --file=schema.sql",
     "db:migrate": "wrangler d1 execute cloudpress-db --file=schema-migrate.sql",
     "db:remote": "wrangler d1 execute cloudpress-db --remote --file=schema.sql",
@@ -22,7 +23,7 @@
     "wrangler": "^4.0.0"
   },
   "dependencies": {
-    "@php-wasm/web": "^0.9.27"
+    "@php-wasm/web": "^0.9.46"
   },
   "engines": {
     "node": ">=18.0.0"

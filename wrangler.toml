@@ -41,11 +41,14 @@ binding = "KV"
 id      = "9b8370d20a9646b9aa73f63c9200379f"
 
 # ── PHP Runner: 진짜 WordPress PHP 실행 (php-wasm) ────────────────────────────
-# cloudpress-php Worker를 먼저 배포한 후 아래 주석을 해제하세요:
-#   wrangler deploy --config wrangler-php.toml
-[[services]]
-binding = "PHP_RUNNER"
-service = "cloudpress-php"
+# 플랫폼 메인 Worker(cloud-press)는 PHP를 직접 실행하지 않습니다.
+# PHP 실행은 각 사이트별 Worker가 cloudpress-php Service Binding으로 처리합니다.
+#
+# 배포 순서:
+#   1. wrangler deploy --config wrangler-php.toml   ← cloudpress-php 먼저 배포
+#   2. wrangler deploy                               ← 메인 플랫폼 Worker 배포
+#
+# (package.json의 "deploy" 스크립트가 이 순서를 자동으로 처리합니다)
 
 # ── Secrets (wrangler secret put 명령으로 설정) ───────────────────────────────
 #

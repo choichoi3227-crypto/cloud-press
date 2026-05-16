@@ -447,11 +447,23 @@ export default {
     const fb=await ghPagesFallback(e,path)||await kvFallback(e,path,url.search);
     if(fb)return fb;
 
-    // 3. 최후 수단: GitHub 레포 index.html 서빙
-    const idxR=await ghFetch(e,"_cache/index.html");
-    if(idxR){
-      const html=await idxR.text();
-      return new Response(html,{status:200,headers:{"Content-Type":"text/html;charset=utf-8","Cache-Control":"public,max-age=60","X-Fallback":"index",...SEC_HEADERS}});
+    // 3. 최후 수단: GitHub 레포 index.html 서빙 (_cache/ 또는 루트)
+    const idxPaths=["_cache/index.html","index.html"];
+    for(const idxPath of idxPaths){
+      const idxR=await ghFetch(e,idxPath);
+      if(idxR){
+        const html=await idxR.text();
+        return new Response(html,{status:200,headers:{"Content-Type":"text/html;charset=utf-8","Cache-Control":"public,max-age=60","X-Fallback":"index",...SEC_HEADERS}});
+      }
+    }
+
+    // 4. GitHub Pages 베이스 URL에서 직접 루트 시도
+    const pagesBase=getPages(e);
+    if(pagesBase){
+      try{
+        const r=await fetch(pagesBase,{cf:{cacheEverything:true,cacheTtl:60},headers:{"User-Agent":"CloudPress-Fallback/1.0"}});
+        if(r.ok)return new Response(await r.text(),{status:200,headers:{"Content-Type":"text/html;charset=utf-8","Cache-Control":"public,max-age=60","X-Fallback":"github-pages-root",...SEC_HEADERS}});
+      }catch{}
     }
 
     return errPage(503,"준비 중","WordPress 사이트가 설정 중입니다. GitHub Actions 설치가 완료되면 자동으로 활성화됩니다.");

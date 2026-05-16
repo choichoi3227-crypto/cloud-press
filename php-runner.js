@@ -413,11 +413,13 @@ async function buildWpVFS(php, env, payload) {
     githubOwner,
     githubRepo,
     githubBranch = "main",
+    githubToken: payloadToken,
     wpConfigContent,
     dbContent,
   } = siteConfig;
 
-  const token = env.GITHUB_TOKEN;
+  // env의 GITHUB_TOKEN 우선, payload의 githubToken 폴백 (Service Binding 호출 시)
+  const token = env.GITHUB_TOKEN || payloadToken || "";
   const wpRoot = "/var/www/wordpress";
 
   // 1. WordPress 코어 파일 마운트 (병렬 fetch)

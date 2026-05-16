@@ -35,3 +35,29 @@ UPDATE sites SET status = 'active' WHERE status = 'pending_domain';
 -- ── php_logs 테이블 누락 컬럼 추가 ──────────────────────────────────────────
 ALTER TABLE php_logs ADD COLUMN level   TEXT DEFAULT 'info';
 ALTER TABLE php_logs ADD COLUMN is_read INTEGER DEFAULT 0;
+
+-- ── file_snapshots 테이블 추가 (백업 기능) ────────────────────────────────
+CREATE TABLE IF NOT EXISTS file_snapshots (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    site_id       TEXT NOT NULL,
+    backup_path   TEXT,
+    snapshot_type TEXT DEFAULT 'manual',
+    label         TEXT,
+    size          INTEGER DEFAULT 0,
+    created_at    TEXT DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(site_id) REFERENCES sites(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_snapshots_site ON file_snapshots(site_id);
+
+-- ── notices 테이블 추가 (공지사항) ────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS notices (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    title      TEXT NOT NULL,
+    content    TEXT NOT NULL,
+    type       TEXT DEFAULT 'info',
+    is_active  INTEGER DEFAULT 1,
+    created_by TEXT,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+);

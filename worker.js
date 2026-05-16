@@ -425,7 +425,7 @@ async function handleWordPressRequest(request, env, ctx) {
     // WordPress 코어 → jsDelivr CDN → WordPress/WordPress GitHub
     if (!res) {
       for (const base of [
-        `https://cdn.jsdelivr.net/npm/wordpress-static@6.7.2`,
+        `https://cdn.jsdelivr.net/npm/wordpress-static@latest`,
         `https://raw.githubusercontent.com/WordPress/WordPress/master`,
       ]) {
         try {
@@ -575,7 +575,7 @@ a.btn{display:inline-block;background:#2271b1;color:#fff;text-decoration:none;
 완료 후 이 페이지가 자동으로 갱신됩니다. (30초마다)</p>
 <ol class="steps">
   <li>✅ GitHub 레포지토리 생성 완료</li>
-  <li>⏳ GitHub Actions: WordPress 6.7.2 설치 중...</li>
+  <li>⏳ GitHub Actions: WordPress 최신버전 설치 중...</li>
   <li>⏳ GitHub Actions: 정적 캐시 생성 중...</li>
 </ol>
 ${actionsUrl ? `<a class="btn" href="${actionsUrl}" target="_blank">🔄 Actions 진행상황 보기</a>` : ""}

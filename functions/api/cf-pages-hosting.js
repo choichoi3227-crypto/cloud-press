@@ -623,7 +623,7 @@ jobs:
           wget -q https://wordpress.org/latest.tar.gz -O /tmp/wp.tar.gz
           tar -xzf /tmp/wp.tar.gz -C /tmp/
           WP_VER=$(grep "^\$wp_version" /tmp/wordpress/wp-includes/version.php | grep -oP "[\d.]+")
-          echo "✅ WordPress ${WP_VER} 압축 해제 완료"
+          echo "✅ WordPress \${WP_VER} 압축 해제 완료"
 
           # wp-config.php는 보호 (덮어쓰지 않음)
           echo "📁 WordPress 파일 복사 중 (wp-config.php 제외)..."

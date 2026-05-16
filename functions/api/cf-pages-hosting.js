@@ -904,7 +904,8 @@ jobs:
     steps:
       - uses: actions/deploy-pages@v4
         id: deployment
-`;\n}
+`;
+}
 
 // ─── wrangler.toml 빌드 (D1 제거, SQLite .db 사용) ──────────────────────────
 function buildWranglerToml({ workerName, kvCacheId, kvCacheName, siteId, ghOwner, ghRepo, ghPagesUrl }) {

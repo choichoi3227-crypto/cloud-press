@@ -812,7 +812,7 @@
             try {
                 const res  = await fetch(`/api/php-versions?id=${siteId}`, { headers: HEADERS });
                 const data = await res.json();
-                const versions = data.available || [];
+                const versions = data.versions || data.available || [];
                 const loading  = document.getElementById('php-list-loading');
                 const list     = document.getElementById('php-list');
 
@@ -1072,7 +1072,7 @@
                     return;
                 }
                 el.innerHTML = domains.map(d => {
-                    const isActive = d.cloudflare_status === 'active';
+                    const isActive = (d.cf_ssl_status || d.cloudflare_status) === 'active';
                     return `<div class="p-3 bg-white/5 border border-white/10 rounded-xl">
                         <div class="flex items-center justify-between">
                             <div class="flex items-center gap-2">

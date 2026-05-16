@@ -1,0 +1,418 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>공지 관리 — CloudPress Admin</title>
+    <link rel="stylesheet" href="/style.css">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+</head>
+<body class="bg-[#050505] text-white md:flex md:h-screen">
+<script>
+    const _at = localStorage.getItem('admin_token');
+    if (!_at) window.location.href = '/login';
+</script>
+
+<!-- 모바일 헤더 -->
+<header class="md:hidden sticky top-0 z-50 bg-[#050505]/95 backdrop-blur-lg border-b border-white/10">
+    <div class="flex justify-between items-center px-4 py-3">
+        <span class="text-xl font-black text-blue-500">CP <span class="text-white">ADMIN</span></span>
+        <button id="mobileMenuBtn" class="text-gray-400 hover:text-white p-2"><i class="fas fa-bars text-xl"></i></button>
+    </div>
+    <div id="mobileMenu" class="hidden border-t border-white/10 py-2 px-2 space-y-1">
+        <a href="/admin"           class="flex items-center gap-3 px-4 py-3 rounded-xl hover:bg-white/5 transition text-gray-400"><i class="fas fa-chart-line w-5"></i> 개요</a>
+        <a href="/admin-users"     class="flex items-center gap-3 px-4 py-3 rounded-xl hover:bg-white/5 transition text-gray-400"><i class="fas fa-users w-5"></i> 사용자 관리</a>
+        <a href="/admin-sites"     class="flex items-center gap-3 px-4 py-3 rounded-xl hover:bg-white/5 transition text-gray-400"><i class="fas fa-globe w-5"></i> 사이트 관리</a>
+        <a href="/admin-inquiries" class="flex items-center gap-3 px-4 py-3 rounded-xl hover:bg-white/5 transition text-gray-400"><i class="fas fa-comments w-5"></i> 문의 관리</a>
+        <a href="/admin-notices"   class="flex items-center gap-3 px-4 py-3 rounded-xl bg-white/10 font-bold"><i class="fas fa-bullhorn w-5"></i> 공지 관리</a>
+        <a href="/admin-settings"  class="flex items-center gap-3 px-4 py-3 rounded-xl hover:bg-white/5 transition text-gray-400"><i class="fas fa-cog w-5"></i> 시스템 설정</a>
+        <div class="border-t border-white/10 mt-2 pt-2">
+            <button onclick="logout()" class="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-red-400 hover:bg-red-900/20 transition"><i class="fas fa-sign-out-alt w-5"></i> 로그아웃</button>
+        </div>
+    </div>
+</header>
+<script>document.getElementById('mobileMenuBtn').addEventListener('click',()=>document.getElementById('mobileMenu').classList.toggle('hidden'));</script>
+
+<!-- 사이드바 -->
+<aside class="w-64 border-r border-white/10 p-6 flex flex-col hidden md:flex flex-shrink-0">
+    <div class="text-2xl font-black text-blue-500 mb-10">CP <span class="text-white">ADMIN</span></div>
+    <nav class="flex-1 space-y-1">
+        <a href="/admin"           class="flex items-center gap-3 p-3 rounded-xl hover:bg-white/5 transition text-gray-400 text-sm"><i class="fas fa-chart-line w-5 text-center"></i> 개요</a>
+        <a href="/admin-users"     class="flex items-center gap-3 p-3 rounded-xl hover:bg-white/5 transition text-gray-400 text-sm"><i class="fas fa-users w-5 text-center"></i> 사용자 관리</a>
+        <a href="/admin-sites"     class="flex items-center gap-3 p-3 rounded-xl hover:bg-white/5 transition text-gray-400 text-sm"><i class="fas fa-globe w-5 text-center"></i> 사이트 관리</a>
+        <a href="/admin-inquiries" class="flex items-center gap-3 p-3 rounded-xl hover:bg-white/5 transition text-gray-400 text-sm"><i class="fas fa-comments w-5 text-center"></i> 문의 관리</a>
+        <a href="/admin-notices"   class="flex items-center gap-3 p-3 rounded-xl bg-white/10 font-bold text-sm"><i class="fas fa-bullhorn w-5 text-center"></i> 공지 관리</a>
+        <a href="/admin-settings"  class="flex items-center gap-3 p-3 rounded-xl hover:bg-white/5 transition text-gray-400 text-sm"><i class="fas fa-cog w-5 text-center"></i> 시스템 설정</a>
+    </nav>
+    <button onclick="logout()" class="mt-auto w-full bg-red-600/20 border border-red-500/30 text-red-400 py-3 rounded-xl font-bold hover:bg-red-600/30 transition text-sm">
+        <i class="fas fa-sign-out-alt mr-2"></i> 로그아웃
+    </button>
+</aside>
+
+<!-- 메인 -->
+<main class="flex-1 w-full overflow-y-auto p-6 md:p-10 space-y-6">
+    <div class="flex items-center justify-between">
+        <div>
+            <h1 class="text-2xl font-bold">공지 관리</h1>
+            <p class="text-sm text-gray-400 mt-1">사용자에게 표시할 공지사항을 관리합니다.</p>
+        </div>
+        <button onclick="openCreateModal()" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-xl text-sm font-bold transition flex items-center gap-2">
+            <i class="fas fa-plus"></i> 공지 작성
+        </button>
+    </div>
+
+    <!-- 통계 -->
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <div class="bg-white/5 border border-white/10 rounded-2xl p-4">
+            <div class="text-2xl font-bold" id="stat-total">-</div>
+            <div class="text-xs text-gray-500 mt-1">전체 공지</div>
+        </div>
+        <div class="bg-white/5 border border-white/10 rounded-2xl p-4">
+            <div class="text-2xl font-bold text-green-400" id="stat-active">-</div>
+            <div class="text-xs text-gray-500 mt-1">활성 공지</div>
+        </div>
+        <div class="bg-white/5 border border-white/10 rounded-2xl p-4">
+            <div class="text-2xl font-bold text-yellow-400" id="stat-warning">-</div>
+            <div class="text-xs text-gray-500 mt-1">경고 공지</div>
+        </div>
+        <div class="bg-white/5 border border-white/10 rounded-2xl p-4">
+            <div class="text-2xl font-bold text-red-400" id="stat-danger">-</div>
+            <div class="text-xs text-gray-500 mt-1">긴급 공지</div>
+        </div>
+    </div>
+
+    <!-- 공지 목록 -->
+    <div class="bg-white/5 border border-white/10 rounded-2xl overflow-hidden">
+        <div class="p-4 border-b border-white/10 flex items-center justify-between">
+            <h2 class="font-bold text-sm">공지 목록</h2>
+            <button onclick="loadNotices()" class="text-xs text-gray-400 hover:text-white transition"><i class="fas fa-sync-alt mr-1"></i> 새로고침</button>
+        </div>
+        <div id="notice-list" class="divide-y divide-white/5">
+            <div class="p-8 text-center text-gray-500"><i class="fas fa-spinner fa-spin text-2xl"></i></div>
+        </div>
+    </div>
+</main>
+
+<!-- 공지 작성/수정 모달 -->
+<div id="notice-modal" class="hidden fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
+    <div class="bg-[#111] border border-white/10 rounded-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
+        <div class="p-6 border-b border-white/10 flex items-center justify-between">
+            <h2 class="text-lg font-bold" id="modal-title">공지 작성</h2>
+            <button onclick="closeModal()" class="text-gray-400 hover:text-white transition"><i class="fas fa-times text-xl"></i></button>
+        </div>
+        <div class="p-6 space-y-4">
+            <div id="modal-alert" class="hidden p-3 rounded-xl text-sm"></div>
+            <input type="hidden" id="edit-id">
+            <div>
+                <label class="block text-xs text-gray-400 mb-2 font-bold">공지 유형</label>
+                <div class="grid grid-cols-4 gap-2">
+                    <label class="notice-type-btn" data-type="info">
+                        <input type="radio" name="notice-type" value="info" class="hidden" checked>
+                        <div class="border border-blue-500/40 bg-blue-900/20 text-blue-300 rounded-xl p-2 text-center text-xs cursor-pointer hover:bg-blue-900/40 transition selected-type">
+                            <i class="fas fa-info-circle block text-lg mb-1"></i> 안내
+                        </div>
+                    </label>
+                    <label class="notice-type-btn" data-type="success">
+                        <input type="radio" name="notice-type" value="success" class="hidden">
+                        <div class="border border-green-500/40 bg-green-900/20 text-green-300 rounded-xl p-2 text-center text-xs cursor-pointer hover:bg-green-900/40 transition">
+                            <i class="fas fa-check-circle block text-lg mb-1"></i> 완료
+                        </div>
+                    </label>
+                    <label class="notice-type-btn" data-type="warning">
+                        <input type="radio" name="notice-type" value="warning" class="hidden">
+                        <div class="border border-yellow-500/40 bg-yellow-900/20 text-yellow-300 rounded-xl p-2 text-center text-xs cursor-pointer hover:bg-yellow-900/40 transition">
+                            <i class="fas fa-exclamation-triangle block text-lg mb-1"></i> 경고
+                        </div>
+                    </label>
+                    <label class="notice-type-btn" data-type="danger">
+                        <input type="radio" name="notice-type" value="danger" class="hidden">
+                        <div class="border border-red-500/40 bg-red-900/20 text-red-300 rounded-xl p-2 text-center text-xs cursor-pointer hover:bg-red-900/40 transition">
+                            <i class="fas fa-fire block text-lg mb-1"></i> 긴급
+                        </div>
+                    </label>
+                </div>
+            </div>
+            <div>
+                <label class="block text-xs text-gray-400 mb-2 font-bold">제목</label>
+                <input id="notice-title" type="text" placeholder="공지 제목을 입력하세요"
+                    class="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white placeholder-gray-600 focus:outline-none focus:border-blue-500/50">
+            </div>
+            <div>
+                <label class="block text-xs text-gray-400 mb-2 font-bold">내용</label>
+                <textarea id="notice-content" rows="5" placeholder="공지 내용을 입력하세요"
+                    class="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white placeholder-gray-600 focus:outline-none focus:border-blue-500/50 resize-none"></textarea>
+            </div>
+            <div class="flex items-center gap-3">
+                <label class="relative inline-flex items-center cursor-pointer">
+                    <input id="notice-active" type="checkbox" checked class="sr-only peer">
+                    <div class="w-9 h-5 bg-gray-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-600"></div>
+                </label>
+                <span class="text-sm text-gray-300">공지 활성화 (사용자에게 표시)</span>
+            </div>
+        </div>
+        <div class="p-6 border-t border-white/10 flex gap-3 justify-end">
+            <button onclick="closeModal()" class="px-4 py-2 text-sm text-gray-400 hover:text-white border border-white/10 rounded-xl transition">취소</button>
+            <button id="modal-submit-btn" onclick="submitNotice()"
+                class="px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold rounded-xl transition flex items-center gap-2">
+                <i class="fas fa-save"></i> 저장
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- 공지 상세 모달 -->
+<div id="detail-modal" class="hidden fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
+    <div class="bg-[#111] border border-white/10 rounded-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
+        <div class="p-6 border-b border-white/10 flex items-center justify-between">
+            <h2 class="text-lg font-bold">공지 상세</h2>
+            <button onclick="closeDetailModal()" class="text-gray-400 hover:text-white transition"><i class="fas fa-times text-xl"></i></button>
+        </div>
+        <div id="detail-content" class="p-6 space-y-4"></div>
+        <div class="p-6 border-t border-white/10 flex gap-3">
+            <button id="detail-edit-btn" onclick="editFromDetail()" class="flex-1 py-2 bg-blue-600/20 border border-blue-500/30 text-blue-300 text-sm font-bold rounded-xl hover:bg-blue-600/30 transition">
+                <i class="fas fa-edit mr-2"></i>수정
+            </button>
+            <button id="detail-delete-btn" onclick="deleteFromDetail()" class="flex-1 py-2 bg-red-600/20 border border-red-500/30 text-red-400 text-sm font-bold rounded-xl hover:bg-red-600/30 transition">
+                <i class="fas fa-trash mr-2"></i>삭제
+            </button>
+        </div>
+    </div>
+</div>
+
+<script>
+const HEADERS = { 'Authorization': 'Bearer ' + localStorage.getItem('admin_token'), 'Content-Type': 'application/json' };
+
+const TYPE_MAP = {
+    info:    { label: '안내',  icon: 'info-circle',          cls: 'text-blue-300',   bg: 'bg-blue-900/20 border-blue-500/30' },
+    success: { label: '완료',  icon: 'check-circle',         cls: 'text-green-300',  bg: 'bg-green-900/20 border-green-500/30' },
+    warning: { label: '경고',  icon: 'exclamation-triangle', cls: 'text-yellow-300', bg: 'bg-yellow-900/20 border-yellow-500/30' },
+    danger:  { label: '긴급',  icon: 'fire',                 cls: 'text-red-300',    bg: 'bg-red-900/20 border-red-500/30' },
+};
+
+function escHtml(s) {
+    if (!s) return '';
+    return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function fmtDate(d) {
+    if (!d) return '-';
+    return new Date(d).toLocaleString('ko-KR', { year:'numeric', month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit' });
+}
+
+let allNotices = [];
+let currentDetailId = null;
+
+async function loadNotices() {
+    const list = document.getElementById('notice-list');
+    list.innerHTML = '<div class="p-8 text-center text-gray-500"><i class="fas fa-spinner fa-spin text-2xl"></i></div>';
+    try {
+        const res = await fetch('/api/admin/notices', { headers: HEADERS });
+        if (res.status === 401 || res.status === 403) { logout(); return; }
+        const data = await res.json();
+        allNotices = data.notices || [];
+        renderStats(allNotices);
+        renderList(allNotices);
+    } catch (e) {
+        list.innerHTML = '<div class="p-8 text-center text-red-400 text-sm">공지 목록을 불러오지 못했습니다.</div>';
+    }
+}
+
+function renderStats(notices) {
+    document.getElementById('stat-total').textContent   = notices.length;
+    document.getElementById('stat-active').textContent  = notices.filter(n => n.is_active).length;
+    document.getElementById('stat-warning').textContent = notices.filter(n => n.type === 'warning' && n.is_active).length;
+    document.getElementById('stat-danger').textContent  = notices.filter(n => n.type === 'danger' && n.is_active).length;
+}
+
+function renderList(notices) {
+    const list = document.getElementById('notice-list');
+    if (!notices.length) {
+        list.innerHTML = '<div class="p-12 text-center text-gray-500"><i class="fas fa-bullhorn text-4xl mb-3 block opacity-30"></i>등록된 공지가 없습니다.</div>';
+        return;
+    }
+    list.innerHTML = notices.map(n => {
+        const t = TYPE_MAP[n.type] || TYPE_MAP.info;
+        return `<div class="p-4 hover:bg-white/3 transition cursor-pointer flex items-start gap-4" onclick="openDetail(${n.id})">
+            <div class="mt-0.5 w-8 h-8 rounded-xl border ${t.bg} flex items-center justify-center flex-shrink-0">
+                <i class="fas fa-${t.icon} text-xs ${t.cls}"></i>
+            </div>
+            <div class="flex-1 min-w-0">
+                <div class="flex items-center gap-2 mb-1 flex-wrap">
+                    <span class="font-bold text-sm truncate">${escHtml(n.title)}</span>
+                    <span class="text-xs px-2 py-0.5 rounded-full border ${t.bg} ${t.cls}">${t.label}</span>
+                    ${n.is_active
+                        ? '<span class="text-xs px-2 py-0.5 rounded-full bg-green-900/30 border border-green-500/30 text-green-400">활성</span>'
+                        : '<span class="text-xs px-2 py-0.5 rounded-full bg-gray-800 border border-white/10 text-gray-500">비활성</span>'}
+                </div>
+                <p class="text-xs text-gray-500 truncate">${escHtml(n.content)}</p>
+                <p class="text-xs text-gray-600 mt-1">${fmtDate(n.created_at)}</p>
+            </div>
+            <button onclick="event.stopPropagation(); confirmDelete(${n.id})"
+                class="text-gray-600 hover:text-red-400 transition p-1 flex-shrink-0">
+                <i class="fas fa-trash text-xs"></i>
+            </button>
+        </div>`;
+    }).join('');
+}
+
+function openDetail(id) {
+    const n = allNotices.find(x => x.id === id);
+    if (!n) return;
+    currentDetailId = id;
+    const t = TYPE_MAP[n.type] || TYPE_MAP.info;
+    document.getElementById('detail-content').innerHTML = `
+        <div class="p-4 rounded-xl border ${t.bg}">
+            <div class="flex items-center gap-2 mb-2">
+                <i class="fas fa-${t.icon} ${t.cls}"></i>
+                <span class="font-bold text-sm ${t.cls}">${t.label}</span>
+                ${n.is_active
+                    ? '<span class="ml-auto text-xs px-2 py-0.5 rounded-full bg-green-900/30 border border-green-500/30 text-green-400">활성</span>'
+                    : '<span class="ml-auto text-xs px-2 py-0.5 rounded-full bg-gray-800 border border-white/10 text-gray-500">비활성</span>'}
+            </div>
+            <h3 class="text-white font-bold mb-2">${escHtml(n.title)}</h3>
+            <p class="text-gray-300 text-sm whitespace-pre-wrap">${escHtml(n.content)}</p>
+        </div>
+        <div class="text-xs text-gray-500 space-y-1">
+            <p><span class="text-gray-400">등록일:</span> ${fmtDate(n.created_at)}</p>
+            <p><span class="text-gray-400">수정일:</span> ${fmtDate(n.updated_at)}</p>
+        </div>`;
+    document.getElementById('detail-modal').classList.remove('hidden');
+}
+
+function closeDetailModal() {
+    document.getElementById('detail-modal').classList.add('hidden');
+    currentDetailId = null;
+}
+
+function editFromDetail() {
+    const n = allNotices.find(x => x.id === currentDetailId);
+    if (!n) return;
+    closeDetailModal();
+    openEditModal(n);
+}
+
+function deleteFromDetail() {
+    if (currentDetailId) confirmDelete(currentDetailId);
+}
+
+// ── 작성/수정 모달 ─────────────────────────────────────────────────────────
+
+function openCreateModal() {
+    document.getElementById('edit-id').value   = '';
+    document.getElementById('notice-title').value   = '';
+    document.getElementById('notice-content').value = '';
+    document.getElementById('notice-active').checked = true;
+    document.getElementById('modal-title').textContent = '공지 작성';
+    document.getElementById('modal-submit-btn').innerHTML = '<i class="fas fa-save"></i> 저장';
+    selectType('info');
+    hideModalAlert();
+    document.getElementById('notice-modal').classList.remove('hidden');
+}
+
+function openEditModal(n) {
+    document.getElementById('edit-id').value   = n.id;
+    document.getElementById('notice-title').value   = n.title;
+    document.getElementById('notice-content').value = n.content;
+    document.getElementById('notice-active').checked = !!n.is_active;
+    document.getElementById('modal-title').textContent = '공지 수정';
+    document.getElementById('modal-submit-btn').innerHTML = '<i class="fas fa-save"></i> 수정 저장';
+    selectType(n.type || 'info');
+    hideModalAlert();
+    document.getElementById('notice-modal').classList.remove('hidden');
+}
+
+function closeModal() {
+    document.getElementById('notice-modal').classList.add('hidden');
+}
+
+function selectType(type) {
+    document.querySelectorAll('.notice-type-btn input[type=radio]').forEach(r => {
+        r.checked = (r.value === type);
+    });
+    document.querySelectorAll('.notice-type-btn div').forEach(div => {
+        div.classList.remove('ring-2', 'ring-white/30');
+    });
+    const sel = document.querySelector(`.notice-type-btn[data-type="${type}"] div`);
+    if (sel) sel.classList.add('ring-2', 'ring-white/30');
+}
+
+document.querySelectorAll('.notice-type-btn').forEach(btn => {
+    btn.addEventListener('click', () => selectType(btn.dataset.type));
+});
+
+function getSelectedType() {
+    const checked = document.querySelector('.notice-type-btn input[type=radio]:checked');
+    return checked ? checked.value : 'info';
+}
+
+function showModalAlert(msg, type = 'error') {
+    const el = document.getElementById('modal-alert');
+    el.className = `p-3 rounded-xl text-sm ${type === 'error' ? 'bg-red-900/40 border border-red-500/30 text-red-300' : 'bg-green-900/40 border border-green-500/30 text-green-300'}`;
+    el.textContent = msg;
+    el.classList.remove('hidden');
+}
+
+function hideModalAlert() {
+    document.getElementById('modal-alert').classList.add('hidden');
+}
+
+async function submitNotice() {
+    const id      = document.getElementById('edit-id').value;
+    const title   = document.getElementById('notice-title').value.trim();
+    const content = document.getElementById('notice-content').value.trim();
+    const type    = getSelectedType();
+    const isActive = document.getElementById('notice-active').checked;
+
+    if (!title)   { showModalAlert('제목을 입력해주세요.'); return; }
+    if (!content) { showModalAlert('내용을 입력해주세요.'); return; }
+
+    const btn = document.getElementById('modal-submit-btn');
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 저장 중...';
+
+    try {
+        const isEdit = !!id;
+        const res = await fetch(isEdit ? `/api/admin/notices?id=${id}` : '/api/admin/notices', {
+            method:  isEdit ? 'PUT' : 'POST',
+            headers: HEADERS,
+            body:    JSON.stringify({ title, content, type, is_active: isActive }),
+        });
+        const data = await res.json();
+        if (res.ok && data.success) {
+            closeModal();
+            await loadNotices();
+        } else {
+            showModalAlert(data.error || '저장에 실패했습니다.');
+        }
+    } catch { showModalAlert('오류가 발생했습니다.'); }
+    finally {
+        btn.disabled = false;
+        btn.innerHTML = id ? '<i class="fas fa-save"></i> 수정 저장' : '<i class="fas fa-save"></i> 저장';
+    }
+}
+
+async function confirmDelete(id) {
+    if (!confirm('이 공지를 삭제하시겠습니까?')) return;
+    closeDetailModal();
+    try {
+        const res = await fetch(`/api/admin/notices?id=${id}`, { method: 'DELETE', headers: HEADERS });
+        const data = await res.json();
+        if (res.ok && data.success) {
+            await loadNotices();
+        } else {
+            alert(data.error || '삭제에 실패했습니다.');
+        }
+    } catch { alert('오류가 발생했습니다.'); }
+}
+
+function logout() {
+    localStorage.removeItem('admin_token');
+    window.location.href = '/login';
+}
+
+// 초기 로드
+loadNotices();
+</script>
+</body>
+</html>

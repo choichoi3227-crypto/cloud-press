@@ -94,7 +94,7 @@
             <div id="ind-1" class="step-active flex-1 p-2.5 border rounded-xl text-center text-xs font-bold"><span class="text-blue-400">1</span> 기본 정보</div>
             <div id="ind-2" class="step-inactive flex-1 p-2.5 border rounded-xl text-center text-xs font-bold text-gray-600"><span>2</span> 플랜 선택</div>
             <div id="ind-3" class="step-inactive flex-1 p-2.5 border rounded-xl text-center text-xs font-bold text-gray-600"><span>3</span> 도메인</div>
-            <div id="ind-4" class="step-inactive flex-1 p-2.5 border rounded-xl text-center text-xs font-bold text-gray-600"><span>4</span> 관리자</div>
+            <div id="ind-4" class="step-inactive flex-1 p-2.5 border rounded-xl text-center text-xs font-bold text-gray-600"><span>4</span> 확인</div>
         </div>
 
         <!-- 알림 -->
@@ -309,37 +309,13 @@
         </div>
 
         <!-- ══════════════════════════════════════════════
-             STEP 4 — 관리자 설정 + 최종 확인
+             STEP 4 — 최종 확인
         ══════════════════════════════════════════════ -->
         <div id="step-4" class="hidden space-y-5">
-            <div class="section-card space-y-5">
-                <div class="section-title"><i class="fas fa-user-shield text-indigo-400"></i> 관리자 계정 설정</div>
-
-                <div>
-                    <label class="cp-label">관리자 아이디 <span class="req">*</span></label>
-                    <input id="wp_admin_user" type="text" class="cp-input font-mono" placeholder="admin">
-                </div>
-
-                <div>
-                    <label class="cp-label">관리자 비밀번호 <span class="req">*</span></label>
-                    <div class="input-wrap">
-                        <input id="wp_admin_pass" type="password" class="cp-input pr-12" placeholder="8자 이상">
-                        <button class="eye-btn" onclick="toggleVis('wp_admin_pass', this)">
-                            <i class="fas fa-eye"></i>
-                        </button>
-                    </div>
-                    <div id="pass-strength" class="mt-2 flex gap-1.5 h-1">
-                        <div class="flex-1 rounded-full bg-white/10" id="ps-1"></div>
-                        <div class="flex-1 rounded-full bg-white/10" id="ps-2"></div>
-                        <div class="flex-1 rounded-full bg-white/10" id="ps-3"></div>
-                        <div class="flex-1 rounded-full bg-white/10" id="ps-4"></div>
-                    </div>
-                </div>
-
-                <div>
-                    <label class="cp-label">관리자 이메일 <span class="req">*</span></label>
-                    <input id="wp_admin_email" type="email" class="cp-input" placeholder="admin@example.com">
-                </div>
+            <div class="p-4 bg-indigo-950/30 border border-indigo-500/25 rounded-xl text-sm text-indigo-300">
+                <i class="fas fa-magic mr-1"></i>
+                <strong>관리자 계정이 자동으로 생성됩니다.</strong><br>
+                <span class="text-xs text-gray-400 mt-1 block">아이디·비밀번호·이메일은 호스팅 생성 완료 후 상세 페이지에서 확인하세요.</span>
             </div>
 
             <!-- 생성 요약 -->
@@ -657,7 +633,7 @@
 
     // 비밀번호 강도
     document.addEventListener('input', e => {
-        if (e.target.id !== 'wp_admin_pass') return;
+        if (false) return; // password field removed
         const v = e.target.value;
         const bars = [1,2,3,4].map(i => document.getElementById(`ps-${i}`));
         const colors = ['bg-red-500','bg-orange-500','bg-yellow-500','bg-green-500'];
@@ -749,7 +725,7 @@
     // ─────────────────────────────────────────────────────────────────────────
     // 스텝 이동
     // ─────────────────────────────────────────────────────────────────────────
-    const STEP_LABELS = {1:'기본 정보', 2:'플랜 선택', 3:'도메인', 4:'관리자'};
+    const STEP_LABELS = {1:'기본 정보', 2:'플랜 선택', 3:'도메인', 4:'확인'};
 
     function goStep(n) {
         // 유효성 검사
@@ -1098,17 +1074,10 @@
     // ─────────────────────────────────────────────────────────────────────────
     async function createHosting() {
         const site_name      = document.getElementById('site_name').value.trim();
-        const wp_admin_user  = document.getElementById('wp_admin_user').value.trim();
-        const wp_admin_pass  = document.getElementById('wp_admin_pass').value;
-        const wp_admin_email = document.getElementById('wp_admin_email').value.trim();
         const initial_domain = document.getElementById('initial_domain').value.trim();
+        // wp_admin_user / wp_admin_pass / wp_admin_email 는 서버에서 자동 생성
 
-        if (!site_name)      { showAlert('사이트 이름을 입력해주세요.'); return; }
-        if (!wp_admin_user)  { showAlert('관리자 아이디를 입력해주세요.'); return; }
-        if (!wp_admin_pass || wp_admin_pass.length < 8)
-            { showAlert('비밀번호는 8자 이상이어야 합니다.'); return; }
-        if (!wp_admin_email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(wp_admin_email))
-            { showAlert('올바른 관리자 이메일을 입력해주세요.'); return; }
+        if (!site_name) { showAlert('사이트 이름을 입력해주세요.'); return; }
 
         const btn = document.getElementById('create-btn');
         btn.disabled = true;
@@ -1130,7 +1099,6 @@
                 headers: HEADERS,
                 body:    JSON.stringify({
                     site_name, php_version: '8.2',
-                    wp_admin_user, wp_admin_pass, wp_admin_email,
                     initial_domain: initial_domain || undefined,
                     plan: selectedPlan,
                     payment_method_id: payment_method_id || undefined,

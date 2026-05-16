@@ -11,7 +11,7 @@
 
 name = "cloud-press"
 main = "worker.js"
-compatibility_date = "2025-04-01"
+compatibility_date = "2026-05-14"
 compatibility_flags = ["nodejs_compat"]
 
 # ── 정적 파일 서빙 (CloudPress 대시보드 HTML/CSS/JS) ─────────────────────────
@@ -71,7 +71,7 @@ id      = "9b8370d20a9646b9aa73f63c9200379f"
 PLATFORM_DOMAIN = "cloud-press.co.kr"
 
 # WordPress 버전
-WP_VERSION = "6.7.2"
+WP_VERSION = "latest"
 
 [observability]
 enabled            = false

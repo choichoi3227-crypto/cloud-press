@@ -133,26 +133,47 @@ async function getOrCreateCfZone(apiKey, email, domain) {
   return { error: errMsg };
 }
 
-// ── CF Zone에 Worker 라우트 설정 ──────────────────────────────────────────────
-async function setupWorkerRoute(apiKey, email, zoneId, domain, workerName) {
+// ── CF Zone에 Worker 커스텀 도메인 설정 ────────────────────────────────────────
+async function setupWorkerCustomDomain(apiKey, email, zoneId, domain, workerName) {
   if (!workerName) return;
 
-  // 기존 라우트 제거 후 재설정
-  const routes = await cfReq("GET", `/zones/${zoneId}/workers/routes`, apiKey, email);
-  if (routes.success) {
-    for (const r of routes.result || []) {
-      if (r.pattern.includes(domain)) {
-        await cfReq("DELETE", `/zones/${zoneId}/workers/routes/${r.id}`, apiKey, email).catch(() => {});
+  // zone에서 account ID 조회
+  const zoneInfo = await cfReq("GET", `/zones/${zoneId}`, apiKey, email);
+  const cfAccountId = zoneInfo.result?.account?.id;
+
+  if (!cfAccountId) {
+    // accountId 없으면 레거시 라우트 방식으로 폴백
+    const routes = await cfReq("GET", `/zones/${zoneId}/workers/routes`, apiKey, email);
+    if (routes.success) {
+      for (const r of routes.result || []) {
+        if (r.pattern.includes(domain)) {
+          await cfReq("DELETE", `/zones/${zoneId}/workers/routes/${r.id}`, apiKey, email).catch(() => {});
+        }
       }
     }
+    const patterns = [`${domain}/*`, `www.${domain}/*`];
+    for (const pattern of patterns) {
+      await cfReq("POST", `/zones/${zoneId}/workers/routes`, apiKey, email, {
+        pattern,
+        script: workerName,
+      }).catch(() => {});
+    }
+    return;
   }
 
-  // 루트 도메인 + www 모두 등록
-  const patterns = [`${domain}/*`, `www.${domain}/*`];
-  for (const pattern of patterns) {
-    await cfReq("POST", `/zones/${zoneId}/workers/routes`, apiKey, email, {
-      pattern,
-      script: workerName,
+  // Worker 커스텀 도메인 API (라우트 방식이 아닌 커스텀 도메인 방식)
+  // PUT /accounts/:account_id/workers/domains
+  const root = getRootDomain(domain);
+  const hostnames = [root];
+  if (domain !== root) hostnames.unshift(domain); // 서브도메인 있으면 먼저
+  if (!hostnames.includes(`www.${root}`)) hostnames.push(`www.${root}`);
+
+  for (const hostname of hostnames) {
+    await cfReq("PUT", `/accounts/${cfAccountId}/workers/domains`, apiKey, email, {
+      environment: "production",
+      hostname,
+      service:     workerName,
+      zone_id:     zoneId,
     }).catch(() => {});
   }
 }
@@ -238,7 +259,7 @@ export async function onRequestGet(context) {
       if (user?.cf_global_api_key && user?.cf_email && da.cf_zone_id && site.cf_worker_name) {
         try {
           await setupDnsRecords(user.cf_global_api_key, user.cf_email, da.cf_zone_id, domain);
-          await setupWorkerRoute(
+          await setupWorkerCustomDomain(
             user.cf_global_api_key, user.cf_email,
             da.cf_zone_id, domain, site.cf_worker_name
           );
@@ -265,7 +286,7 @@ export async function onRequestGet(context) {
       return jsonOk({
         success:  true,
         verified: true,
-        message:  `✅ 네임서버 전환 확인 완료! 도메인이 활성화되었습니다.${workerRouteSet ? " Worker 라우트도 자동 설정되었습니다." : ""}`,
+        message:  `✅ 네임서버 전환 확인 완료! 도메인이 활성화되었습니다.${workerRouteSet ? " Worker 커스텀 도메인도 자동 설정되었습니다." : ""}`,
         domain,
         current_nameservers: currentNs,
       });
@@ -369,10 +390,10 @@ export async function onRequestPost(context) {
           .catch(e => console.warn("[domains] dns setup:", e.message));
       }
 
-      // 이미 CF 네임서버 사용 중이거나 Zone이 active면 Worker 라우트 즉시 설정
+      // 이미 CF 네임서버 사용 중이거나 Zone이 active면 Worker 커스텀 도메인 즉시 설정
       if ((alreadyOnCf || zoneStatus === "active") && site.cf_worker_name && zoneId) {
         try {
-          await setupWorkerRoute(
+          await setupWorkerCustomDomain(
             user.cf_global_api_key, user.cf_email,
             zoneId, domainClean, site.cf_worker_name
           );
@@ -422,10 +443,10 @@ export async function onRequestPost(context) {
     message = `도메인이 등록되었습니다. (Cloudflare Zone 생성 실패: ${zoneError})`;
     instructions = ["Cloudflare 대시보드에서 직접 Zone을 추가하거나 다시 시도해주세요."];
   } else if (alreadyOnCf || initialStatus === "active") {
-    message = `✅ 도메인이 자동으로 활성화되었습니다! 이미 해당 Cloudflare 계정에서 도메인을 사용 중입니다.${workerRouteSet ? " Worker 라우트도 설정되었습니다." : ""}`;
+    message = `✅ 도메인이 자동으로 활성화되었습니다! 이미 해당 Cloudflare 계정에서 도메인을 사용 중입니다.${workerRouteSet ? " Worker 커스텀 도메인도 설정되었습니다." : ""}`;
     instructions = [
       "이미 이 도메인의 DNS가 Cloudflare를 통해 관리되고 있습니다.",
-      workerRouteSet ? "Worker 라우트가 자동으로 설정되었습니다." : "Worker 라우트를 Cloudflare 대시보드에서 수동으로 설정해주세요.",
+      workerRouteSet ? "Worker 커스텀 도메인이 자동으로 설정되었습니다." : "Cloudflare 대시보드 > Workers > 커스텀 도메인에서 수동으로 설정해주세요.",
     ];
   } else if (nameservers.length > 0) {
     message = `도메인이 등록되었습니다. 아래 Cloudflare 네임서버로 변경해주세요.`;
@@ -449,7 +470,7 @@ export async function onRequestPost(context) {
     zone_id:        zoneId,
     zone_status:    alreadyOnCf ? "active" : zoneStatus,
     already_on_cf:  alreadyOnCf,
-    worker_route:   workerRouteSet,
+    worker_custom_domain: workerRouteSet,
     verify_method:  alreadyOnCf ? "auto" : "nameserver",
     instructions,
   });

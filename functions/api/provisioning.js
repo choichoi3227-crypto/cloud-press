@@ -78,12 +78,15 @@ export async function onRequestPost(context) {
         return;
       }
 
-      const {
-        owner, repoName, pagesUrl, pagesProject, cfDomain,
-        d1Id, kvSessionsId, kvCacheId, workerName,
-      } = result;
+      // cf-pages-hosting.js 리턴 필드명에 맞게 매핑
+      const workerName    = result.workerName    || null;
+      const workerDomain  = result.workerDomain  || null;
+      const cfPagesUrl    = result.cfPagesUrl    || null;
+      const githubOwner   = result.githubOwner   || null;
+      const githubRepo    = result.githubRepo    || null;
+      const kvCacheId     = result.kvCacheId     || null;
 
-      const primaryDomain = cfDomain || pagesUrl || null;
+      const primaryDomain = workerDomain || cfPagesUrl || null;
 
       await env.DB.prepare(`
         UPDATE sites SET
@@ -91,29 +94,29 @@ export async function onRequestPost(context) {
           github_repo_owner = ?,
           github_repo_name  = ?,
           cf_pages_url      = ?,
-          cf_pages_project  = ?,
+          cf_pages_project  = NULL,
           cf_worker_name    = ?,
-          cf_d1_id          = ?,
+          cf_d1_id          = NULL,
           cf_kv_id          = ?,
           plan              = ?,
           status            = 'active'
         WHERE id = ?
       `).bind(
-        primaryDomain, owner, repoName,
-        pagesUrl, pagesProject,
-        workerName    || null,
-        d1Id          || null,
-        kvSessionsId  || null,
+        primaryDomain,
+        githubOwner,
+        githubRepo,
+        cfPagesUrl,
+        workerName,
+        kvCacheId,
         site.plan,
         siteId
       ).run();
 
       await log("✅ 프로비저닝 완료!");
-      await log(`Pages URL : ${pagesUrl}`);
-      await log(`GitHub    : https://github.com/${owner}/${repoName}`);
-      if (d1Id)         await log(`D1        : ${d1Id}`);
-      if (kvSessionsId) await log(`KV        : ${kvSessionsId}`);
-      if (workerName)   await log(`Worker    : ${workerName}`);
+      await log(`사이트 URL : ${primaryDomain}`);
+      await log(`GitHub     : https://github.com/${githubOwner}/${githubRepo}`);
+      if (kvCacheId)  await log(`KV Cache   : ${kvCacheId}`);
+      if (workerName) await log(`Worker     : ${workerName}`);
 
     } catch (e) {
       const msg = String(e?.message || e);

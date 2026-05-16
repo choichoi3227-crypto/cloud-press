@@ -1,7 +1,10 @@
 # CloudPress PHP Runner Worker — wrangler-php.toml
 # 진짜 WordPress PHP를 php-wasm으로 실행하는 별도 Worker
 #
-# 배포: wrangler deploy --config wrangler-php.toml
+# 배포 순서:
+#   1. wrangler deploy --config wrangler-php.toml   ← 먼저 배포
+#   2. wrangler deploy                               ← 메인 Worker 배포
+#
 # 메인 Worker에서 Service Binding으로 호출됨
 
 name = "cloudpress-php"
@@ -17,27 +20,27 @@ cpu_ms = 50000
 port = 8789
 local_protocol = "http"
 
-# ── KV: PHP 출력 캐시 & 정적 자산 캐시 ────────────────────────────────────────
+# ── KV: PHP 출력 캐시 & WordPress 코어 파일 캐시 ─────────────────────────────
+# 메인 Worker와 동일한 KV 네임스페이스 공유
 [[kv_namespaces]]
 binding = "CACHE"
 id      = "9b8370d20a9646b9aa73f63c9200379f"
 
-# ── 환경변수 ─────────────────────────────────────────────────────────────────
+# ── 환경변수 ──────────────────────────────────────────────────────────────────
 [vars]
-PHP_VERSION = "8.2"
-WP_VERSION  = "6.7.2"
+WP_VERSION  = "6.9.4"
 
-# ── Secrets (wrangler secret put 으로 설정) ────────────────────────────────
+# ── Secrets (wrangler secret put 으로 설정) ────────────────────────────────────
 #
 # wrangler secret put GITHUB_TOKEN --config wrangler-php.toml
-#   ← GitHub Personal Access Token (사용자 레포 접근용)
-#   ← repo 권한 필요
+#   ← 플랫폼 GitHub Token (사용자 레포 파일 읽기용)
+#   ← 또는 각 사이트별 토큰은 PHP 실행 시 payload로 전달
 
 [observability]
-enabled = false
+enabled = true
 
 [observability.logs]
-enabled          = true
+enabled            = true
 head_sampling_rate = 1
-persist          = true
-invocation_logs  = true
+persist            = true
+invocation_logs    = true

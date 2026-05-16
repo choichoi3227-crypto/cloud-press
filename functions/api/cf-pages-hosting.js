@@ -559,17 +559,29 @@ export default {
     const stale=await kvGet(env,\`php:\${siteId}:\${path}\${url.search}\`);
     if(stale)return new Response(stale,{status:200,headers:{"Content-Type":"text/html;charset=utf-8","Cache-Control":"public,max-age=30","X-Fallback":"kv-stale",...SEC_HEADERS}});
 
-    // 8. PHP_RUNNER가 없고 캐시도 없는 상태 → 설치 안내
-    //    (정상: PHP Runner 배포 전 초기 상태)
-    const isPhpRunnerMissing = !env.PHP_RUNNER;
-    const statusCode = isPhpRunnerMissing ? 503 : 502;
-    const title      = isPhpRunnerMissing ? "WordPress 초기화 중" : "일시적 오류";
-    const detail     = isPhpRunnerMissing
-      ? "PHP Runner Worker가 아직 배포되지 않았습니다.<br>GitHub Actions 'Cloudflare Worker 자동 배포' 워크플로우를 실행하거나,<br><code>wrangler deploy --config wrangler-php.toml</code> 명령을 실행하세요."
-      : "WordPress 실행 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.";
+    // 8. 모든 폴백 실패 → WordPress 설치 진행 중 안내
+    const repoUrl    = (getOwner(env) && getRepo(env)) ? \`https://github.com/\${getOwner(env)}/\${getRepo(env)}\` : "";
+    const actionsUrl = repoUrl ? \`\${repoUrl}/actions/workflows/install-wordpress.yml\` : "";
 
-    return new Response(\`<!DOCTYPE html><html lang="ko"><head><meta charset="UTF-8"><meta http-equiv="refresh" content="30"><title>\${title}</title><style>*{box-sizing:border-box}body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#f0f0f1;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;padding:20px}.card{background:#fff;border:1px solid #c3c4c7;border-radius:4px;max-width:480px;width:100%;padding:40px;text-align:center}.icon{font-size:48px;margin-bottom:20px}h1{color:#1d2327;font-size:20px;font-weight:600;margin:0 0 12px}p{color:#646970;line-height:1.6;margin:0 0 20px;font-size:14px}code{background:#f6f7f7;border:1px solid #dcdcde;border-radius:2px;padding:2px 6px;font-size:12px}.badge{display:inline-block;background:\${isPhpRunnerMissing?"#f0b849":"#d63638"};color:#fff;font-size:11px;font-weight:600;padding:3px 8px;border-radius:2px;margin-bottom:16px}</style></head><body><div class="card"><div class="icon">\${isPhpRunnerMissing?"⚙️":"⚠️"}</div><div class="badge">\${isPhpRunnerMissing?"INITIALIZING":"ERROR"}</div><h1>\${title}</h1><p>\${detail}</p></div></body></html>\`,
-      {status:statusCode,headers:{"Content-Type":"text/html;charset=utf-8","Cache-Control":"no-store",...SEC_HEADERS}});
+    return new Response(\`<!DOCTYPE html>
+<html lang="ko"><head><meta charset="UTF-8"><meta http-equiv="refresh" content="30">
+<title>WordPress 준비 중</title>
+<style>*{box-sizing:border-box}body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Malgun Gothic,sans-serif;background:#f0f0f1;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;padding:20px}.card{background:#fff;border:1px solid #c3c4c7;border-radius:4px;max-width:520px;width:100%;padding:40px;text-align:center}.badge{background:#f0b849;color:#fff;font-size:11px;font-weight:700;padding:3px 10px;border-radius:3px;display:inline-block;margin-bottom:14px}h1{color:#1d2327;font-size:20px;font-weight:600;margin:0 0 10px}p{color:#646970;line-height:1.6;margin:0 0 14px;font-size:14px}a.btn{display:inline-block;background:#2271b1;color:#fff;text-decoration:none;padding:8px 18px;border-radius:3px;font-size:13px;font-weight:600;margin:4px}.steps{text-align:left;background:#f6f7f7;border-radius:4px;padding:14px 18px;margin:14px 0;font-size:13px;color:#3c434a;line-height:2}.note{font-size:12px;color:#a7aaad;margin-top:14px}</style>
+</head><body><div class="card">
+<div class="badge">WORDPRESS INSTALLING</div>
+<h1>⚙️ WordPress 설치 진행 중</h1>
+<p>GitHub Actions가 WordPress 6.7.2를 자동으로 설치하고 있습니다.</p>
+<ol class="steps">
+  <li>✅ GitHub 레포지토리 생성</li>
+  <li>⏳ WordPress 6.7.2 전체 파일 설치 중...</li>
+  <li>⏳ 데이터베이스 초기화 중...</li>
+  <li>⏳ 정적 캐시 생성 중...</li>
+</ol>
+\${actionsUrl?\`<a class="btn" href="\${actionsUrl}" target="_blank">🔄 설치 진행상황 보기</a>\`:""}
+\${repoUrl?\` <a class="btn" style="background:#6e7d88" href="\${repoUrl}" target="_blank">📁 GitHub 레포 보기</a>\`:""}
+<p class="note">30초마다 자동 새로고침됩니다</p>
+</div></body></html>\`,
+      {status:503,headers:{"Content-Type":"text/html;charset=utf-8","Cache-Control":"no-store","Retry-After":"30",...SEC_HEADERS}});
   },
 };`;
   return src;

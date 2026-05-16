@@ -1,5 +1,5 @@
 /**
- * CloudPress — cf-pages-hosting.js v7.0
+ * CloudPress — cf-pages-hosting.js v6.0
  * ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
  * 진짜 WordPress 호스팅 프로비저닝 (D1 완전 제거 버전)
  *
@@ -293,26 +293,24 @@ require_once ABSPATH . 'wp-settings.php';
 
 // ─── Worker 소스 빌드 (순수 미러링 코드만) ───────────────────────────────────
 function buildWorkerSource({ siteId, githubOwner, githubRepo, ghPagesUrl }) {
-  // 템플릿 리터럴 안에서 || "" 패턴이 따옴표 충돌을 일으키므로 미리 변수로 빼둠
   const _ghPagesUrl = ghPagesUrl || "";
-  ghPagesUrl = _ghPagesUrl;
   const src = `/**
- * CloudPress — site worker v7.0 (PHP_RUNNER Service Binding)
+ * CloudPress — site worker v8.0
  * 사이트 ID: ${siteId}
  * GitHub: ${githubOwner}/${githubRepo}
- * 이 코드는 자동 생성됩니다. 직접 수정하지 마세요.
+ * 이 코드는 자동 생성됩니다.
  *
- * 동작 방식:
- *   1. 정적 자산(css/js/img): KV 캐시 → GitHub 레포 → WP 코어 CDN
- *   2. 동적 요청: KV HTML 캐시 → PHP_RUNNER(php-wasm) Service Binding → 직접 실행
- *   PHP_RUNNER가 없으면 GitHub _cache/ 정적 HTML 폴백
+ * 실행 우선순위:
+ *   1. PHP_RUNNER Service Binding (배포된 경우) → php-wasm으로 WP 실행
+ *   2. KV 캐시 HTML (빠른 응답)
+ *   3. 정적 자산: GitHub 레포 → WordPress CDN
  */
 
 const SITE_ID      = "${siteId}";
 const GH_OWNER     = "${githubOwner}";
 const GH_REPO      = "${githubRepo}";
 const GH_BRANCH    = "main";
-const GH_PAGES_URL = "${ghPagesUrl}";
+const GH_PAGES_URL = "${_ghPagesUrl}";
 const WP_VERSION   = "6.7.2";
 
 const STATIC_EXT = /\\.(css|js|jpg|jpeg|png|gif|webp|avif|svg|ico|woff2?|ttf|eot|otf|map|txt|xml|json|pdf|zip|mp4|mp3|ogg|wav|webm|gz|tar)$/i;
@@ -326,25 +324,39 @@ const SEC_HEADERS = {
   "X-XSS-Protection":      "1; mode=block",
 };
 
-function getSiteId(e)   { return e.SITE_ID      || SITE_ID;     }
-function getOwner(e)    { return e.GH_OWNER     || GH_OWNER;    }
-function getRepo(e)     { return e.GH_REPO      || GH_REPO;     }
-function getToken(e)    { return e.GITHUB_TOKEN || "";           }
-function getPages(e)    { return e.GH_PAGES_URL || GH_PAGES_URL || ""; }
+function getSiteId(e)  { return e.SITE_ID      || SITE_ID;    }
+function getOwner(e)   { return e.GH_OWNER     || GH_OWNER;   }
+function getRepo(e)    { return e.GH_REPO      || GH_REPO;    }
+function getToken(e)   { return e.GITHUB_TOKEN || "";          }
+function getPages(e)   { return e.GH_PAGES_URL || GH_PAGES_URL || ""; }
 
-async function kvGet(e,k)         { try{return await e.CACHE?.get(k);}catch{return null;} }
-async function kvGetBuf(e,k)      { try{return await e.CACHE?.get(k,"arrayBuffer");}catch{return null;} }
-async function kvSetBuf(e,k,v,t=86400){ try{await e.CACHE?.put(k,v,{expirationTtl:t});}catch{} }
+async function kvGet(e,k)             { try{return await e.CACHE?.get(k);}catch{return null;} }
+async function kvGetBuf(e,k)          { try{return await e.CACHE?.get(k,"arrayBuffer");}catch{return null;} }
+async function kvPut(e,k,v,t=86400)   { try{await e.CACHE?.put(k,v,{expirationTtl:t});}catch{} }
 
-function mime(p){const x=(p.split(".").pop()||"").toLowerCase();return({css:"text/css;charset=utf-8",js:"application/javascript;charset=utf-8",json:"application/json;charset=utf-8",xml:"application/xml;charset=utf-8",svg:"image/svg+xml",png:"image/png",jpg:"image/jpeg",jpeg:"image/jpeg",gif:"image/gif",webp:"image/webp",avif:"image/avif",ico:"image/x-icon",woff:"font/woff",woff2:"font/woff2",ttf:"font/ttf",eot:"application/vnd.ms-fontobject",otf:"font/otf",pdf:"application/pdf",zip:"application/zip",mp4:"video/mp4",webm:"video/webm",mp3:"audio/mpeg",ogg:"audio/ogg",wav:"audio/wav",txt:"text/plain;charset=utf-8",html:"text/html;charset=utf-8"})[x]||"application/octet-stream";}
+function mime(p){
+  const x=(p.split(".").pop()||"").toLowerCase();
+  return({css:"text/css;charset=utf-8",js:"application/javascript;charset=utf-8",
+    json:"application/json;charset=utf-8",xml:"application/xml;charset=utf-8",
+    svg:"image/svg+xml",png:"image/png",jpg:"image/jpeg",jpeg:"image/jpeg",
+    gif:"image/gif",webp:"image/webp",avif:"image/avif",ico:"image/x-icon",
+    woff:"font/woff",woff2:"font/woff2",ttf:"font/ttf",otf:"font/otf",
+    eot:"application/vnd.ms-fontobject",pdf:"application/pdf",zip:"application/zip",
+    mp4:"video/mp4",webm:"video/webm",mp3:"audio/mpeg",ogg:"audio/ogg",
+    wav:"audio/wav",txt:"text/plain;charset=utf-8",html:"text/html;charset=utf-8"
+  })[x]||"application/octet-stream";
+}
 
 async function ghFetch(e, path, noCache=false){
   const owner=getOwner(e),repo=getRepo(e),token=getToken(e);
   if(!owner||!repo)return null;
   const url=\`https://raw.githubusercontent.com/\${owner}/\${repo}/\${GH_BRANCH}/\${path}\`;
-  const h={"User-Agent":"CloudPress/7.0"};
+  const h={"User-Agent":"CloudPress/8.0"};
   if(token)h["Authorization"]=\`Bearer \${token}\`;
-  try{const r=await fetch(url,{headers:h,cf:noCache?{cacheEverything:false}:{cacheEverything:true,cacheTtl:300}});if(r.ok)return r;}catch{}
+  try{
+    const r=await fetch(url,{headers:h,cf:noCache?{cacheEverything:false}:{cacheEverything:true,cacheTtl:300}});
+    if(r.ok)return r;
+  }catch{}
   return null;
 }
 
@@ -356,71 +368,83 @@ async function wpCoreFetch(path){
   return null;
 }
 
-function errPage(s,t,d){return new Response(\`<!DOCTYPE html><html lang="ko"><head><meta charset="UTF-8"><title>\${t}</title><style>body{font-family:sans-serif;background:#0a0a0a;color:#e5e5e5;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0}.b{text-align:center;padding:40px}h1{font-size:72px;color:#374151;margin:0 0 16px}h2{font-size:20px;color:#fff;margin:0 0 12px}p{color:#9ca3af}</style></head><body><div class="b"><h1>\${s}</h1><h2>\${t}</h2><p>\${d}</p></div></body></html>\`,{status:s,headers:{"Content-Type":"text/html;charset=utf-8",...SEC_HEADERS}});}
+function maintPage(){
+  return new Response(\`<!DOCTYPE html><html lang="ko"><head><meta charset="UTF-8"><meta http-equiv="refresh" content="15"><title>유지보수 중</title><style>body{font-family:sans-serif;background:#f0f0f1;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0}.b{text-align:center;padding:48px;background:#fff;border-radius:8px;border:1px solid #c3c4c7;max-width:420px}</style></head><body><div class="b"><div style="font-size:48px;margin-bottom:16px">🔧</div><h1 style="color:#1d2327;font-size:22px;margin-bottom:12px">유지보수 중</h1><p style="color:#646970;line-height:1.6">설정을 업데이트하고 있습니다.<br>잠시 후 자동으로 다시 접속됩니다.</p></div></body></html>\`,
+    {status:503,headers:{"Content-Type":"text/html;charset=utf-8","Retry-After":"30","Cache-Control":"no-store"}});
+}
 
-function maintPage(){return new Response(\`<!DOCTYPE html><html lang="ko"><head><meta charset="UTF-8"><meta http-equiv="refresh" content="15"><title>유지보수 중</title><style>body{font-family:sans-serif;background:#f0f0f1;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0}.b{text-align:center;padding:48px;background:#fff;border-radius:8px;border:1px solid #c3c4c7;max-width:420px}</style></head><body><div class="b"><div style="font-size:48px;margin-bottom:16px">🔧</div><h1 style="color:#1d2327;font-size:22px;margin-bottom:12px">유지보수 중</h1><p style="color:#646970;line-height:1.6">설정을 업데이트하고 있습니다.<br>잠시 후 자동으로 다시 접속됩니다.</p></div></body></html>\`,{status:503,headers:{"Content-Type":"text/html;charset=utf-8","Retry-After":"30","Cache-Control":"no-store"}});}
-
-// ─── PHP_RUNNER Service Binding으로 WordPress 동적 실행 ──────────────────────
-// PHP_RUNNER가 바인딩되어 있으면 php-wasm으로 즉시 WP 실행
-// GitHub Actions 완료 여부와 무관하게 배포 즉시 동작
+// ─── PHP_RUNNER Service Binding으로 WordPress 실행 ───────────────────────────
 async function runViaPhpRunner(req, env, ctx) {
-  if (!env.PHP_RUNNER) return null;
+  if(!env.PHP_RUNNER) return null;
 
   const url    = new URL(req.url);
   const method = req.method.toUpperCase();
   const siteId = getSiteId(env);
+  const skipCache = SKIP_CACHE.some(p=>url.pathname.startsWith(p))
+    || (req.headers.get("Cookie")||"").includes("wordpress_logged_in");
+
+  let stdin = "";
+  if(method==="POST"||method==="PUT"||method==="PATCH"){
+    stdin = await req.text().catch(()=>"");
+  }
 
   const payload = {
-    phpFile:   url.pathname === "/" ? "/index.php" : url.pathname,
+    phpFile:   url.pathname==="/" ? "/index.php" : url.pathname,
     phpEnv: {
       REQUEST_METHOD:       method,
       REQUEST_URI:          url.pathname + url.search,
       QUERY_STRING:         url.search.slice(1),
       HTTP_HOST:            url.hostname,
-      HTTP_USER_AGENT:      req.headers.get("User-Agent") || "",
-      HTTP_ACCEPT:          req.headers.get("Accept") || "",
-      HTTP_ACCEPT_LANGUAGE: req.headers.get("Accept-Language") || "",
-      HTTP_COOKIE:          req.headers.get("Cookie") || "",
-      HTTP_REFERER:         req.headers.get("Referer") || "",
-      HTTP_X_FORWARDED_FOR: req.headers.get("CF-Connecting-IP") || "",
-      HTTPS:                "on",
-      SERVER_PORT:          "443",
       SERVER_NAME:          url.hostname,
-      SCRIPT_FILENAME:      url.pathname === "/" ? "/index.php" : url.pathname,
-      CONTENT_TYPE:         req.headers.get("Content-Type") || "",
-      CONTENT_LENGTH:       req.headers.get("Content-Length") || "",
+      SERVER_PORT:          "443",
+      HTTPS:                "on",
+      DOCUMENT_ROOT:        "/var/www/wordpress",
+      SCRIPT_FILENAME:      \`/var/www/wordpress\${url.pathname==="/"?"/index.php":url.pathname}\`,
+      SCRIPT_NAME:          url.pathname==="/"?"/index.php":url.pathname,
+      PHP_SELF:             url.pathname==="/"?"/index.php":url.pathname,
+      GATEWAY_INTERFACE:    "CGI/1.1",
+      SERVER_PROTOCOL:      "HTTP/1.1",
+      SERVER_SOFTWARE:      "CloudPress/8.0",
+      HTTP_USER_AGENT:      req.headers.get("User-Agent")||"",
+      HTTP_ACCEPT:          req.headers.get("Accept")||"",
+      HTTP_ACCEPT_LANGUAGE: req.headers.get("Accept-Language")||"",
+      HTTP_ACCEPT_ENCODING: req.headers.get("Accept-Encoding")||"",
+      HTTP_COOKIE:          req.headers.get("Cookie")||"",
+      HTTP_REFERER:         req.headers.get("Referer")||"",
+      HTTP_X_FORWARDED_FOR: req.headers.get("CF-Connecting-IP")||"",
+      HTTP_AUTHORIZATION:   req.headers.get("Authorization")||"",
+      CONTENT_TYPE:         req.headers.get("Content-Type")||"",
+      CONTENT_LENGTH:       req.headers.get("Content-Length")||"",
+      WP_HOME:              \`https://\${url.hostname}\`,
+      WP_SITEURL:           \`https://\${url.hostname}\`,
     },
-    stdin: (method === "POST" || method === "PUT" || method === "PATCH")
-      ? (await req.text().catch(() => ""))
-      : "",
+    stdin,
     siteConfig: {
       siteId,
       githubOwner: getOwner(env),
       githubRepo:  getRepo(env),
       githubToken: getToken(env),
     },
-    skipCache: SKIP_CACHE.some(p => url.pathname.startsWith(p)) ||
-               (req.headers.get("Cookie") || "").includes("wordpress_logged_in"),
+    skipCache,
   };
 
   try {
-    const phpReq = new Request("https://php-runner/run-wordpress", {
-      method:  "POST",
-      headers: { "Content-Type": "application/json" },
-      body:    JSON.stringify(payload),
-    });
-    const phpRes = await env.PHP_RUNNER.fetch(phpReq);
-    if (!phpRes.ok && phpRes.status >= 500) return null;
+    const phpRes = await env.PHP_RUNNER.fetch(
+      new Request("https://php-runner/run-wordpress", {
+        method:  "POST",
+        headers: {"Content-Type":"application/json"},
+        body:    JSON.stringify(payload),
+      })
+    );
 
-    // GET + 비로그인 응답을 KV에 캐시
-    if (!payload.skipCache && method === "GET" && phpRes.ok) {
+    // 5xx → 폴백으로 넘김
+    if(!phpRes.ok && phpRes.status>=500) return null;
+
+    // 성공 HTML → KV 캐시 저장 (비로그인 GET만)
+    if(!skipCache && method==="GET" && phpRes.ok && phpRes.headers.get("Content-Type")?.includes("text/html")){
       const html = await phpRes.clone().text();
       ctx.waitUntil(
-        env.CACHE?.put(
-          \`php:\${siteId}:\${url.pathname}\${url.search}\`,
-          html,
-          { expirationTtl: 3600 }
-        ).catch(() => {})
+        kvPut(env, \`php:\${siteId}:\${url.pathname}\${url.search}\`, html, 3600)
       );
     }
     return phpRes;
@@ -429,120 +453,127 @@ async function runViaPhpRunner(req, env, ctx) {
   }
 }
 
-// ─── GitHub _cache/ 정적 HTML 폴백 ───────────────────────────────────────────
-async function serveFromCache(e, path, search) {
-  const ck = \`html:\${getSiteId(e)}:\${path}\${search}\`;
-  const kv = await kvGet(e, ck);
-  if (kv) return new Response(kv, {headers:{"Content-Type":"text/html;charset=utf-8","Cache-Control":"public,s-maxage=60,stale-while-revalidate=3600","X-Cache":"KV-HIT",...SEC_HEADERS}});
+// ─── 정적 파일 서빙 ──────────────────────────────────────────────────────────
+async function serveStatic(req, env, ctx, path) {
+  const fp = path.startsWith("/")?path.slice(1):path;
+  const siteId = getSiteId(env);
 
-  const cachePath = (path==="/"||path==="")?
-    "_cache/index.html" :
-    \`_cache\${path.endsWith("/")?path:path+"/"}index.html\`;
-  const r = await ghFetch(e, cachePath);
-  if(r){
-    const html=await r.text();
-    try{await e.CACHE?.put(ck,html,{expirationTtl:3600});}catch{}
-    return new Response(html,{headers:{"Content-Type":"text/html;charset=utf-8","Cache-Control":"public,s-maxage=60,stale-while-revalidate=3600","X-Cache":"GH-CACHE",...SEC_HEADERS}});
+  // wp-content → GitHub 레포 (테마/플러그인/업로드)
+  if(path.startsWith("/wp-content/")){
+    const ck=\`static:\${siteId}:\${fp}\`;
+    const cb=await kvGetBuf(env,ck);
+    if(cb)return new Response(cb,{headers:{"Content-Type":mime(fp),"Cache-Control":"public,max-age=3600","X-Cache":"HIT",...SEC_HEADERS}});
+    const r=await ghFetch(env,fp);
+    if(r){
+      const b=await r.arrayBuffer();
+      ctx.waitUntil(kvPut(env,ck,b,3600));
+      return new Response(b,{headers:{"Content-Type":mime(fp),"Cache-Control":"public,max-age=3600","X-Source":"github",...SEC_HEADERS}});
+    }
   }
-  return null;
-}
 
-async function ghPagesFallback(e,path){
-  const base=getPages(e);if(!base)return null;
-  try{
-    const r=await fetch(\`\${base}\${path}\`,{cf:{cacheEverything:true,cacheTtl:300},headers:{"User-Agent":"CloudPress-Fallback/1.0"}});
-    if(r.ok)return new Response(await r.text(),{status:200,headers:{"Content-Type":"text/html;charset=utf-8","Cache-Control":"public,max-age=60","X-Fallback":"github-pages",...SEC_HEADERS}});
-  }catch{}
-  return null;
-}
+  // wp-includes / wp-admin 정적 자산 → GitHub 레포 → WordPress CDN
+  if(path.startsWith("/wp-includes/")||path.startsWith("/wp-admin/")){
+    const gr=await ghFetch(env,fp);
+    if(gr){const b=await gr.arrayBuffer();return new Response(b,{headers:{"Content-Type":mime(fp),"Cache-Control":"public,max-age=86400,stale-while-revalidate=604800","X-Source":"github",...SEC_HEADERS}});}
+    const cr=await wpCoreFetch(fp);
+    if(cr){const b=await cr.arrayBuffer();return new Response(b,{headers:{"Content-Type":mime(fp),"Cache-Control":"public,max-age=86400,immutable","X-Source":"wp-cdn",...SEC_HEADERS}});}
+  }
 
-async function kvFallback(e,path,search){
-  const h=await kvGet(e,\`php:\${getSiteId(e)}:\${path}\${search}\`);
-  if(!h)return null;
-  return new Response(h,{status:200,headers:{"Content-Type":"text/html;charset=utf-8","Cache-Control":"public,max-age=30","X-Fallback":"kv-stale",...SEC_HEADERS}});
+  // 기타 정적 파일
+  const cr2=await ghFetch(env,fp.startsWith("_cache/")?fp:\`_cache/\${fp}\`);
+  if(cr2){const b=await cr2.arrayBuffer();return new Response(b,{headers:{"Content-Type":mime(fp),"Cache-Control":"public,max-age=86400",...SEC_HEADERS}});}
+
+  return new Response("Not Found",{status:404});
 }
 
 export default {
-  async fetch(req,e,ctx){
-    const url=new URL(req.url),path=url.pathname,method=req.method.toUpperCase();
-    const ua=req.headers.get("User-Agent")||"",isBot=BOT_RE.test(ua);
+  async fetch(req, env, ctx) {
+    const url    = new URL(req.url);
+    const path   = url.pathname;
+    const method = req.method.toUpperCase();
+    const siteId = getSiteId(env);
 
-    if(method==="OPTIONS")return new Response(null,{status:204,headers:{"Access-Control-Allow-Origin":"*","Access-Control-Allow-Methods":"GET,POST,PUT,DELETE,PATCH,OPTIONS","Access-Control-Allow-Headers":"Content-Type,Authorization,X-WP-Nonce,X-Requested-With"}});
-    if(path==="/_health")return new Response(JSON.stringify({ok:true,site:getSiteId(e),engine:e.PHP_RUNNER?"php-wasm":"static"}),{headers:{"Content-Type":"application/json"}});
+    // CORS preflight
+    if(method==="OPTIONS") return new Response(null,{status:204,headers:{
+      "Access-Control-Allow-Origin":"*",
+      "Access-Control-Allow-Methods":"GET,POST,PUT,DELETE,PATCH,OPTIONS",
+      "Access-Control-Allow-Headers":"Content-Type,Authorization,X-WP-Nonce,X-Requested-With",
+    }});
 
-    const maint=await e.CACHE?.get(\`cp:maintenance:\${getSiteId(e)}\`).catch(()=>null);
-    if(maint==="1"&&!path.startsWith("/wp-admin/"))return maintPage();
+    // 헬스체크
+    if(path==="/_health") return new Response(
+      JSON.stringify({ok:true,site:siteId,engine:env.PHP_RUNNER?"php-wasm":"init",wp:WP_VERSION}),
+      {headers:{"Content-Type":"application/json"}}
+    );
 
-    // 1. 정적 파일 서빙
-    if(STATIC_EXT.test(path)){
-      const fp=path.startsWith("/")?path.slice(1):path;
-      if(path.startsWith("/wp-content/")){
-        const ck=\`static:\${getSiteId(e)}:\${fp}\`;
-        const cb=await kvGetBuf(e,ck);
-        if(cb)return new Response(cb,{headers:{"Content-Type":mime(fp),"Cache-Control":"public,max-age=3600","X-Cache":"HIT"}});
-        const r=await ghFetch(e,fp);
-        if(r){const b=await r.arrayBuffer();ctx.waitUntil(kvSetBuf(e,ck,b,3600));return new Response(b,{headers:{"Content-Type":mime(fp),"Cache-Control":"public,max-age=3600","X-Source":"github"}});}
-      }
-      if(path.startsWith("/wp-includes/")||path.startsWith("/wp-admin/")){
-        const gr=await ghFetch(e,fp);
-        if(gr){const b=await gr.arrayBuffer();return new Response(b,{headers:{"Content-Type":mime(fp),"Cache-Control":"public,max-age=86400,stale-while-revalidate=604800","X-Source":"github"}});}
-        const cr=await wpCoreFetch(fp);
-        if(cr){const b=await cr.arrayBuffer();return new Response(b,{headers:{"Content-Type":mime(fp),"Cache-Control":"public,max-age=86400,immutable","X-Source":"wp-cdn"}});}
-      }
-      const cr2=await ghFetch(e,fp.startsWith("_cache/")?fp:\`_cache/\${fp}\`);
-      if(cr2){const b=await cr2.arrayBuffer();return new Response(b,{headers:{"Content-Type":mime(fp),"Cache-Control":"public,max-age=86400"}});}
-      return new Response("Not Found",{status:404});
-    }
+    // 유지보수 모드
+    const maint=await kvGet(env,\`cp:maintenance:\${siteId}\`);
+    if(maint==="1"&&!path.startsWith("/wp-admin/")) return maintPage();
 
-    // 2. 봇 사전렌더링 캐시 (SEO)
+    // 1. 정적 파일 처리
+    if(STATIC_EXT.test(path)) return serveStatic(req,env,ctx,path);
+
+    // 2. 봇 사전렌더링 캐시 (SEO 최적화)
+    const isBot=BOT_RE.test(req.headers.get("User-Agent")||"");
     if(isBot&&method==="GET"){
-      const pr=await kvGet(e,\`prerender:\${getSiteId(e)}:\${path}\${url.search}\`);
+      const pr=await kvGet(env,\`prerender:\${siteId}:\${path}\${url.search}\`);
       if(pr)return new Response(pr,{headers:{"Content-Type":"text/html;charset=utf-8","Cache-Control":"public,max-age=300","X-Cache":"PRERENDER",...SEC_HEADERS}});
     }
 
-    // 3. KV HTML 캐시 (비-정적 GET, 비로그인)
+    // 3. KV HTML 캐시 (비로그인 GET)
     const isLoggedIn=(req.headers.get("Cookie")||"").includes("wordpress_logged_in");
-    const cacheable=method==="GET"&&!SKIP_CACHE.some(p=>path.startsWith(p))&&!isLoggedIn;
+    const cacheable = method==="GET" && !SKIP_CACHE.some(p=>path.startsWith(p)) && !isLoggedIn;
     if(cacheable){
-      const c=await kvGet(e,\`php:\${getSiteId(e)}:\${path}\${url.search}\`);
+      const c=await kvGet(env,\`php:\${siteId}:\${path}\${url.search}\`);
       if(c)return new Response(c,{headers:{"Content-Type":"text/html;charset=utf-8","Cache-Control":"public,s-maxage=60,stale-while-revalidate=3600","X-Cache":"HIT",...SEC_HEADERS}});
     }
 
-    // 4. PHP_RUNNER Service Binding으로 실제 WordPress 실행 (핵심)
-    //    PHP_RUNNER가 바인딩되어 있으면 php-wasm으로 즉시 WP 실행
-    const phpRes = await runViaPhpRunner(req, e, ctx);
-    if(phpRes)return phpRes;
+    // 4. PHP_RUNNER Service Binding으로 WordPress 실행 (핵심 경로)
+    const phpRes = await runViaPhpRunner(req,env,ctx);
+    if(phpRes) return phpRes;
 
-    // 5. PHP_RUNNER 없을 때 폴백: GitHub _cache/ 정적 HTML
+    // 5. PHP_RUNNER 없음 → GitHub _cache/ 정적 HTML 폴백
+    //    (WordPress 아직 미설치이거나 PHP Runner 미배포 상태)
     if(cacheable){
-      const cached=await serveFromCache(e,path,url.search);
-      if(cached)return cached;
+      const cachePath=(path==="/"||path==="")?
+        "_cache/index.html":
+        \`_cache\${path.endsWith("/")?path:path+"/"}index.html\`;
+      const cr=await ghFetch(env,cachePath);
+      if(cr){
+        const html=await cr.text();
+        ctx.waitUntil(kvPut(env,\`html:\${siteId}:\${path}\${url.search}\`,html,3600));
+        return new Response(html,{headers:{"Content-Type":"text/html;charset=utf-8","Cache-Control":"public,s-maxage=60,stale-while-revalidate=3600","X-Cache":"GH-CACHE",...SEC_HEADERS}});
+      }
     }
 
     // 6. GitHub Pages 폴백
-    const fb=await ghPagesFallback(e,path)||await kvFallback(e,path,url.search);
-    if(fb)return fb;
-
-    // 7. GitHub 레포 루트 index.html (최후 수단)
-    for(const idxPath of ["_cache/index.html","index.html"]){
-      const idxR=await ghFetch(e,idxPath);
-      if(idxR)return new Response(await idxR.text(),{status:200,headers:{"Content-Type":"text/html;charset=utf-8","Cache-Control":"public,max-age=60","X-Fallback":"index",...SEC_HEADERS}});
-    }
-
-    const pagesBase=getPages(e);
+    const pagesBase=getPages(env);
     if(pagesBase){
       try{
-        const r=await fetch(pagesBase,{cf:{cacheEverything:true,cacheTtl:60},headers:{"User-Agent":"CloudPress-Fallback/1.0"}});
-        if(r.ok)return new Response(await r.text(),{status:200,headers:{"Content-Type":"text/html;charset=utf-8","Cache-Control":"public,max-age=60","X-Fallback":"github-pages-root",...SEC_HEADERS}});
+        const r=await fetch(\`\${pagesBase}\${path}\`,{cf:{cacheEverything:true,cacheTtl:300},headers:{"User-Agent":"CloudPress-Fallback/1.0"}});
+        if(r.ok)return new Response(await r.text(),{status:200,headers:{"Content-Type":"text/html;charset=utf-8","Cache-Control":"public,max-age=60","X-Fallback":"github-pages",...SEC_HEADERS}});
       }catch{}
     }
 
-    return errPage(503,"설치 진행 중","WordPress를 설치하고 있습니다. GitHub Actions 워크플로우가 완료되면 자동으로 활성화됩니다. (약 3~5분 소요)");
+    // 7. KV stale 캐시 (최후 폴백)
+    const stale=await kvGet(env,\`php:\${siteId}:\${path}\${url.search}\`);
+    if(stale)return new Response(stale,{status:200,headers:{"Content-Type":"text/html;charset=utf-8","Cache-Control":"public,max-age=30","X-Fallback":"kv-stale",...SEC_HEADERS}});
+
+    // 8. PHP_RUNNER가 없고 캐시도 없는 상태 → 설치 안내
+    //    (정상: PHP Runner 배포 전 초기 상태)
+    const isPhpRunnerMissing = !env.PHP_RUNNER;
+    const statusCode = isPhpRunnerMissing ? 503 : 502;
+    const title      = isPhpRunnerMissing ? "WordPress 초기화 중" : "일시적 오류";
+    const detail     = isPhpRunnerMissing
+      ? "PHP Runner Worker가 아직 배포되지 않았습니다.<br>GitHub Actions 'Cloudflare Worker 자동 배포' 워크플로우를 실행하거나,<br><code>wrangler deploy --config wrangler-php.toml</code> 명령을 실행하세요."
+      : "WordPress 실행 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.";
+
+    return new Response(\`<!DOCTYPE html><html lang="ko"><head><meta charset="UTF-8"><meta http-equiv="refresh" content="30"><title>\${title}</title><style>*{box-sizing:border-box}body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#f0f0f1;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;padding:20px}.card{background:#fff;border:1px solid #c3c4c7;border-radius:4px;max-width:480px;width:100%;padding:40px;text-align:center}.icon{font-size:48px;margin-bottom:20px}h1{color:#1d2327;font-size:20px;font-weight:600;margin:0 0 12px}p{color:#646970;line-height:1.6;margin:0 0 20px;font-size:14px}code{background:#f6f7f7;border:1px solid #dcdcde;border-radius:2px;padding:2px 6px;font-size:12px}.badge{display:inline-block;background:\${isPhpRunnerMissing?"#f0b849":"#d63638"};color:#fff;font-size:11px;font-weight:600;padding:3px 8px;border-radius:2px;margin-bottom:16px}</style></head><body><div class="card"><div class="icon">\${isPhpRunnerMissing?"⚙️":"⚠️"}</div><div class="badge">\${isPhpRunnerMissing?"INITIALIZING":"ERROR"}</div><h1>\${title}</h1><p>\${detail}</p></div></body></html>\`,
+      {status:statusCode,headers:{"Content-Type":"text/html;charset=utf-8","Cache-Control":"no-store",...SEC_HEADERS}});
   },
 };`;
   return src;
 }
-
 // ─── GitHub Actions 워크플로우 빌드 ─────────────────────────────────────────
 
 // 메인: WordPress 전체 설치 + SQLite DB 초기화

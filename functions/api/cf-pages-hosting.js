@@ -432,8 +432,7 @@ export default {
     if(cacheable){const c=await kvGet(e,\`php:\${getSiteId(e)}:\${path}\${url.search}\`);if(c)return new Response(c,{headers:{"Content-Type":"text/html;charset=utf-8","Cache-Control":"public,s-maxage=60,stale-while-revalidate=3600","X-Cache":"HIT",...SEC_HEADERS}});}
     // 정적 파일
     if(STATIC_EXT.test(path)){
-      const fp=path.replace(/^\//,"");
-      if(path.startsWith("/wp-content/")){
+      const fp=path.startsWith("/")?path.slice(1):path;    if(path.startsWith("/wp-content/")){
         const ck=\`static:\${getSiteId(e)}:\${fp}\`;
         const cb=await kvGetBuf(e,ck);
         if(cb)return new Response(cb,{headers:{"Content-Type":mime(fp),"Cache-Control":"public,max-age=3600","X-Cache":"HIT"}});

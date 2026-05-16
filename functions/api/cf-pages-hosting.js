@@ -1531,6 +1531,46 @@ export async function provisionCloudflarePagesHosting({
   };
 }
 
+
+// ─── Cloudflare Workers Upload 멀티파트 빌더 ─────────────────────────────────
+// CF Workers Upload API는 반드시 Uint8Array 바이너리 바디로 전송해야 함
+// 문자열 concat 방식은 502 오류 발생
+function buildWorkerMultipart(metadataObj, files) {
+  const enc = new TextEncoder();
+  const boundary = "----CFWorkerBoundary" + Math.random().toString(36).slice(2);
+  const parts = [];
+
+  // metadata part
+  const metaStr =
+    `--${boundary}\r\n` +
+    `Content-Disposition: form-data; name="metadata"\r\n` +
+    `Content-Type: application/json\r\n\r\n` +
+    JSON.stringify(metadataObj) + `\r\n`;
+  parts.push(enc.encode(metaStr));
+
+  // source file parts
+  for (const { name, content: src } of files) {
+    const header =
+      `--${boundary}\r\n` +
+      `Content-Disposition: form-data; name="${name}"; filename="${name}"\r\n` +
+      `Content-Type: application/javascript+module\r\n\r\n`;
+    parts.push(enc.encode(header));
+    parts.push(enc.encode(src));
+    parts.push(enc.encode("\r\n"));
+  }
+
+  // terminator
+  parts.push(enc.encode(`--${boundary}--`));
+
+  // flatten
+  const totalLen = parts.reduce((s, p) => s + p.length, 0);
+  const merged = new Uint8Array(totalLen);
+  let offset = 0;
+  for (const p of parts) { merged.set(p, offset); offset += p.length; }
+
+  return { body: merged, contentType: `multipart/form-data; boundary=${boundary}` };
+}
+
 // ─── PHP Runner Worker 배포 ──────────────────────────────────────────────────
 async function deployPhpRunnerWorker({
   cfToken, cfAccountId, cfEmail,
@@ -1539,8 +1579,6 @@ async function deployPhpRunnerWorker({
   siteId, ghOwner, ghRepo,
   log,
 }) {
-  const boundary = `----FormBoundary${Math.random().toString(36).slice(2)}`;
-
   const bindings = [
     ...(kvCacheId ? [{ type: "kv_namespace", name: "CACHE", namespace_id: kvCacheId }] : []),
     { type: "plain_text", name: "SITE_ID",  text: siteId },
@@ -1555,22 +1593,12 @@ async function deployPhpRunnerWorker({
     bindings,
   };
 
-  const metaPart =
-    `--${boundary}\r\n` +
-    `Content-Disposition: form-data; name="metadata"\r\n` +
-    `Content-Type: application/json\r\n\r\n` +
-    JSON.stringify(metadataObj) + `\r\n`;
-
-  const srcPart =
-    `--${boundary}\r\n` +
-    `Content-Disposition: form-data; name="php-runner.js"; filename="php-runner.js"\r\n` +
-    `Content-Type: application/javascript+module\r\n\r\n` +
-    workerSource + `\r\n`;
-
-  const body = metaPart + srcPart + `--${boundary}--`;
+  const { body, contentType } = buildWorkerMultipart(metadataObj, [
+    { name: "php-runner.js", content: workerSource },
+  ]);
 
   const headers = {
-    "Content-Type": `multipart/form-data; boundary=${boundary}`,
+    "Content-Type": contentType,
     ...(cfEmail
       ? { "X-Auth-Email": cfEmail, "X-Auth-Key": cfToken }
       : { "Authorization": `Bearer ${cfToken}` }),
@@ -1587,7 +1615,8 @@ async function deployPhpRunnerWorker({
     return { ok: true };
   } else {
     const errDetail = JSON.stringify(data?.errors || data);
-    await log(`  ⚠️ PHP Runner Worker 배포 실패 [${res.status}]: ${errDetail}`, "warn");
+    const phpErrText = await res.clone().text().catch(() => "");
+    await log(`  ⚠️ PHP Runner Worker 배포 실패 [${res.status}]: ${errDetail || phpErrText}`, "warn");
     return null;
   }
 }
@@ -1601,8 +1630,6 @@ async function deployWorker({
   ghToken,
   log,
 }) {
-  const boundary = `----FormBoundary${Math.random().toString(36).slice(2)}`;
-
   // phpRunnerExists: PHP Runner가 실제로 배포됐는지 먼저 확인
   let phpRunnerExists = false;
   try {
@@ -1638,22 +1665,12 @@ async function deployWorker({
     bindings,
   };
 
-  const metaPart =
-    `--${boundary}\r\n` +
-    `Content-Disposition: form-data; name="metadata"\r\n` +
-    `Content-Type: application/json\r\n\r\n` +
-    JSON.stringify(metadataObj) + `\r\n`;
-
-  const srcPart =
-    `--${boundary}\r\n` +
-    `Content-Disposition: form-data; name="worker.js"; filename="worker.js"\r\n` +
-    `Content-Type: application/javascript+module\r\n\r\n` +
-    workerSource + `\r\n`;
-
-  const body = metaPart + srcPart + `--${boundary}--`;
+  const { body: workerBody, contentType: workerCT } = buildWorkerMultipart(metadataObj, [
+    { name: "worker.js", content: workerSource },
+  ]);
 
   const headers = {
-    "Content-Type": `multipart/form-data; boundary=${boundary}`,
+    "Content-Type": workerCT,
     ...(cfEmail
       ? { "X-Auth-Email": cfEmail, "X-Auth-Key": cfToken }
       : { "Authorization": `Bearer ${cfToken}` }),
@@ -1662,13 +1679,14 @@ async function deployWorker({
   await log(`  메인 Worker 배포 시작: ${workerName} (bindings: ${bindings.map(b=>b.name).join(", ")})`);
   const res = await fetch(
     `https://api.cloudflare.com/client/v4/accounts/${cfAccountId}/workers/scripts/${workerName}`,
-    { method: "PUT", headers, body }
+    { method: "PUT", headers, body: workerBody }
   );
   const data = await res.json().catch(() => ({}));
 
   if (!res.ok) {
     const errDetail = JSON.stringify(data?.errors || data);
-    await log(`  ❌ 메인 Worker 배포 실패 [${res.status}]: ${errDetail}`, "error");
+    const errText = await res.clone().text().catch(() => "");
+    await log(`  ❌ 메인 Worker 배포 실패 [${res.status}]: ${errDetail || errText}`, "error");
     return null;
   }
 

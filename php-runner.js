@@ -20,7 +20,7 @@
  *   GH_PAGES_URL       - GitHub Pages URL (폴백)
  */
 
-const WP_VERSION = "6.7.2";
+const WP_VERSION = "latest";
 
 // ─── KV 캐시 헬퍼 ────────────────────────────────────────────────────────────
 async function kvGetText(env, key) {
@@ -75,7 +75,7 @@ async function fetchCoreFile(filePath, env) {
   if (cached) return { buffer: cached, ct: mimeType(filePath), fromCache: true };
 
   try {
-    const res = await fetch("https://cdn.jsdelivr.net/gh/WordPress/WordPress@" + WP_VERSION + "/" + filePath, {
+    const res = await fetch("https://cdn.jsdelivr.net/gh/WordPress/WordPress@master/" + filePath, {
       cf: { cacheEverything: true, cacheTtl: 86400 * 7 },
     });
     if (res.ok) {
@@ -304,9 +304,9 @@ async function runWordpress(payload, env, ctx) {
     "<body><div class=\"card\">" +
     "<div class=\"badge\">WORDPRESS INSTALLING</div>" +
     "<h1>⚙️ WordPress 설치 진행 중</h1>" +
-    "<p>GitHub Actions가 WordPress 6.7.2를 자동으로 설치하고 있습니다.</p>" +
+    "<p>GitHub Actions가 WordPress 최신버전을 자동으로 설치하고 있습니다.</p>" +
     "<ol class=\"steps\"><li>✅ GitHub 레포지토리 생성</li>" +
-    "<li>⏳ WordPress 6.7.2 파일 설치 중...</li>" +
+    "<li>⏳ WordPress 최신버전 파일 설치 중...</li>" +
     "<li>⏳ 데이터베이스 초기화 중...</li>" +
     "<li>⏳ 정적 캐시 생성 중...</li></ol>" +
     (actionsUrl ? "<a class=\"btn\" href=\"" + actionsUrl + "\" target=\"_blank\">🔄 설치 진행상황 보기</a>" : "") +

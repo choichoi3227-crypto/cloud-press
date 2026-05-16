@@ -15,7 +15,7 @@
 import { pickGithubToken } from "./github-storage.js";
 
 // ─── 상수 ────────────────────────────────────────────────────────────────────
-const WP_VERSION = "6.7.2";
+const WP_VERSION = "latest";
 
 // ─── 유틸 ────────────────────────────────────────────────────────────────────
 const delay = (ms) => new Promise(r => setTimeout(r, ms));
@@ -311,7 +311,7 @@ const GH_OWNER     = "${githubOwner}";
 const GH_REPO      = "${githubRepo}";
 const GH_BRANCH    = "main";
 const GH_PAGES_URL = "${_ghPagesUrl}";
-const WP_VERSION   = "6.7.2";
+const WP_VERSION   = "latest";
 
 const STATIC_EXT = /\\.(css|js|jpg|jpeg|png|gif|webp|avif|svg|ico|woff2?|ttf|eot|otf|map|txt|xml|json|pdf|zip|mp4|mp3|ogg|wav|webm|gz|tar)$/i;
 const SKIP_CACHE  = ["/wp-admin","/wp-login.php","/cart","/checkout","/my-account","/wp-cron.php","/xmlrpc.php"];
@@ -570,10 +570,10 @@ export default {
 </head><body><div class="card">
 <div class="badge">WORDPRESS INSTALLING</div>
 <h1>⚙️ WordPress 설치 진행 중</h1>
-<p>GitHub Actions가 WordPress 6.7.2를 자동으로 설치하고 있습니다.</p>
+<p>GitHub Actions가 WordPress 최신버전을 자동으로 설치하고 있습니다.</p>
 <ol class="steps">
   <li>✅ GitHub 레포지토리 생성</li>
-  <li>⏳ WordPress 6.7.2 전체 파일 설치 중...</li>
+  <li>⏳ WordPress 최신버전 전체 파일 설치 중...</li>
   <li>⏳ 데이터베이스 초기화 중...</li>
   <li>⏳ 정적 캐시 생성 중...</li>
 </ol>
@@ -606,7 +606,7 @@ permissions:
 
 jobs:
   install-wordpress:
-    name: WordPress 6.7.2 설치
+    name: WordPress 최신버전 설치
     runs-on: ubuntu-latest
     steps:
       - name: 레포 체크아웃
@@ -617,12 +617,13 @@ jobs:
       - name: SQLite 설치
         run: sudo apt-get install -y sqlite3
 
-      - name: WordPress 6.7.2 다운로드 (모든 파일)
+      - name: WordPress 최신버전 다운로드 (모든 파일)
         run: |
-          echo "📥 WordPress 6.7.2 다운로드 중..."
-          wget -q https://wordpress.org/wordpress-6.7.2.tar.gz -O /tmp/wp.tar.gz
+          echo "📥 WordPress 최신버전 다운로드 중..."
+          wget -q https://wordpress.org/latest.tar.gz -O /tmp/wp.tar.gz
           tar -xzf /tmp/wp.tar.gz -C /tmp/
-          echo "✅ WordPress 압축 해제 완료"
+          WP_VER=$(grep "^\$wp_version" /tmp/wordpress/wp-includes/version.php | grep -oP "[\d.]+")
+          echo "✅ WordPress ${WP_VER} 압축 해제 완료"
 
           # wp-config.php는 보호 (덮어쓰지 않음)
           echo "📁 WordPress 파일 복사 중 (wp-config.php 제외)..."
@@ -870,7 +871,7 @@ jobs:
           git status --short | head -30
           TOTAL=$(git diff --staged --name-only | wc -l)
           echo "📁 커밋할 파일: \${TOTAL}개"
-          git diff --staged --quiet || git commit -m "🚀 WordPress 6.7.2 완전 설치 + SQLite DB 초기화 (\${TOTAL}개 파일)"
+          git diff --staged --quiet || git commit -m "🚀 WordPress 최신버전 완전 설치 + SQLite DB 초기화 (\${TOTAL}개 파일)"
           git push
           echo "✅ 모든 파일 푸시 완료"
           echo "📊 레포 파일 통계:"
@@ -884,13 +885,6 @@ function buildWorkerDeployAction({ workerName }) {
   return `name: Cloudflare Worker 자동 배포
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - 'worker.js'
-      - 'php-runner.js'
-      - 'wrangler.toml'
-      - 'wrangler-php.toml'
   workflow_dispatch:
 
 jobs:
@@ -958,10 +952,6 @@ on:
   schedule:
     - cron: '0 */3 * * *'  # 3시간마다 정적 캐시 갱신
   workflow_dispatch:
-  push:
-    paths:
-      - 'wp-content/**'
-      - 'wp-config.php'
 
 permissions:
   contents: write
@@ -987,8 +977,8 @@ jobs:
       - name: WordPress 코어 다운로드 (없으면)
         run: |
           if [ ! -f "wp-includes/version.php" ]; then
-            echo "📥 WordPress 6.7.2 다운로드..."
-            wget -q https://wordpress.org/wordpress-6.7.2.tar.gz -O /tmp/wp.tar.gz
+            echo "📥 WordPress 최신버전 다운로드..."
+            wget -q https://wordpress.org/latest.tar.gz -O /tmp/wp.tar.gz
             tar -xzf /tmp/wp.tar.gz -C /tmp/
             # wp-content, wp-config.php 보존하면서 코어만 복사
             rsync -a --exclude='wp-content' --exclude='wp-config.php' /tmp/wordpress/ ./
@@ -1407,7 +1397,7 @@ export async function provisionCloudflarePagesHosting({
 
         if (triggerRes.ok || triggerRes.status === 204) {
           await log("  🚀 WordPress 설치 Action 트리거 완료 (GitHub Actions에서 설치 진행 중)");
-          await log("  📁 설치 내용: WordPress 6.7.2 모든 파일 + SQLite DB 초기화");
+          await log("  📁 설치 내용: WordPress 최신버전 모든 파일 + SQLite DB 초기화");
           await log("  ⏱️ 완료까지 약 2~5분 소요");
         } else {
           await log("  ⚠️ Action 트리거 실패 — GitHub 레포 Actions 탭에서 수동 실행하세요", "warn");

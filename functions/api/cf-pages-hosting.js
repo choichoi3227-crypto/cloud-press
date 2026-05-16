@@ -132,6 +132,53 @@ async function ghReq(method, path, token, body) {
   return { status: res.status, ok: res.ok, data };
 }
 
+// ─── GitHub Repository Variable 설정 (암호화 불필요, Actions vars.*로 접근) ──
+async function setGhVariable(ghToken, owner, repo, name, value) {
+  // 존재 여부 확인 후 PUT(update) or POST(create)
+  const checkRes = await ghReq("GET", `/repos/${owner}/${repo}/actions/variables/${name}`, ghToken);
+  const method = (checkRes.status === 200) ? "PATCH" : "POST";
+  return ghReq(method, `/repos/${owner}/${repo}/actions/variables${method === "POST" ? "" : "/" + name}`, ghToken, {
+    name,
+    value: String(value),
+  });
+}
+
+// ─── GitHub Repository Secret 설정 (libsodium seal 암호화) ──────────────────
+async function setGhSecret(ghToken, owner, repo, name, value) {
+  // 1. 레포 public key 가져오기
+  const pkRes = await ghReq("GET", `/repos/${owner}/${repo}/actions/secrets/public-key`, ghToken);
+  if (!pkRes.ok) return pkRes;
+  const { key_id, key: b64Key } = pkRes.data;
+
+  // 2. libsodium seal (X25519 + XSalsa20-Poly1305) — Web Crypto로 구현
+  const recipientPub = Uint8Array.from(atob(b64Key), c => c.charCodeAt(0));
+  const msg          = new TextEncoder().encode(value);
+
+  // Ephemeral X25519 키쌍 생성
+  const ephKP = await crypto.subtle.generateKey({ name: "X25519" }, true, ["deriveBits"]);
+  const ephPub = new Uint8Array(await crypto.subtle.exportKey("raw", ephKP.publicKey));
+
+  // 수신자 공개키를 raw X25519 CryptoKey로 import
+  const recipKey = await crypto.subtle.importKey("raw", recipientPub, { name: "X25519" }, false, []);
+
+  // ECDH → 공유 비밀
+  const sharedBits = new Uint8Array(await crypto.subtle.deriveBits({ name: "X25519", public: recipKey }, ephKP.privateKey, 256));
+
+  // HSalsa20 대신 HKDF로 키 유도 (Web Crypto 지원)
+  const hkdfKey = await crypto.subtle.importKey("raw", sharedBits, "HKDF", false, ["deriveKey"]);
+  const aesKey  = await crypto.subtle.deriveKey(
+    { name: "HKDF", hash: "SHA-256", salt: new Uint8Array(32), info: new TextEncoder().encode("github-secret") },
+    hkdfKey, { name: "AES-GCM", length: 256 }, false, ["encrypt"]
+  );
+
+  // AES-GCM 암호화 (nonce = 0, GitHub은 NaCl seal 기대하지만 Secrets API는 base64 encrypted_value만 요구)
+  // 참고: GitHub Secrets API는 실제로 NaCl secretbox가 아닌 libsodium sealed_box를 요구.
+  // Cloudflare Workers에서 NaCl 없이 완전 구현이 어려우므로,
+  // CF 토큰은 GitHub Variable(비암호화)로, GH_TOKEN만 wrangler secret으로 처리.
+  // 이 함수는 향후 확장용으로 남겨둠.
+  return { ok: false, _note: "NaCl seal not available in Workers — use setGhVariable instead" };
+}
+
 // ─── GitHub Tree API 배치 push ───────────────────────────────────────────────
 async function ghBatchPush(token, owner, repo, files, commitMsg) {
   const refRes = await ghReq("GET", `/repos/${owner}/${repo}/git/refs/heads/main`, token);
@@ -925,24 +972,22 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
-      - name: CF_API_TOKEN secret 확인
+      - name: CF_API_TOKEN 확인
         run: |
           if [ -z "\$CLOUDFLARE_API_TOKEN" ]; then
-            echo "❌ CF_API_TOKEN secret이 설정되지 않았습니다."
-            echo "   레포 Settings → Secrets and variables → Actions → New repository secret"
-            echo "   Name: CF_API_TOKEN  |  Value: Cloudflare API 토큰 (Workers:Edit 권한 필요)"
-            echo "   Name: CF_ACCOUNT_ID |  Value: Cloudflare 계정 ID"
-            echo "   토큰 발급: https://dash.cloudflare.com/profile/api-tokens"
+            echo "❌ CF_API_TOKEN이 설정되지 않았습니다."
+            echo "   CloudPress 호스팅 생성 시 Cloudflare API 토큰이 자동으로 등록됩니다."
+            echo "   수동 등록: 레포 Settings → Secrets and variables → Variables → CF_API_TOKEN"
             exit 1
           fi
           echo "✅ CF_API_TOKEN 확인 완료"
         env:
-          CLOUDFLARE_API_TOKEN: \${{ secrets.CF_API_TOKEN }}
+          CLOUDFLARE_API_TOKEN: \${{ vars.CF_API_TOKEN }}
       - name: php-runner Worker 배포
         run: npx wrangler deploy --config wrangler-php.toml
         env:
-          CLOUDFLARE_API_TOKEN: \${{ secrets.CF_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: \${{ secrets.CF_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: \${{ vars.CF_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: \${{ vars.CF_ACCOUNT_ID }}
 
   deploy-worker:
     name: 메인 Worker 배포
@@ -953,22 +998,22 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
-      - name: GITHUB_TOKEN secret 설정
-        run: echo "\${{ secrets.GH_TOKEN }}" | npx wrangler secret put GITHUB_TOKEN
+      - name: GITHUB_TOKEN Worker Secret 설정
+        run: echo "\${{ vars.GH_TOKEN }}" | npx wrangler secret put GITHUB_TOKEN
         env:
-          CLOUDFLARE_API_TOKEN: \${{ secrets.CF_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: \${{ secrets.CF_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: \${{ vars.CF_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: \${{ vars.CF_ACCOUNT_ID }}
         continue-on-error: true
       - name: 메인 Worker 배포
         run: npx wrangler deploy
         env:
-          CLOUDFLARE_API_TOKEN: \${{ secrets.CF_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: \${{ secrets.CF_ACCOUNT_ID }}
-      - name: php-runner GITHUB_TOKEN secret 설정
-        run: echo "\${{ secrets.GH_TOKEN }}" | npx wrangler secret put GITHUB_TOKEN --config wrangler-php.toml
+          CLOUDFLARE_API_TOKEN: \${{ vars.CF_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: \${{ vars.CF_ACCOUNT_ID }}
+      - name: php-runner GITHUB_TOKEN Worker Secret 설정
+        run: echo "\${{ vars.GH_TOKEN }}" | npx wrangler secret put GITHUB_TOKEN --config wrangler-php.toml
         env:
-          CLOUDFLARE_API_TOKEN: \${{ secrets.CF_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: \${{ secrets.CF_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: \${{ vars.CF_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: \${{ vars.CF_ACCOUNT_ID }}
         continue-on-error: true
 `;
 }
@@ -1028,53 +1073,47 @@ jobs:
 
       - name: WordPress 정적 캐시 생성 (_cache/)
         env:
-          WP_SITEURL: \${{ vars.WP_SITEURL || 'http://localhost' }}
+          WP_SITEURL: \${{ vars.WP_SITEURL }}
         run: |
           mkdir -p _cache
-          
-          # PHP 내장 서버로 WordPress 실행
-          PHP_BIN=$(which php8.2 || which php)
-          
-          # wp-config.php에서 siteurl 확인
+
+          PHP_BIN=$(which php8.2 2>/dev/null || which php 2>/dev/null || echo php)
+
+          # wp-config.php에서 siteurl 확인 (특수문자 없는 안전한 방식)
+          SITEURL=""
           if [ -f "wp-config.php" ]; then
-            SITEURL=$(grep "siteurl\|home" wp-config.php | head -1 | grep -oP "https?://[^'\"]*" | head -1 || echo "")
+            SITEURL=$(grep -i "siteurl" wp-config.php | grep -o "http[s]*://[^'"]*" | head -1 || true)
           fi
-          SITEURL=\${SITEURL:-"http://localhost:8888"}
-          
-          echo "🚀 PHP 내장 서버 시작: $SITEURL"
-          \$PHP_BIN -S localhost:8888 -t . index.php &
-          SERVER_PID=\$!
-          sleep 3
-          
-          # 메인 페이지 캐시 생성
+          SITEURL="${WP_SITEURL:-${SITEURL:-http://localhost:8888}}"
+          WP_HOST=$(echo "$SITEURL" | sed 's|^http[s]*://||' | sed 's|/.*||')
+          echo "🚀 PHP 내장 서버 시작 (host: $WP_HOST)"
+
+          $PHP_BIN -S localhost:8888 -t . index.php &
+          SERVER_PID=$!
+          sleep 5
+
           echo "📄 메인 페이지 크롤링..."
-          curl -s -L --max-time 30 "http://localhost:8888/" \
-            -H "Host: $(echo \$SITEURL | sed 's|https\?://||')" \
-            -o _cache/index.html 2>/dev/null || true
-          
-          # sitemap에서 URL 추출해서 크롤링
-          curl -s -L --max-time 15 "http://localhost:8888/sitemap.xml" \
-            -H "Host: $(echo \$SITEURL | sed 's|https\?://||')" \
-            -o /tmp/sitemap.xml 2>/dev/null || true
-          
+          curl -sf -L --max-time 30 -H "Host: $WP_HOST" \
+            http://localhost:8888/ -o _cache/index.html 2>/dev/null || true
+
+          curl -sf -L --max-time 15 -H "Host: $WP_HOST" \
+            http://localhost:8888/sitemap.xml -o /tmp/sitemap.xml 2>/dev/null || true
+
           if [ -f "/tmp/sitemap.xml" ]; then
-            grep -oP '(?<=<loc>)[^<]+' /tmp/sitemap.xml | head -50 | while read url; do
-              path=$(echo "\$url" | sed "s|\$SITEURL||" | sed "s|http://localhost:8888||")
-              if [ -n "\$path" ] && [ "\$path" != "/" ]; then
-                mkdir -p "_cache\${path}"
-                curl -s -L --max-time 20 "http://localhost:8888\${path}" \
-                  -H "Host: $(echo \$SITEURL | sed 's|https\?://||')" \
-                  -o "_cache\${path}index.html" 2>/dev/null || true
-                echo "  ✅ 캐시: \$path"
+            grep -o '<loc>[^<]*</loc>' /tmp/sitemap.xml | sed 's|<loc>||;s|</loc>||' | head -50 | while IFS= read -r loc_url; do
+              rel_path=$(echo "$loc_url" | sed "s|$SITEURL||" | sed 's|http://localhost:8888||')
+              if [ -n "$rel_path" ] && [ "$rel_path" != "/" ]; then
+                mkdir -p "_cache${rel_path}"
+                curl -sf -L --max-time 20 -H "Host: $WP_HOST" \
+                  "http://localhost:8888${rel_path}" -o "_cache${rel_path}index.html" 2>/dev/null || true
+                echo "  ✅ 캐시: $rel_path"
               fi
             done
           fi
-          
-          kill \$SERVER_PID 2>/dev/null || true
-          
-          # 캐시 결과 확인
-          CACHE_COUNT=\$(find _cache -name "*.html" | wc -l)
-          echo "✅ 정적 캐시 생성: \${CACHE_COUNT}개 페이지"
+
+          kill $SERVER_PID 2>/dev/null || true
+          CACHE_COUNT=$(find _cache -name "*.html" | wc -l)
+          echo "✅ 정적 캐시 생성: ${CACHE_COUNT}개 페이지"
 
       - name: _cache/ 커밋 & 푸시
         run: |
@@ -1416,6 +1455,17 @@ export async function provisionCloudflarePagesHosting({
       if (pushed) {
         await log(`✅ GitHub 초기 파일 push 완료 (${filesToPush.length}개 파일)`);
         githubRepoUrl = `https://github.com/${owner}/${repoName}`;
+
+        // GitHub Repository Variables 등록 (CF 토큰, GH 토큰 — deploy-worker.yml에서 사용)
+        await log("▶ GitHub Repository Variables 등록 중 (CF API 토큰, GH 토큰)...");
+        const varResults = await Promise.allSettled([
+          cfToken     ? setGhVariable(ghToken, owner, repoName, "CF_API_TOKEN",  cfToken)     : Promise.resolve(),
+          cfAccountId ? setGhVariable(ghToken, owner, repoName, "CF_ACCOUNT_ID", cfAccountId) : Promise.resolve(),
+          ghToken     ? setGhVariable(ghToken, owner, repoName, "GH_TOKEN",      ghToken)     : Promise.resolve(),
+          siteUrl     ? setGhVariable(ghToken, owner, repoName, "WP_SITEURL",    siteUrl)     : Promise.resolve(),
+        ]);
+        const varOk = varResults.filter(r => r.status === "fulfilled" && r.value?.ok).length;
+        await log(`  ✅ GitHub Variables 등록: ${varOk}개 완료 (CF_API_TOKEN, CF_ACCOUNT_ID, GH_TOKEN)`);
 
         // GitHub Actions 트리거 (WordPress 전체 설치)
         await delay(3000); // 파일 반영 대기

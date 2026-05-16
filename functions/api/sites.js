@@ -132,9 +132,6 @@ export async function onRequestPost(context) {
   const {
     site_name,
     php_version = "8.2",
-    wp_admin_user,
-    wp_admin_pass,
-    wp_admin_email,
     cf_api_token,           // Cloudflare API 토큰 (Pages 프로젝트 생성용)
     cf_account_id,          // Cloudflare 계정 ID
     initial_domain,
@@ -143,12 +140,8 @@ export async function onRequestPost(context) {
   } = body;
 
   // ── 기본 검증 ────────────────────────────────────────────────────────────
+  // wp_admin_user / wp_admin_pass / wp_admin_email 는 cf-pages-hosting.js에서 자동 생성
   if (!site_name?.trim())     return jsonErr("사이트 이름을 입력해주세요.", 400);
-  if (!wp_admin_user?.trim()) return jsonErr("관리자 아이디를 입력해주세요.", 400);
-  if (!wp_admin_pass || wp_admin_pass.length < 8)
-    return jsonErr("비밀번호는 8자 이상이어야 합니다.", 400);
-  if (!wp_admin_email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(wp_admin_email))
-    return jsonErr("올바른 이메일을 입력해주세요.", 400);
 
   // ── 유료 플랜 결제수단 검증 (어드민은 예외) ─────────────────────────────
   if (plan !== "free" && !payment_method_id && payload.role !== "admin") {
@@ -181,6 +174,7 @@ export async function onRequestPost(context) {
   const id = crypto.randomUUID();
 
   // ── 사이트 레코드 DB 저장 (provisioning 상태) ─────────────────────────────
+  // wp_admin_user / wp_admin_pass / wp_admin_email 는 프로비저닝 완료 후 업데이트됨
   try {
     await env.DB.prepare(
       `INSERT INTO sites
@@ -196,7 +190,7 @@ export async function onRequestPost(context) {
        VALUES (?, ?, ?, ?, ?, 'provisioning',
                NULL, NULL,
                NULL, NULL,
-               ?, ?, ?,
+               NULL, NULL, NULL,
                NULL, NULL, NULL, NULL,
                NULL, NULL, NULL,
                ?, 0, 0,
@@ -204,7 +198,6 @@ export async function onRequestPost(context) {
                '', 1, ?)`
     ).bind(
       id, payload.id, site_name.trim(), initial_domain || null, php_version,
-      wp_admin_user, wp_admin_pass, wp_admin_email,
       plan,
       // 어드민은 결제수단 없어도 저장 가능
       (payload.role === "admin" ? null : (payment_method_id || null)),
@@ -250,7 +243,6 @@ export async function onRequestPost(context) {
     try {
       const result = await provisionCloudflarePagesHosting({
         env, siteId: id, siteName: site_name.trim(),
-        adminUser: wp_admin_user, adminPass: wp_admin_pass, adminEmail: wp_admin_email,
         plan, planLimits, cfToken, cfAccountId, cfEmail,
         initialDomain: initial_domain || null,
         userId: payload.id, isAdmin: payload.role === "admin",
@@ -272,6 +264,11 @@ export async function onRequestPost(context) {
         githubRepo,
         d1Id,
         kvCacheId,
+        wpAdminUser,
+        wpAdminPass,
+        wpAdminEmail,
+        dbPath,
+        dbFileUrl,
       } = result;
       const primaryDomain = workerDomain || cfPagesUrl || null;
 
@@ -280,6 +277,8 @@ export async function onRequestPost(context) {
           primary_domain = ?, github_repo_owner = ?, github_repo_name = ?,
           cf_pages_url = ?, cf_pages_project = ?,
           cf_worker_name = ?, cf_d1_id = ?, cf_kv_id = ?,
+          wp_admin_user = ?, wp_admin_pass = ?, wp_admin_email = ?,
+          db_name = ?, db_user = ?, db_pass = ?, db_host = ?,
           plan = ?, status = 'active'
         WHERE id = ?
       `).bind(
@@ -291,6 +290,13 @@ export async function onRequestPost(context) {
         workerName           || null,
         d1Id                 || null,
         kvCacheId            || null,
+        wpAdminUser          || null,
+        wpAdminPass          || null,
+        wpAdminEmail         || null,
+        dbPath               || "_db/wordpress.db",
+        "cloudpress",
+        "",
+        githubOwner && githubRepo ? `https://github.com/${githubOwner}/${githubRepo}` : null,
         plan, id
       ).run();
 

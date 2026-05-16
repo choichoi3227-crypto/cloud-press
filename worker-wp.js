@@ -27,7 +27,7 @@ const _INJECTED_GITHUB_OWNER = "%%GITHUB_OWNER%%";
 const _INJECTED_GITHUB_REPO  = "%%GITHUB_REPO%%";
 
 // ─── WordPress 공식 코어 소스 ────────────────────────────────────────────────
-const WP_VER        = "6.7.2";
+const WP_VER        = "latest";
 const WP_CORE_CDN   = `https://cdn.jsdelivr.net/npm/wordpress-static@${WP_VER}`;
 const WP_GITHUB_RAW = "https://raw.githubusercontent.com/WordPress/WordPress/master";
 
@@ -380,7 +380,7 @@ async function autoInstallWordPress(env, url) {
       ["current_theme",    "Twenty Twenty-Four"],
       ["active_plugins",   "a:0:{}"],
       ["wp_user_roles",    `a:1:{s:13:"administrator";a:2:{s:4:"name";s:13:"Administrator";s:12:"capabilities";a:1:{s:13:"administrator";b:1;}}}`],
-      ["wp_installed_version", "6.7.2"],
+      ["wp_installed_version", WP_VER],
       ["db_version",       "57155"],
       ["initial_db_version", "57155"],
       ["cp_auto_installed", "1"],

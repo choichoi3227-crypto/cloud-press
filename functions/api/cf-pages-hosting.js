@@ -1358,29 +1358,45 @@ export async function provisionCloudflarePagesHosting({
   // ── 5. Cloudflare Worker 배포 ─────────────────────────────────────────────
   let workerDomain = null;
 
-  if (cfToken && cfAccountId && owner && ghToken) {
+  if (cfToken && cfAccountId) {
     await log("▶ Cloudflare Worker 배포 중...");
-    await delay(3000); // GitHub 반영 대기
 
+    // 미러링 Worker 소스: GitHub에서 읽기 시도 → 실패 시 buildWorkerSource()로 즉시 생성
     let workerSource = null;
-    try {
-      const rawUrl = `https://raw.githubusercontent.com/${owner}/${repoName}/main/worker.js`;
-      const res = await fetch(rawUrl, {
-        headers: { "Authorization": `Bearer ${ghToken}`, "User-Agent": "CloudPress/6.0" },
-      });
-      if (res.ok) {
-        workerSource = await res.text();
-        await log("  Worker 소스: GitHub 레포에서 읽기 완료");
+    if (owner && ghToken) {
+      try {
+        await delay(3000); // GitHub 반영 대기
+        const rawUrl = `https://raw.githubusercontent.com/${owner}/${repoName}/main/worker.js`;
+        const res = await fetch(rawUrl, {
+          headers: { "Authorization": `Bearer ${ghToken}`, "User-Agent": "CloudPress/6.0" },
+        });
+        if (res.ok) {
+          workerSource = await res.text();
+          await log("  Worker 소스: GitHub 레포에서 읽기 완료");
+        }
+      } catch (e) {
+        await log(`  Worker 소스 GitHub 읽기 실패: ${e.message}`, "warn");
       }
-    } catch (e) {
-      await log(`  Worker 소스 읽기 실패: ${e.message}`, "warn");
     }
 
-    if (workerSource) {
-      // 1. PHP Runner Worker 먼저 배포 (Service Binding 타겟)
-      await log("  PHP Runner Worker 배포 중...");
-      const phpRunnerName = `${workerName}-php`;
-      let phpRunnerSource = null;
+    // GitHub 읽기 실패 시 buildWorkerSource()로 즉시 생성 (미러링 Worker 항상 배포)
+    if (!workerSource) {
+      workerSource = buildWorkerSource({
+        siteId,
+        githubOwner: owner || "",
+        githubRepo:  repoName,
+        ghPagesUrl:  ghPagesUrl || "",
+      });
+      await log("  Worker 소스: 로컬 빌드 (buildWorkerSource) 사용");
+    }
+
+    // 1. PHP Runner Worker 먼저 배포 (Service Binding 타겟)
+    await log("  PHP Runner Worker 배포 중...");
+    const phpRunnerName = `${workerName}-php`;
+
+    // PHP Runner 소스: GitHub → 플랫폼 로드된 phpRunnerSourceCode 순으로 시도
+    let phpRunnerSource = null;
+    if (owner && ghToken) {
       try {
         const phpRawUrl = `https://raw.githubusercontent.com/${owner}/${repoName}/main/php-runner.js`;
         const phpRes = await fetch(phpRawUrl, {
@@ -1391,37 +1407,40 @@ export async function provisionCloudflarePagesHosting({
           await log("  PHP Runner 소스: GitHub 레포에서 읽기 완료");
         }
       } catch (e) {
-        await log(`  PHP Runner 소스 읽기 실패: ${e.message}`, "warn");
+        await log(`  PHP Runner 소스 GitHub 읽기 실패: ${e.message}`, "warn");
       }
-
-      // php-runner.js가 레포에 없으면 플랫폼 기본 소스를 사용
-      // (프로비저닝 시 레포에 push됐어야 하므로, 없으면 경고만)
-      if (!phpRunnerSource) {
-        await log("  ⚠️ php-runner.js를 GitHub 레포에서 찾을 수 없습니다.", "warn");
-        await log("  GitHub Actions deploy-worker.yml이 실행되면 자동 배포됩니다.", "warn");
-      } else {
-        await deployPhpRunnerWorker({
-          cfToken, cfAccountId, cfEmail,
-          workerName: phpRunnerName,
-          workerSource: phpRunnerSource,
-          kvCacheId, kvCacheName,
-          siteId, ghOwner: owner, ghRepo: repoName,
-          log,
-        }).catch(async (e) => {
-          await log(`  PHP Runner 배포 실패: ${e.message} (GitHub Actions로 재시도 가능)`, "warn");
-        });
-      }
-
-      // 2. 메인 Worker 배포 (PHP_RUNNER Service Binding 포함)
-      const deployed = await deployWorker({
-        cfToken, cfAccountId, cfEmail,
-        workerName, workerSource,
-        kvCacheId, kvCacheName,
-        siteId, ghOwner: owner, ghRepo: repoName, ghPagesUrl,
-        log,
-      });
-      if (deployed) workerDomain = deployed.workerDomain;
     }
+
+    // GitHub 실패 시 프로비저닝 단계에서 로드한 플랫폼 소스 사용
+    if (!phpRunnerSource && phpRunnerSourceCode) {
+      phpRunnerSource = phpRunnerSourceCode;
+      await log("  PHP Runner 소스: 플랫폼 기본 소스 사용");
+    }
+
+    if (phpRunnerSource) {
+      await deployPhpRunnerWorker({
+        cfToken, cfAccountId, cfEmail,
+        workerName: phpRunnerName,
+        workerSource: phpRunnerSource,
+        kvCacheId, kvCacheName,
+        siteId, ghOwner: owner || "", ghRepo: repoName,
+        log,
+      }).catch(async (e) => {
+        await log(`  PHP Runner 배포 실패: ${e.message} (GitHub Actions로 재시도 가능)`, "warn");
+      });
+    } else {
+      await log("  ⚠️ PHP Runner 소스를 찾을 수 없습니다. GitHub Actions deploy-worker.yml이 실행되면 자동 배포됩니다.", "warn");
+    }
+
+    // 2. 미러링 Worker 배포 (PHP_RUNNER Service Binding 포함) — 항상 실행
+    const deployed = await deployWorker({
+      cfToken, cfAccountId, cfEmail,
+      workerName, workerSource,
+      kvCacheId, kvCacheName,
+      siteId, ghOwner: owner || "", ghRepo: repoName, ghPagesUrl: ghPagesUrl || "",
+      log,
+    });
+    if (deployed) workerDomain = deployed.workerDomain;
   }
 
   // ── 6. 결과 반환 ──────────────────────────────────────────────────────────

@@ -206,7 +206,7 @@ async function createGitHubRepo({ ghToken, owner, repoName, log }) {
   await log(`  GitHub 레포 생성: ${owner}/${repoName}`);
   const res = await ghReq("POST", "/user/repos", ghToken, {
     name:        repoName,
-    private:     true,
+    private:     false,
     description: `CloudPress WordPress 사이트 — ${repoName}`,
     auto_init:   true,
   });
@@ -1441,6 +1441,7 @@ export async function provisionCloudflarePagesHosting({
       workerName, workerSource,
       kvCacheId, kvCacheName,
       siteId, ghOwner: owner || "", ghRepo: repoName, ghPagesUrl: ghPagesUrl || "",
+      ghToken: ghToken || null,
       log,
     });
     if (deployed) workerDomain = deployed.workerDomain;
@@ -1544,6 +1545,7 @@ async function deployWorker({
   workerName, workerSource,
   kvCacheId, kvCacheName,
   siteId, ghOwner, ghRepo, ghPagesUrl,
+  ghToken,
   log,
 }) {
   const boundary = `----FormBoundary${Math.random().toString(36).slice(2)}`;
@@ -1628,13 +1630,43 @@ async function deployWorker({
   const workerDomain = `https://${workerName}.workers.dev`;
   await log(`  🌐 사이트 URL: ${workerDomain}`);
 
-  // GITHUB_TOKEN secret 설정
-  if (ghOwner) {
-    // (보안: token은 secret으로 설정해야 하므로 직접 배포 불가 — 사용자가 수동 설정)
-    await log("  ℹ️ GITHUB_TOKEN은 Cloudflare 대시보드 > Worker > Settings > Secrets에서 수동 설정 필요");
+  // GITHUB_TOKEN secret 자동 설정 (관리자 GitHub 토큰을 Worker secret으로 등록)
+  if (ghToken && ghOwner) {
+    // 메인 Worker에 GITHUB_TOKEN secret 등록
+    await setWorkerSecret(cfToken, cfAccountId, cfEmail, workerName, "GITHUB_TOKEN", ghToken, log);
+    // PHP Runner Worker에도 동일하게 등록
+    await setWorkerSecret(cfToken, cfAccountId, cfEmail, `${workerName}-php`, "GITHUB_TOKEN", ghToken, log);
   }
 
   return { workerDomain };
+}
+
+// ─── Worker Secret 설정 ───────────────────────────────────────────────────────
+async function setWorkerSecret(cfToken, cfAccountId, cfEmail, workerName, secretName, secretValue, log) {
+  try {
+    const headers = {
+      "Content-Type": "application/json",
+      ...(cfEmail
+        ? { "X-Auth-Email": cfEmail, "X-Auth-Key": cfToken }
+        : { "Authorization": `Bearer ${cfToken}` }),
+    };
+    const res = await fetch(
+      `https://api.cloudflare.com/client/v4/accounts/${cfAccountId}/workers/scripts/${workerName}/secrets`,
+      {
+        method: "PUT",
+        headers,
+        body: JSON.stringify({ name: secretName, text: secretValue, type: "secret_text" }),
+      }
+    );
+    const data = await res.json().catch(() => ({}));
+    if (res.ok) {
+      await log(`  🔑 ${workerName} secret [${secretName}] 등록 완료`);
+    } else {
+      await log(`  ⚠️ ${workerName} secret [${secretName}] 등록 실패: ${data?.errors?.[0]?.message || res.status}`, "warn");
+    }
+  } catch (e) {
+    await log(`  ⚠️ ${workerName} secret 등록 오류: ${e.message}`, "warn");
+  }
 }
 
 // ─── php-runner.js 설명 (README) ─────────────────────────────────────────────

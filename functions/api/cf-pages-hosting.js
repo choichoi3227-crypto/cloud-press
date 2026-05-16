@@ -293,8 +293,6 @@ require_once ABSPATH . 'wp-settings.php';
 
 // ─── Worker 소스 빌드 (순수 미러링 코드만) ───────────────────────────────────
 function buildWorkerSource({ siteId, githubOwner, githubRepo, ghPagesUrl }) {
-  // worker-site-mirror.js v6.0 인라인 (사이트별 상수 치환)
-  // 전체 소스는 worker-site-mirror.js 참조
   const src = `/**
  * CloudPress — site worker (순수 미러링 전용)
  * 사이트 ID: ${siteId}
@@ -320,10 +318,10 @@ const SEC_HEADERS = {
   "X-XSS-Protection":      "1; mode=block",
 };
 
-function getSiteId(e)   { return e.SITE_ID    || SITE_ID;    }
-function getOwner(e)    { return e.GH_OWNER   || GH_OWNER;   }
-function getRepo(e)     { return e.GH_REPO    || GH_REPO;    }
-function getToken(e)    { return e.GITHUB_TOKEN || "";        }
+function getSiteId(e)   { return e.SITE_ID     || SITE_ID;     }
+function getOwner(e)    { return e.GH_OWNER    || GH_OWNER;    }
+function getRepo(e)     { return e.GH_REPO     || GH_REPO;     }
+function getToken(e)    { return e.GITHUB_TOKEN || "";          }
 function getPages(e)    { return e.GH_PAGES_URL || GH_PAGES_URL || ""; }
 
 async function kvGet(e,k){ try{return await e.CACHE?.get(k);}catch{return null;} }
@@ -370,49 +368,28 @@ function errPage(s,t,d){return new Response(\`<!DOCTYPE html><html lang="ko"><he
 
 function maintPage(){return new Response(\`<!DOCTYPE html><html lang="ko"><head><meta charset="UTF-8"><meta http-equiv="refresh" content="15"><title>유지보수 중</title><style>body{font-family:sans-serif;background:#f0f0f1;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0}.b{text-align:center;padding:48px;background:#fff;border-radius:8px;border:1px solid #c3c4c7;max-width:420px}</style></head><body><div class="b"><div style="font-size:48px;margin-bottom:16px">🔧</div><h1 style="color:#1d2327;font-size:22px;margin-bottom:12px">유지보수 중</h1><p style="color:#646970;line-height:1.6">설정을 업데이트하고 있습니다.<br>잠시 후 자동으로 다시 접속됩니다.</p></div></body></html>\`,{status:503,headers:{"Content-Type":"text/html;charset=utf-8","Retry-After":"30","Cache-Control":"no-store"}});}
 
-async function runWP(req,e,ctx,phpFile){
-  const url=new URL(req.url),method=req.method.toUpperCase(),siteId=getSiteId(e),owner=getOwner(e),repo=getRepo(e),token=getToken(e);
-  if(!e.PHP_RUNNER){
-    const fb=await ghPagesFallback(e,url.pathname)||await kvFallback(e,url.pathname,url.search);
-    return fb||errPage(503,"PHP Runner 없음","cloudpress-php Worker가 필요합니다.");
+// ─── WordPress 정적 캐시 서빙 (GitHub 레포 _cache/ 디렉토리) ─────────────────
+async function serveFromCache(e, path, search) {
+  // KV 캐시 우선
+  const ck = \`html:\${getSiteId(e)}:\${path}\${search}\`;
+  const kv = await kvGet(e, ck);
+  if (kv) return new Response(kv, {headers:{"Content-Type":"text/html;charset=utf-8","Cache-Control":"public,s-maxage=60,stale-while-revalidate=3600","X-Cache":"KV-HIT",...SEC_HEADERS}});
+
+  // GitHub 레포 _cache/ 에서 정적 HTML 서빙
+  const owner=getOwner(e),repo=getRepo(e),token=getToken(e);
+  if(!owner||!repo)return null;
+  // path → _cache/index.html 또는 _cache/slug/index.html
+  const cachePath = (path==="/"||path==="")?
+    "_cache/index.html" :
+    \`_cache\${path.endsWith("/")?path:path+"/"}index.html\`;
+  const r = await ghFetch(e, cachePath);
+  if(r){
+    const html=await r.text();
+    // KV에 저장
+    try{await e.CACHE?.put(ck,html,{expirationTtl:3600});}catch{}
+    return new Response(html,{headers:{"Content-Type":"text/html;charset=utf-8","Cache-Control":"public,s-maxage=60,stale-while-revalidate=3600","X-Cache":"GH-CACHE",...SEC_HEADERS}});
   }
-  let wpCfg=null;
-  try{const r=await ghFetch(e,"wp-config.php",true);if(r)wpCfg=await r.text();}catch{}
-  let stdin="";
-  if(["POST","PUT","PATCH"].includes(method)){try{stdin=await req.text();}catch{}}
-  const phpEnv={
-    REQUEST_METHOD:method,REQUEST_URI:url.pathname+url.search,QUERY_STRING:url.search.slice(1),
-    HTTP_HOST:url.hostname,SERVER_NAME:url.hostname,SERVER_PORT:url.port||(url.protocol==="https:"?"443":"80"),
-    HTTPS:url.protocol==="https:"?"on":"off",SCRIPT_FILENAME:\`/var/www/wordpress\${phpFile}\`,
-    SCRIPT_NAME:phpFile,PHP_SELF:phpFile,DOCUMENT_ROOT:"/var/www/wordpress",
-    GATEWAY_INTERFACE:"CGI/1.1",SERVER_PROTOCOL:"HTTP/1.1",SERVER_SOFTWARE:"CloudPress/6.0",
-    HTTP_COOKIE:req.headers.get("Cookie")||"",HTTP_USER_AGENT:req.headers.get("User-Agent")||"",
-    HTTP_ACCEPT:req.headers.get("Accept")||"*/*",HTTP_ACCEPT_LANGUAGE:req.headers.get("Accept-Language")||"ko-KR",
-    HTTP_ACCEPT_ENCODING:req.headers.get("Accept-Encoding")||"gzip",HTTP_REFERER:req.headers.get("Referer")||"",
-    HTTP_X_FORWARDED_FOR:req.headers.get("CF-Connecting-IP")||"127.0.0.1",REMOTE_ADDR:req.headers.get("CF-Connecting-IP")||"127.0.0.1",
-    CONTENT_TYPE:req.headers.get("Content-Type")||"",CONTENT_LENGTH:req.headers.get("Content-Length")||String(stdin.length),
-    CP_SITE_ID:siteId,CP_SQLITE_DB_PATH:"_db/wordpress.db",
-    CP_GITHUB_OWNER:owner,CP_GITHUB_REPO:repo,CP_GITHUB_TOKEN:token,CP_GITHUB_BRANCH:GH_BRANCH,
-  };
-  const payload={phpFile,phpEnv,stdin,siteConfig:{siteId,githubOwner:owner,githubRepo:repo,githubBranch:GH_BRANCH,githubToken:token,wpConfigContent:wpCfg,sqliteDbPath:"_db/wordpress.db",dbEngine:"sqlite"},skipCache:method!=="GET"||(phpEnv.HTTP_COOKIE||"").includes("wordpress_logged_in")};
-  let phpRes;
-  try{phpRes=await e.PHP_RUNNER.fetch(new Request("https://cloudpress-php/run-wordpress",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)}));}
-  catch(err){return await ghPagesFallback(e,url.pathname)||await kvFallback(e,url.pathname,url.search)||errPage(502,"서비스 오류","잠시 후 다시 시도해주세요.");}
-  const cacheable=method==="GET"&&!SKIP_CACHE.some(p=>url.pathname.startsWith(p))&&!(phpEnv.HTTP_COOKIE||"").includes("wordpress_logged_in");
-  if(cacheable&&phpRes.ok){
-    const ct=phpRes.headers.get("Content-Type")||"";
-    if(ct.includes("text/html")){
-      const html=await phpRes.text();
-      if(!html.includes("wpadminbar")&&!html.includes("wordpress_logged_in")){
-        const ck=\`php:\${siteId}:\${url.pathname}\${url.search}\`,pk=\`prerender:\${siteId}:\${url.pathname}\${url.search}\`;
-        ctx.waitUntil(Promise.all([kvSet(e,ck,html,3600),kvSet(e,pk,html,86400)]));
-      }
-      return new Response(html,{status:phpRes.status,headers:{...Object.fromEntries(phpRes.headers),...SEC_HEADERS,"Cache-Control":"public,s-maxage=60,stale-while-revalidate=3600"}});
-    }
-  }
-  const rh=new Headers(phpRes.headers);
-  for(const[k,v]of Object.entries(SEC_HEADERS))rh.set(k,v);
-  return new Response(phpRes.body,{status:phpRes.status,headers:rh});
+  return null;
 }
 
 export default {
@@ -422,17 +399,24 @@ export default {
     if(path==="/_health")return new Response(JSON.stringify({ok:true,site:getSiteId(e)}),{headers:{"Content-Type":"application/json"}});
     const maint=await e.CACHE?.get(\`cp:maintenance:\${getSiteId(e)}\`).catch(()=>null);
     if(maint==="1"&&!path.startsWith("/wp-admin/"))return maintPage();
+
     // 봇 사전렌더링 캐시 (SEO)
     if(isBot&&method==="GET"&&!STATIC_EXT.test(path)){
       const pr=await kvGet(e,\`prerender:\${getSiteId(e)}:\${path}\${url.search}\`);
       if(pr)return new Response(pr,{headers:{"Content-Type":"text/html;charset=utf-8","Cache-Control":"public,max-age=300","X-Cache":"PRERENDER",...SEC_HEADERS}});
     }
-    // KV 캐시
+
+    // KV HTML 캐시 (비-정적 GET)
     const cacheable=method==="GET"&&!SKIP_CACHE.some(p=>path.startsWith(p))&&!(req.headers.get("Cookie")||"").includes("wordpress_logged_in")&&!STATIC_EXT.test(path);
-    if(cacheable){const c=await kvGet(e,\`php:\${getSiteId(e)}:\${path}\${url.search}\`);if(c)return new Response(c,{headers:{"Content-Type":"text/html;charset=utf-8","Cache-Control":"public,s-maxage=60,stale-while-revalidate=3600","X-Cache":"HIT",...SEC_HEADERS}});}
+    if(cacheable){
+      const c=await kvGet(e,\`php:\${getSiteId(e)}:\${path}\${url.search}\`);
+      if(c)return new Response(c,{headers:{"Content-Type":"text/html;charset=utf-8","Cache-Control":"public,s-maxage=60,stale-while-revalidate=3600","X-Cache":"HIT",...SEC_HEADERS}});
+    }
+
     // 정적 파일
     if(STATIC_EXT.test(path)){
-      const fp=path.startsWith("/")?path.slice(1):path;    if(path.startsWith("/wp-content/")){
+      const fp=path.startsWith("/")?path.slice(1):path;
+      if(path.startsWith("/wp-content/")){
         const ck=\`static:\${getSiteId(e)}:\${fp}\`;
         const cb=await kvGetBuf(e,ck);
         if(cb)return new Response(cb,{headers:{"Content-Type":mime(fp),"Cache-Control":"public,max-age=3600","X-Cache":"HIT"}});
@@ -445,19 +429,36 @@ export default {
         const cr=await wpCoreFetch(fp);
         if(cr){const b=await cr.arrayBuffer();return new Response(b,{headers:{"Content-Type":mime(fp),"Cache-Control":"public,max-age=86400,immutable","X-Source":"wp-cdn"}});}
       }
+      // _cache/ 정적 자산
+      const cr2=await ghFetch(e,fp.startsWith("_cache/")?fp:\`_cache/\${fp}\`);
+      if(cr2){const b=await cr2.arrayBuffer();return new Response(b,{headers:{"Content-Type":mime(fp),"Cache-Control":"public,max-age=86400"}});}
       return new Response("Not Found",{status:404});
     }
-    // PHP 실행
-    let phpFile="/index.php";
-    if(path==="/wp-login.php")phpFile="/wp-login.php";
-    else if(path.startsWith("/wp-admin/"))phpFile=path.endsWith(".php")?path:"/wp-admin/index.php";
-    else if(path.endsWith(".php"))phpFile=path;
-    return runWP(req,e,ctx,phpFile);
+
+    // ── 동적 PHP 요청: GitHub _cache/ 정적 HTML → GitHub Pages 폴백 순서로 처리 ──
+
+    // 1. GitHub _cache/ 에서 WordPress 정적 캐시 서빙
+    if(method==="GET"&&cacheable){
+      const cached=await serveFromCache(e,path,url.search);
+      if(cached)return cached;
+    }
+
+    // 2. GitHub Pages 폴백 (CF 장애 또는 캐시 없을 때)
+    const fb=await ghPagesFallback(e,path)||await kvFallback(e,path,url.search);
+    if(fb)return fb;
+
+    // 3. 최후 수단: GitHub 레포 index.html 서빙
+    const idxR=await ghFetch(e,"_cache/index.html");
+    if(idxR){
+      const html=await idxR.text();
+      return new Response(html,{status:200,headers:{"Content-Type":"text/html;charset=utf-8","Cache-Control":"public,max-age=60","X-Fallback":"index",...SEC_HEADERS}});
+    }
+
+    return errPage(503,"준비 중","WordPress 사이트가 설정 중입니다. GitHub Actions 설치가 완료되면 자동으로 활성화됩니다.");
   },
 };`;
   return src;
 }
-
 // ─── GitHub Actions 워크플로우 빌드 ─────────────────────────────────────────
 
 // 메인: WordPress 전체 설치 + SQLite DB 초기화
@@ -779,56 +780,123 @@ jobs:
 
 // GitHub Pages 정적 캐시 생성 Action (CF 장애 대비 폴백)
 function buildGhPagesAction({ siteName }) {
-  return `name: GitHub Pages 정적 폴백 생성 (CF 장애 대비)
+  return `name: WordPress 정적 캐시 생성 + GitHub Pages 배포
 
 on:
   schedule:
-    - cron: '0 */6 * * *'  # 6시간마다 정적 스냅샷 생성
+    - cron: '0 */3 * * *'  # 3시간마다 정적 캐시 갱신
   workflow_dispatch:
+  push:
+    paths:
+      - 'wp-content/**'
+      - 'wp-config.php'
 
 permissions:
-  contents: read
+  contents: write
   pages: write
   id-token: write
 
 jobs:
-  build-static-fallback:
+  build-cache:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: 정적 폴백 페이지 생성
+      - name: PHP 8.2 + WordPress 의존성 설치
         run: |
-          mkdir -p docs
-          # 최소한의 폴백 HTML 생성 (CF 장애 시 GitHub Pages가 서빙)
-          cat > docs/index.html << 'EOF'
-          <!DOCTYPE html>
-          <html lang="ko">
-          <head>
-            <meta charset="UTF-8">
-            <meta name="viewport" content="width=device-width,initial-scale=1">
-            <title>${siteName}</title>
-            <meta name="robots" content="noindex">
-            <meta http-equiv="refresh" content="5; url=/">
-            <style>body{font-family:sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;background:#f9fafb}.b{text-align:center;padding:40px}</style>
-          </head>
-          <body>
-            <div class="b">
-              <h1>⚡ ${siteName}</h1>
-              <p>잠시 후 다시 접속됩니다...</p>
-            </div>
-          </body>
-          </html>
-          EOF
-          echo "✅ 폴백 페이지 생성 완료"
+          sudo apt-get install -y php8.2-cli php8.2-sqlite3 php8.2-mbstring php8.2-xml php8.2-curl php8.2-gd sqlite3
+          echo "✅ PHP 설치 완료: $(php -v | head -1)"
 
-      - name: GitHub Pages 배포
+      - name: WordPress 코어 다운로드 (없으면)
+        run: |
+          if [ ! -f "wp-includes/version.php" ]; then
+            echo "📥 WordPress 6.7.2 다운로드..."
+            wget -q https://wordpress.org/wordpress-6.7.2.tar.gz -O /tmp/wp.tar.gz
+            tar -xzf /tmp/wp.tar.gz -C /tmp/
+            # wp-content, wp-config.php 보존하면서 코어만 복사
+            rsync -a --exclude='wp-content' --exclude='wp-config.php' /tmp/wordpress/ ./
+            echo "✅ WordPress 코어 복사 완료"
+          fi
+
+      - name: SQLite DB 확인
+        run: |
+          mkdir -p _db
+          if [ ! -f "_db/wordpress.db" ]; then
+            echo "⚠️ _db/wordpress.db 없음 — install-wordpress.yml 먼저 실행 필요"
+            exit 0
+          fi
+          echo "✅ DB 파일 존재: $(du -h _db/wordpress.db | cut -f1)"
+
+      - name: WordPress 정적 캐시 생성 (_cache/)
+        env:
+          WP_SITEURL: \${{ vars.WP_SITEURL || 'http://localhost' }}
+        run: |
+          mkdir -p _cache
+          
+          # PHP 내장 서버로 WordPress 실행
+          PHP_BIN=$(which php8.2 || which php)
+          
+          # wp-config.php에서 siteurl 확인
+          if [ -f "wp-config.php" ]; then
+            SITEURL=$(grep "siteurl\|home" wp-config.php | head -1 | grep -oP "https?://[^'\"]*" | head -1 || echo "")
+          fi
+          SITEURL=\${SITEURL:-"http://localhost:8888"}
+          
+          echo "🚀 PHP 내장 서버 시작: $SITEURL"
+          \$PHP_BIN -S localhost:8888 -t . index.php &
+          SERVER_PID=\$!
+          sleep 3
+          
+          # 메인 페이지 캐시 생성
+          echo "📄 메인 페이지 크롤링..."
+          curl -s -L --max-time 30 "http://localhost:8888/" \
+            -H "Host: $(echo \$SITEURL | sed 's|https\?://||')" \
+            -o _cache/index.html 2>/dev/null || true
+          
+          # sitemap에서 URL 추출해서 크롤링
+          curl -s -L --max-time 15 "http://localhost:8888/sitemap.xml" \
+            -H "Host: $(echo \$SITEURL | sed 's|https\?://||')" \
+            -o /tmp/sitemap.xml 2>/dev/null || true
+          
+          if [ -f "/tmp/sitemap.xml" ]; then
+            grep -oP '(?<=<loc>)[^<]+' /tmp/sitemap.xml | head -50 | while read url; do
+              path=$(echo "\$url" | sed "s|\$SITEURL||" | sed "s|http://localhost:8888||")
+              if [ -n "\$path" ] && [ "\$path" != "/" ]; then
+                mkdir -p "_cache\${path}"
+                curl -s -L --max-time 20 "http://localhost:8888\${path}" \
+                  -H "Host: $(echo \$SITEURL | sed 's|https\?://||')" \
+                  -o "_cache\${path}index.html" 2>/dev/null || true
+                echo "  ✅ 캐시: \$path"
+              fi
+            done
+          fi
+          
+          kill \$SERVER_PID 2>/dev/null || true
+          
+          # 캐시 결과 확인
+          CACHE_COUNT=\$(find _cache -name "*.html" | wc -l)
+          echo "✅ 정적 캐시 생성: \${CACHE_COUNT}개 페이지"
+
+      - name: _cache/ 커밋 & 푸시
+        run: |
+          git config user.name "CloudPress Bot"
+          git config user.email "bot@cloudpress.site"
+          git add _cache/
+          if git diff --staged --quiet; then
+            echo "변경 없음 — 캐시 최신 상태"
+          else
+            git commit -m "🔄 WordPress 정적 캐시 갱신 [\$(date '+%Y-%m-%d %H:%M')]"
+            git push
+            echo "✅ _cache/ 업데이트 완료"
+          fi
+
+      - name: GitHub Pages 배포 (폴백용)
         uses: actions/upload-pages-artifact@v3
         with:
-          path: docs
+          path: _cache
 
   deploy-pages:
-    needs: build-static-fallback
+    needs: build-cache
     runs-on: ubuntu-latest
     environment:
       name: github-pages
@@ -836,8 +904,7 @@ jobs:
     steps:
       - uses: actions/deploy-pages@v4
         id: deployment
-`;
-}
+`;\n}
 
 // ─── wrangler.toml 빌드 (D1 제거, SQLite .db 사용) ──────────────────────────
 function buildWranglerToml({ workerName, kvCacheId, kvCacheName, siteId, ghOwner, ghRepo, ghPagesUrl }) {
@@ -858,11 +925,7 @@ ${kvCacheId ? `[[kv_namespaces]]
 binding = "CACHE"
 id      = "${kvCacheId}"` : `# KV CACHE: Cloudflare 대시보드에서 바인딩 설정 필요`}
 
-# ── PHP Runner: cloudpress-php Worker (php-wasm + SQLite 실행) ───────────────
-[[services]]
-binding = "PHP_RUNNER"
-service = "cloudpress-php"
-
+# PHP_RUNNER 없음 — 순수 미러링 Worker (GitHub _cache/ 정적 HTML 서빙)
 # ── 환경변수 ─────────────────────────────────────────────────────────────────
 [vars]
 SITE_ID      = "${siteId}"
@@ -911,7 +974,7 @@ ${repoName}/
 
 1. **Cloudflare Worker** (\`worker.js\`)가 모든 요청 수신
 2. 정적 자산은 GitHub 레포에서 직접 서빙
-3. PHP 요청은 \`cloudpress-php\` Worker (php-wasm)로 전달
+3. 동적 요청은 GitHub _cache/ 정적 HTML로 서빙 (GitHub Actions가 생성)
 4. php-wasm이 이 레포의 WP 파일 + \`_db/wordpress.db\` 실행
 5. Cloudflare 장애 시 GitHub Pages 정적 폴백 자동 전환
 
@@ -1062,6 +1125,8 @@ export async function provisionCloudflarePagesHosting({
         },
         // _db/.gitkeep — 데이터베이스 폴더 (install-wordpress.yml이 .db 생성)
         { path: "_db/.gitkeep", content: "# 이 폴더에 wordpress.db SQLite 데이터베이스가 생성됩니다.\n# install-wordpress.yml 워크플로우가 자동으로 생성합니다.\n" },
+        // _cache/.gitkeep — Worker가 서빙할 WordPress 정적 캐시 (gh-pages-fallback.yml이 채움)
+        { path: "_cache/.gitkeep", content: "# 이 폴더에 WordPress 정적 HTML 캐시가 생성됩니다.\n# gh-pages-fallback.yml 워크플로우가 자동으로 생성합니다.\n" },
         // wp-content 기본 구조
         { path: "wp-content/uploads/.gitkeep",  content: "" },
         { path: "wp-content/themes/.gitkeep",   content: "" },
@@ -1188,9 +1253,7 @@ async function deployWorker({
     { type: "plain_text", name: "GH_OWNER",     text: ghOwner || "" },
     { type: "plain_text", name: "GH_REPO",      text: ghRepo  || "" },
     { type: "plain_text", name: "GH_PAGES_URL", text: ghPagesUrl || "" },
-    // PHP_RUNNER: cloudpress-php Worker (php-wasm + SQLite 실행기)
-    { type: "service", name: "PHP_RUNNER", service: "cloudpress-php", environment: "production" },
-    // D1 바인딩 없음 — SQLite .db 파일을 GitHub 레포에서 직접 읽음
+    // PHP_RUNNER 없음 — 순수 미러링 Worker (GitHub _cache/ 정적 HTML 서빙)
   ];
 
   const metadataObj = {
@@ -1256,7 +1319,7 @@ async function deployWorker({
 function buildPhpRunnerReadme() {
   return `# PHP Runner (php-wasm)
 
-이 레포지토리는 \`cloudpress-php\` Cloudflare Worker (php-wasm)와 함께 작동합니다.
+이 레포지토리의 WordPress 사이트는 GitHub Actions로 정적 HTML을 생성하고 Cloudflare Worker가 서빙합니다.
 
 ## 역할
 

@@ -293,6 +293,9 @@ require_once ABSPATH . 'wp-settings.php';
 
 // ─── Worker 소스 빌드 (순수 미러링 코드만) ───────────────────────────────────
 function buildWorkerSource({ siteId, githubOwner, githubRepo, ghPagesUrl }) {
+  // 템플릿 리터럴 안에서 || "" 패턴이 따옴표 충돌을 일으키므로 미리 변수로 빼둠
+  const _ghPagesUrl = ghPagesUrl || "";
+  ghPagesUrl = _ghPagesUrl;
   const src = `/**
  * CloudPress — site worker v7.0 (PHP_RUNNER Service Binding)
  * 사이트 ID: ${siteId}
@@ -309,7 +312,7 @@ const SITE_ID      = "${siteId}";
 const GH_OWNER     = "${githubOwner}";
 const GH_REPO      = "${githubRepo}";
 const GH_BRANCH    = "main";
-const GH_PAGES_URL = "${ghPagesUrl || ""}";
+const GH_PAGES_URL = "${ghPagesUrl}";
 const WP_VERSION   = "6.7.2";
 
 const STATIC_EXT = /\\.(css|js|jpg|jpeg|png|gif|webp|avif|svg|ico|woff2?|ttf|eot|otf|map|txt|xml|json|pdf|zip|mp4|mp3|ogg|wav|webm|gz|tar)$/i;
@@ -338,24 +341,24 @@ function mime(p){const x=(p.split(".").pop()||"").toLowerCase();return({css:"tex
 async function ghFetch(e, path, noCache=false){
   const owner=getOwner(e),repo=getRepo(e),token=getToken(e);
   if(!owner||!repo)return null;
-  const url=\\\`https://raw.githubusercontent.com/\\\${owner}/\\\${repo}/\\\${GH_BRANCH}/\\\${path}\\\`;
+  const url=\`https://raw.githubusercontent.com/\${owner}/\${repo}/\${GH_BRANCH}/\${path}\`;
   const h={"User-Agent":"CloudPress/7.0"};
-  if(token)h["Authorization"]=\\\`Bearer \\\${token}\\\`;
+  if(token)h["Authorization"]=\`Bearer \${token}\`;
   try{const r=await fetch(url,{headers:h,cf:noCache?{cacheEverything:false}:{cacheEverything:true,cacheTtl:300}});if(r.ok)return r;}catch{}
   return null;
 }
 
 async function wpCoreFetch(path){
-  const u1=\\\`https://cdn.jsdelivr.net/gh/WordPress/WordPress@\\\${WP_VERSION}/\\\${path}\\\`;
+  const u1=\`https://cdn.jsdelivr.net/gh/WordPress/WordPress@\${WP_VERSION}/\${path}\`;
   try{const r=await fetch(u1,{cf:{cacheEverything:true,cacheTtl:604800}});if(r.ok)return r;}catch{}
-  const u2=\\\`https://raw.githubusercontent.com/WordPress/WordPress/master/\\\${path}\\\`;
+  const u2=\`https://raw.githubusercontent.com/WordPress/WordPress/master/\${path}\`;
   try{const r=await fetch(u2,{cf:{cacheEverything:true,cacheTtl:86400}});if(r.ok)return r;}catch{}
   return null;
 }
 
-function errPage(s,t,d){return new Response(\\\`<!DOCTYPE html><html lang="ko"><head><meta charset="UTF-8"><title>\\\${t}</title><style>body{font-family:sans-serif;background:#0a0a0a;color:#e5e5e5;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0}.b{text-align:center;padding:40px}h1{font-size:72px;color:#374151;margin:0 0 16px}h2{font-size:20px;color:#fff;margin:0 0 12px}p{color:#9ca3af}</style></head><body><div class="b"><h1>\\\${s}</h1><h2>\\\${t}</h2><p>\\\${d}</p></div></body></html>\\\`,{status:s,headers:{"Content-Type":"text/html;charset=utf-8",...SEC_HEADERS}});}
+function errPage(s,t,d){return new Response(\`<!DOCTYPE html><html lang="ko"><head><meta charset="UTF-8"><title>\${t}</title><style>body{font-family:sans-serif;background:#0a0a0a;color:#e5e5e5;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0}.b{text-align:center;padding:40px}h1{font-size:72px;color:#374151;margin:0 0 16px}h2{font-size:20px;color:#fff;margin:0 0 12px}p{color:#9ca3af}</style></head><body><div class="b"><h1>\${s}</h1><h2>\${t}</h2><p>\${d}</p></div></body></html>\`,{status:s,headers:{"Content-Type":"text/html;charset=utf-8",...SEC_HEADERS}});}
 
-function maintPage(){return new Response(\\\`<!DOCTYPE html><html lang="ko"><head><meta charset="UTF-8"><meta http-equiv="refresh" content="15"><title>유지보수 중</title><style>body{font-family:sans-serif;background:#f0f0f1;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0}.b{text-align:center;padding:48px;background:#fff;border-radius:8px;border:1px solid #c3c4c7;max-width:420px}</style></head><body><div class="b"><div style="font-size:48px;margin-bottom:16px">🔧</div><h1 style="color:#1d2327;font-size:22px;margin-bottom:12px">유지보수 중</h1><p style="color:#646970;line-height:1.6">설정을 업데이트하고 있습니다.<br>잠시 후 자동으로 다시 접속됩니다.</p></div></body></html>\\\`,{status:503,headers:{"Content-Type":"text/html;charset=utf-8","Retry-After":"30","Cache-Control":"no-store"}});}
+function maintPage(){return new Response(\`<!DOCTYPE html><html lang="ko"><head><meta charset="UTF-8"><meta http-equiv="refresh" content="15"><title>유지보수 중</title><style>body{font-family:sans-serif;background:#f0f0f1;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0}.b{text-align:center;padding:48px;background:#fff;border-radius:8px;border:1px solid #c3c4c7;max-width:420px}</style></head><body><div class="b"><div style="font-size:48px;margin-bottom:16px">🔧</div><h1 style="color:#1d2327;font-size:22px;margin-bottom:12px">유지보수 중</h1><p style="color:#646970;line-height:1.6">설정을 업데이트하고 있습니다.<br>잠시 후 자동으로 다시 접속됩니다.</p></div></body></html>\`,{status:503,headers:{"Content-Type":"text/html;charset=utf-8","Retry-After":"30","Cache-Control":"no-store"}});}
 
 // ─── PHP_RUNNER Service Binding으로 WordPress 동적 실행 ──────────────────────
 // PHP_RUNNER가 바인딩되어 있으면 php-wasm으로 즉시 WP 실행
@@ -414,7 +417,7 @@ async function runViaPhpRunner(req, env, ctx) {
       const html = await phpRes.clone().text();
       ctx.waitUntil(
         env.CACHE?.put(
-          \\\`php:\\\${siteId}:\\\${url.pathname}\\\${url.search}\\\`,
+          \`php:\${siteId}:\${url.pathname}\${url.search}\`,
           html,
           { expirationTtl: 3600 }
         ).catch(() => {})
@@ -428,13 +431,13 @@ async function runViaPhpRunner(req, env, ctx) {
 
 // ─── GitHub _cache/ 정적 HTML 폴백 ───────────────────────────────────────────
 async function serveFromCache(e, path, search) {
-  const ck = \\\`html:\\\${getSiteId(e)}:\\\${path}\\\${search}\\\`;
+  const ck = \`html:\${getSiteId(e)}:\${path}\${search}\`;
   const kv = await kvGet(e, ck);
   if (kv) return new Response(kv, {headers:{"Content-Type":"text/html;charset=utf-8","Cache-Control":"public,s-maxage=60,stale-while-revalidate=3600","X-Cache":"KV-HIT",...SEC_HEADERS}});
 
   const cachePath = (path==="/"||path==="")?
     "_cache/index.html" :
-    \\\`_cache\\\${path.endsWith("/")?path:path+"/"}index.html\\\`;
+    \`_cache\${path.endsWith("/")?path:path+"/"}index.html\`;
   const r = await ghFetch(e, cachePath);
   if(r){
     const html=await r.text();
@@ -447,14 +450,14 @@ async function serveFromCache(e, path, search) {
 async function ghPagesFallback(e,path){
   const base=getPages(e);if(!base)return null;
   try{
-    const r=await fetch(\\\`\\\${base}\\\${path}\\\`,{cf:{cacheEverything:true,cacheTtl:300},headers:{"User-Agent":"CloudPress-Fallback/1.0"}});
+    const r=await fetch(\`\${base}\${path}\`,{cf:{cacheEverything:true,cacheTtl:300},headers:{"User-Agent":"CloudPress-Fallback/1.0"}});
     if(r.ok)return new Response(await r.text(),{status:200,headers:{"Content-Type":"text/html;charset=utf-8","Cache-Control":"public,max-age=60","X-Fallback":"github-pages",...SEC_HEADERS}});
   }catch{}
   return null;
 }
 
 async function kvFallback(e,path,search){
-  const h=await kvGet(e,\\\`php:\\\${getSiteId(e)}:\\\${path}\\\${search}\\\`);
+  const h=await kvGet(e,\`php:\${getSiteId(e)}:\${path}\${search}\`);
   if(!h)return null;
   return new Response(h,{status:200,headers:{"Content-Type":"text/html;charset=utf-8","Cache-Control":"public,max-age=30","X-Fallback":"kv-stale",...SEC_HEADERS}});
 }
@@ -467,14 +470,14 @@ export default {
     if(method==="OPTIONS")return new Response(null,{status:204,headers:{"Access-Control-Allow-Origin":"*","Access-Control-Allow-Methods":"GET,POST,PUT,DELETE,PATCH,OPTIONS","Access-Control-Allow-Headers":"Content-Type,Authorization,X-WP-Nonce,X-Requested-With"}});
     if(path==="/_health")return new Response(JSON.stringify({ok:true,site:getSiteId(e),engine:e.PHP_RUNNER?"php-wasm":"static"}),{headers:{"Content-Type":"application/json"}});
 
-    const maint=await e.CACHE?.get(\\\`cp:maintenance:\\\${getSiteId(e)}\\\`).catch(()=>null);
+    const maint=await e.CACHE?.get(\`cp:maintenance:\${getSiteId(e)}\`).catch(()=>null);
     if(maint==="1"&&!path.startsWith("/wp-admin/"))return maintPage();
 
     // 1. 정적 파일 서빙
     if(STATIC_EXT.test(path)){
       const fp=path.startsWith("/")?path.slice(1):path;
       if(path.startsWith("/wp-content/")){
-        const ck=\\\`static:\\\${getSiteId(e)}:\\\${fp}\\\`;
+        const ck=\`static:\${getSiteId(e)}:\${fp}\`;
         const cb=await kvGetBuf(e,ck);
         if(cb)return new Response(cb,{headers:{"Content-Type":mime(fp),"Cache-Control":"public,max-age=3600","X-Cache":"HIT"}});
         const r=await ghFetch(e,fp);
@@ -486,14 +489,14 @@ export default {
         const cr=await wpCoreFetch(fp);
         if(cr){const b=await cr.arrayBuffer();return new Response(b,{headers:{"Content-Type":mime(fp),"Cache-Control":"public,max-age=86400,immutable","X-Source":"wp-cdn"}});}
       }
-      const cr2=await ghFetch(e,fp.startsWith("_cache/")?fp:\\\`_cache/\\\${fp}\\\`);
+      const cr2=await ghFetch(e,fp.startsWith("_cache/")?fp:\`_cache/\${fp}\`);
       if(cr2){const b=await cr2.arrayBuffer();return new Response(b,{headers:{"Content-Type":mime(fp),"Cache-Control":"public,max-age=86400"}});}
       return new Response("Not Found",{status:404});
     }
 
     // 2. 봇 사전렌더링 캐시 (SEO)
     if(isBot&&method==="GET"){
-      const pr=await kvGet(e,\\\`prerender:\\\${getSiteId(e)}:\\\${path}\\\${url.search}\\\`);
+      const pr=await kvGet(e,\`prerender:\${getSiteId(e)}:\${path}\${url.search}\`);
       if(pr)return new Response(pr,{headers:{"Content-Type":"text/html;charset=utf-8","Cache-Control":"public,max-age=300","X-Cache":"PRERENDER",...SEC_HEADERS}});
     }
 
@@ -501,7 +504,7 @@ export default {
     const isLoggedIn=(req.headers.get("Cookie")||"").includes("wordpress_logged_in");
     const cacheable=method==="GET"&&!SKIP_CACHE.some(p=>path.startsWith(p))&&!isLoggedIn;
     if(cacheable){
-      const c=await kvGet(e,\\\`php:\\\${getSiteId(e)}:\\\${path}\\\${url.search}\\\`);
+      const c=await kvGet(e,\`php:\${getSiteId(e)}:\${path}\${url.search}\`);
       if(c)return new Response(c,{headers:{"Content-Type":"text/html;charset=utf-8","Cache-Control":"public,s-maxage=60,stale-while-revalidate=3600","X-Cache":"HIT",...SEC_HEADERS}});
     }
 
@@ -1046,7 +1049,7 @@ service = "${phpRunnerName}"
 SITE_ID      = "${siteId}"
 GH_OWNER     = "${ghOwner}"
 GH_REPO      = "${ghRepo}"
-GH_PAGES_URL = "${ghPagesUrl || ""}"
+GH_PAGES_URL = "${ghPagesUrl}"
 
 # GITHUB_TOKEN은 secret으로 설정 (wrangler secret put GITHUB_TOKEN)
 `;

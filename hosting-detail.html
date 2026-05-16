@@ -139,6 +139,50 @@
                     </div>
                 </div>
 
+                <!-- DB / 관리자 정보 -->
+                <div class="section-card space-y-3">
+                    <h3 class="font-bold flex items-center gap-2"><i class="fas fa-database text-cyan-400"></i> 데이터베이스 &amp; 관리자 정보</h3>
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
+                        <div class="bg-white/5 rounded-xl p-3">
+                            <div class="text-gray-500 text-xs mb-1">WP 관리자 아이디</div>
+                            <div id="db-admin-user" class="font-mono text-xs text-green-300">-</div>
+                        </div>
+                        <div class="bg-white/5 rounded-xl p-3 relative">
+                            <div class="text-gray-500 text-xs mb-1">WP 관리자 비밀번호</div>
+                            <div class="flex items-center gap-2">
+                                <div id="db-admin-pass" class="font-mono text-xs text-yellow-300 flex-1 truncate">-</div>
+                                <button onclick="toggleDbPass()" class="text-gray-500 hover:text-white text-xs" title="비밀번호 표시/숨김">
+                                    <i class="fas fa-eye" id="db-pass-eye"></i>
+                                </button>
+                                <button onclick="copyText(document.getElementById('db-admin-pass-raw').value)" class="text-gray-500 hover:text-white text-xs" title="복사">
+                                    <i class="fas fa-copy"></i>
+                                </button>
+                            </div>
+                            <input type="hidden" id="db-admin-pass-raw">
+                        </div>
+                        <div class="bg-white/5 rounded-xl p-3">
+                            <div class="text-gray-500 text-xs mb-1">WP 관리자 이메일</div>
+                            <div id="db-admin-email" class="font-mono text-xs text-blue-300 truncate">-</div>
+                        </div>
+                        <div class="bg-white/5 rounded-xl p-3">
+                            <div class="text-gray-500 text-xs mb-1">DB 엔진</div>
+                            <div class="font-mono text-xs text-purple-300">SQLite (.db 파일)</div>
+                        </div>
+                        <div class="bg-white/5 rounded-xl p-3">
+                            <div class="text-gray-500 text-xs mb-1">DB 파일 경로</div>
+                            <div class="font-mono text-xs text-gray-300">_db/wordpress.db</div>
+                        </div>
+                        <div class="bg-white/5 rounded-xl p-3">
+                            <div class="text-gray-500 text-xs mb-1">DB 파일 링크</div>
+                            <a id="db-file-link" href="#" target="_blank" class="font-mono text-xs text-blue-400 hover:underline truncate block">-</a>
+                        </div>
+                        <div class="bg-white/5 rounded-xl p-3 sm:col-span-2">
+                            <div class="text-gray-500 text-xs mb-1">WP 관리자 페이지</div>
+                            <a id="db-wpadmin-link" href="#" target="_blank" class="font-mono text-xs text-green-400 hover:underline">-</a>
+                        </div>
+                    </div>
+                </div>
+
                 <!-- 빠른 액션 -->
                 <div class="section-card">
                     <h3 class="font-bold flex items-center gap-2 mb-4"><i class="fas fa-bolt text-yellow-400"></i> 빠른 액션</h3>
@@ -597,6 +641,27 @@
                 document.getElementById('info-domain').textContent = siteData.primary_domain || '-';
                 document.getElementById('info-bucket').textContent = siteData.github_repo || 'GitHub 저장소 생성 중...';
                 document.getElementById('info-wpadmin').textContent = `${siteData.primary_domain}/wp-admin`;
+
+                // DB / 관리자 정보
+                document.getElementById('db-admin-user').textContent  = siteData.wp_admin_user  || '(생성 중...)';
+                document.getElementById('db-admin-email').textContent = siteData.wp_admin_email || '(생성 중...)';
+                const rawPass = siteData.wp_admin_pass || '';
+                document.getElementById('db-admin-pass-raw').value = rawPass;
+                document.getElementById('db-admin-pass').textContent  = rawPass ? '••••••••••••' : '(생성 중...)';
+                // DB 파일 링크
+                const ghOwner = siteData.github_repo_owner || '';
+                const ghRepo  = siteData.github_repo_name  || '';
+                const dbLink  = (ghOwner && ghRepo)
+                    ? `https://github.com/${ghOwner}/${ghRepo}/blob/main/_db/wordpress.db`
+                    : '#';
+                const dbLinkEl = document.getElementById('db-file-link');
+                dbLinkEl.href = dbLink;
+                dbLinkEl.textContent = (ghOwner && ghRepo) ? `${ghOwner}/${ghRepo}/_db/wordpress.db` : '(생성 중...)';
+                // WP 관리자 링크
+                const wpAdminUrl = siteData.primary_domain ? `https://${siteData.primary_domain}/wp-admin` : '#';
+                const wpAdminEl  = document.getElementById('db-wpadmin-link');
+                wpAdminEl.href = wpAdminUrl;
+                wpAdminEl.textContent = wpAdminUrl !== '#' ? wpAdminUrl : '(생성 중...)';
 
                 // PHP 배지
                 document.getElementById('php-current-badge').textContent = `현재: PHP ${siteData.php_version || '8.2'}`;
@@ -1276,6 +1341,31 @@
 
         // ── 위험 구역 ─────────────────────────────────────────────────────────
         function visitSite() { if (siteData) window.open(`https://${siteData.primary_domain}`, '_blank'); }
+
+        function toggleDbPass() {
+            const el  = document.getElementById('db-admin-pass');
+            const raw = document.getElementById('db-admin-pass-raw').value;
+            const eye = document.getElementById('db-pass-eye');
+            if (el.textContent.includes('•')) {
+                el.textContent = raw || '(없음)';
+                eye.className  = 'fas fa-eye-slash';
+            } else {
+                el.textContent = raw ? '••••••••••••' : '(없음)';
+                eye.className  = 'fas fa-eye';
+            }
+        }
+        function copyText(text) {
+            if (!text) return;
+            navigator.clipboard.writeText(text).then(() => {
+                showAlert('복사되었습니다.', 'success');
+            }).catch(() => {
+                const ta = document.createElement('textarea');
+                ta.value = text; document.body.appendChild(ta);
+                ta.select(); document.execCommand('copy');
+                document.body.removeChild(ta);
+                showAlert('복사되었습니다.', 'success');
+            });
+        }
         function openWpAdmin() { if (siteData) window.open(`https://${siteData.primary_domain}/wp-admin`, '_blank'); }
 
         async function suspendSite() {

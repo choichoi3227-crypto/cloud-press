@@ -32,6 +32,13 @@ import {
   onRequestPost as cmsPost,
 } from "./cms-settings.js";
 
+import {
+  onRequestGet    as noticesGet,
+  onRequestPost   as noticesPost,
+  onRequestPut    as noticesPut,
+  onRequestDelete as noticesDelete,
+} from "./notices.js";
+
 // sub-path 추출 헬퍼
 function subPath(context) {
   if (context.params?.path) {
@@ -62,9 +69,10 @@ export async function onRequestOptions() {
 // ── GET ───────────────────────────────────────────────────────────────────────
 export async function onRequestGet(context) {
   const sub = subPath(context);
-  if (sub === "inquiries")   return inquiriesGet(context);
-  if (sub === "ai-settings") return aiGet(context);
+  if (sub === "inquiries")    return inquiriesGet(context);
+  if (sub === "ai-settings")  return aiGet(context);
   if (sub === "cms-settings") return cmsGet(context);
+  if (sub === "notices")      return noticesGet(context);
   // stats, users, sites, settings, quota-stats → admin.js
   return adminGet(context);
 }
@@ -74,6 +82,7 @@ export async function onRequestPost(context) {
   const sub = subPath(context);
   if (sub === "ai-settings")  return aiPost(context);
   if (sub === "cms-settings") return cmsPost(context);
+  if (sub === "notices")      return noticesPost(context);
   if (typeof adminPost === "function") return adminPost(context);
   return new Response(JSON.stringify({ error: "Method Not Allowed" }), {
     status: 405,
@@ -86,6 +95,7 @@ export async function onRequestPut(context) {
   const sub = subPath(context);
   if (sub === "inquiries")   return inquiriesPut(context);
   if (sub === "ai-settings") return aiPut(context);
+  if (sub === "notices")     return noticesPut(context);
   // users, sites, settings → admin.js
   return adminPut(context);
 }
@@ -95,6 +105,7 @@ export async function onRequestDelete(context) {
   const sub = subPath(context);
   if (sub === "inquiries")   return inquiriesDelete(context);
   if (sub === "ai-settings") return aiDelete(context);
+  if (sub === "notices")     return noticesDelete(context);
   // users, sites → admin.js
   return adminDelete(context);
 }

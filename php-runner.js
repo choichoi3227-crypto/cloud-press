@@ -289,25 +289,42 @@ async function runWordpress(payload, env, ctx) {
     } catch {}
   }
 
-  // 설치 완료인데 여기까지 온 경우: 캐시 아직 없음 → 대기 안내
+  // 설치 완료인데 여기까지 온 경우: 캐시 아직 없음 → 사이트 준비 중 안내
   if (wpInstalled) {
+    const siteHost = (payload.phpEnv?.HTTP_HOST) || "이 사이트";
     return new Response(
-      "<!DOCTYPE html><html lang=\"ko\"><head><meta charset=\"UTF-8\"><meta http-equiv=\"refresh\" content=\"15\">" +
-      "<title>거의 준비됨</title>" +
-      "<style>*{box-sizing:border-box}body{font-family:-apple-system,sans-serif;background:#f0f0f1;" +
-      "display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;padding:20px}" +
-      ".card{background:#fff;border:1px solid #c3c4c7;border-radius:4px;max-width:500px;width:100%;padding:40px;text-align:center}" +
-      ".badge{background:#00a32a;color:#fff;font-size:11px;font-weight:700;padding:3px 10px;border-radius:3px;display:inline-block;margin-bottom:14px}" +
-      "h1{color:#1d2327;font-size:20px;margin:0 0 10px}p{color:#646970;font-size:14px;line-height:1.6;margin:0 0 14px}" +
-      "a.btn{display:inline-block;background:#2271b1;color:#fff;text-decoration:none;padding:8px 18px;border-radius:3px;font-size:13px;margin:4px}" +
-      ".note{font-size:12px;color:#a7aaad;margin-top:14px}</style></head>" +
-      "<body><div class=\"card\">" +
-      "<div class=\"badge\">ALMOST READY</div>" +
-      "<h1>\uD83C\uDF89 WordPress 설치 완료!</h1>" +
-      "<p>정적 캐시를 생성하고 있습니다. 잠시 후 사이트가 자동으로 열립니다.</p>" +
-      (repoUrl ? " <a class=\"btn\" style=\"background:#6e7d88\" href=\"" + repoUrl + "\" target=\"_blank\">\uD83D\uDCC1 GitHub 레포 보기</a>" : "") +
-      "<p class=\"note\">15초마다 자동 새로고침됩니다</p>" +
-      "</div></body></html>",
+      `<!DOCTYPE html><html lang="ko"><head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="refresh" content="15">
+<title>준비 중 — ${siteHost}</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Malgun Gothic,sans-serif;
+  background:#fff;display:flex;flex-direction:column;min-height:100vh}
+header{background:#1d2327;padding:18px 32px}
+header span{color:#fff;font-size:18px;font-weight:700}
+.hero{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;
+  padding:60px 24px;text-align:center}
+.emoji{font-size:64px;margin-bottom:24px}
+h1{font-size:34px;font-weight:800;color:#1d2327;margin-bottom:12px}
+.sub{font-size:16px;color:#646970;max-width:400px;line-height:1.6;margin-bottom:32px}
+.bar{width:220px;height:4px;background:#f0f0f1;border-radius:4px;overflow:hidden;margin-bottom:12px}
+.fill{height:100%;background:#2271b1;animation:p 2s ease-in-out infinite alternate}
+@keyframes p{from{width:25%}to{width:75%}}
+.note{font-size:13px;color:#a7aaad}
+footer{padding:20px;text-align:center;font-size:12px;color:#a7aaad;border-top:1px solid #f0f0f1}
+</style></head>
+<body>
+<header><span>${siteHost}</span></header>
+<div class="hero">
+  <div class="emoji">🚀</div>
+  <h1>사이트 준비 중입니다</h1>
+  <p class="sub">WordPress 설치가 완료되었습니다. 첫 페이지를 생성하는 동안 잠시만 기다려 주세요.</p>
+  <div class="bar"><div class="fill"></div></div>
+  <p class="note">15초마다 자동 새로고침됩니다</p>
+</div>
+<footer>Powered by CloudPress · WordPress Hosting</footer>
+</body></html>`,
       { status: 503, headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store", "Retry-After": "15" } }
     );
   }

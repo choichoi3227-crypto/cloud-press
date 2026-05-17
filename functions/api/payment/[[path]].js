@@ -63,7 +63,7 @@ export async function onRequestGet(context) {
 export async function onRequestPost(context) {
   const sub = subPath(context);
   if (sub === "cards") return cardsPost(context);
-  // request, confirm → payment.js
+  // request, confirm, billing-key → payment.js
   return paymentPost(context);
 }
 

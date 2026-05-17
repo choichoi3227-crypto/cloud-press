@@ -1,7 +1,5 @@
 // functions/api/provisioning.js
 // POST /api/provisioning?id={siteId}
-// sites.js가 사이트 레코드 생성 후 이 엔드포인트를 호출
-// Cloudflare Pages Functions에서 독립적으로 실행됨
 
 import { jsonOk, jsonErr, requireAuth, PLAN_LIMITS } from "../_shared.js";
 import { provisionCloudflarePagesHosting } from "./cf-pages-hosting.js";
@@ -9,7 +7,6 @@ import { provisionCloudflarePagesHosting } from "./cf-pages-hosting.js";
 export async function onRequestPost(context) {
   const { request, env } = context;
 
-  // ── 인증 ────────────────────────────────────────────────────────────────
   const payload = await requireAuth(request, env).catch(() => null);
   if (!payload) return jsonErr("Unauthorized", 401);
 
@@ -17,7 +14,6 @@ export async function onRequestPost(context) {
   const siteId = url.searchParams.get("id");
   if (!siteId) return jsonErr("site id required", 400);
 
-  // ── 사이트 조회 ──────────────────────────────────────────────────────────
   const site = await env.DB.prepare(
     "SELECT * FROM sites WHERE id = ? AND user_id = ?"
   ).bind(siteId, payload.id).first().catch(() => null);
@@ -25,7 +21,6 @@ export async function onRequestPost(context) {
   if (!site) return jsonErr("Site not found", 404);
   if (site.status !== "provisioning") return jsonErr("Already processed", 409);
 
-  // ── 로그 헬퍼 ───────────────────────────────────────────────────────────
   const log = async (msg, level = "info") => {
     console.log(`[Provision][${level}] ${msg}`);
     await env.DB.prepare(
@@ -34,7 +29,52 @@ export async function onRequestPost(context) {
      .run().catch((e) => console.error("[Provision] log DB err:", e?.message));
   };
 
-  // ── CF 자격증명 ─────────────────────────────────────────────────────────
+  const sendNotification = async ({ success, siteUrl, siteName, wpAdminUser, wpAdminPass, error }) => {
+    try {
+      if (env.RESEND_API_KEY && payload.email) {
+        const subject = success
+          ? `✅ [CloudPress] "${siteName}" WordPress 호스팅 개설 완료`
+          : `❌ [CloudPress] "${siteName}" 호스팅 개설 실패`;
+        const htmlBody = success
+          ? `<h2>✅ WordPress 호스팅 개설 완료</h2>
+<p>사이트 <strong>${siteName}</strong>가 성공적으로 개설되었습니다.</p>
+<table style="border-collapse:collapse;font-size:14px;margin:16px 0;">
+  <tr><td style="padding:6px 16px;font-weight:bold;background:#f5f5f5;">사이트 URL</td><td style="padding:6px 16px;"><a href="${siteUrl}">${siteUrl}</a></td></tr>
+  <tr><td style="padding:6px 16px;font-weight:bold;background:#f5f5f5;">관리자 페이지</td><td style="padding:6px 16px;"><a href="${siteUrl}/wp-admin/">${siteUrl}/wp-admin/</a></td></tr>
+  <tr><td style="padding:6px 16px;font-weight:bold;background:#f5f5f5;">관리자 ID</td><td style="padding:6px 16px;">${wpAdminUser}</td></tr>
+  <tr><td style="padding:6px 16px;font-weight:bold;background:#f5f5f5;">관리자 비밀번호</td><td style="padding:6px 16px;"><code style="background:#f0f0f0;padding:2px 8px;border-radius:3px;">${wpAdminPass}</code></td></tr>
+</table>
+<p><a href="https://cloud-press.co.kr/hosting.html" style="background:#2271b1;color:#fff;padding:10px 20px;border-radius:4px;text-decoration:none;display:inline-block;">대시보드 바로가기</a></p>`
+          : `<h2>❌ 호스팅 개설 실패</h2>
+<p>사이트 <strong>${siteName}</strong> 개설 중 오류가 발생했습니다.</p>
+<p><strong>오류:</strong> ${error || "알 수 없는 오류"}</p>
+<p><a href="https://cloud-press.co.kr/hosting.html">다시 시도하기</a></p>`;
+
+        await fetch("https://api.resend.com/emails", {
+          method: "POST",
+          headers: { "Authorization": `Bearer ${env.RESEND_API_KEY}`, "Content-Type": "application/json" },
+          body: JSON.stringify({ from: "CloudPress <noreply@cloud-press.co.kr>", to: [payload.email], subject, html: htmlBody }),
+        });
+        await log(`  📧 이메일 알림 발송: ${payload.email}`);
+      }
+
+      if (env.KV) {
+        const notif = {
+          type: success ? "success" : "error",
+          title: success ? `"${siteName}" 호스팅 개설 완료` : `"${siteName}" 호스팅 개설 실패`,
+          message: success ? `WordPress 설치 완료. ${siteUrl}` : `오류: ${error || "알 수 없는 오류"}`,
+          siteUrl: siteUrl || null,
+          createdAt: new Date().toISOString(),
+          read: false,
+        };
+        await env.KV.put(`notify:${payload.id}:${Date.now()}`, JSON.stringify(notif), { expirationTtl: 86400 * 30 });
+        await log(`  🔔 인앱 알림 저장 완료`);
+      }
+    } catch (e) {
+      await log(`  ⚠️ 알림 발송 실패: ${e.message}`, "warn");
+    }
+  };
+
   const u = await env.DB.prepare(
     "SELECT cf_global_api_key, cf_account_id, cf_email FROM users WHERE id = ?"
   ).bind(payload.id).first().catch(() => null);
@@ -42,11 +82,8 @@ export async function onRequestPost(context) {
   const cfToken     = u?.cf_global_api_key || env.CF_API_TOKEN  || null;
   const cfAccountId = u?.cf_account_id     || env.CF_ACCOUNT_ID || null;
   const cfEmail     = u?.cf_email          || null;
+  const planLimits  = PLAN_LIMITS[site.plan] || PLAN_LIMITS.free;
 
-  const planLimits = PLAN_LIMITS[site.plan] || PLAN_LIMITS.free;
-
-  // ── 본체: provision 실행 후 즉시 응답 반환 ──────────────────────────────
-  // waitUntil로 백그라운드 실행
   const run = async () => {
     await log("▶ 프로비저닝 시작");
     await log(`CF Token     : ${cfToken     ? "✅ " + String(cfToken).slice(0,8)     + "..." : "❌ 없음"}`);
@@ -55,38 +92,34 @@ export async function onRequestPost(context) {
 
     try {
       const result = await provisionCloudflarePagesHosting({
-        env,
-        siteId,
+        env, siteId,
         siteName:      site.site_name,
-        adminUser:     site.wp_admin_user  || "admin",
-        adminPass:     site.wp_admin_pass  || "changeme123!",
-        adminEmail:    site.wp_admin_email || payload.email,
         plan:          site.plan,
         planLimits,
-        cfToken,
-        cfAccountId,
-        cfEmail,
+        cfToken, cfAccountId, cfEmail,
         initialDomain: site.initial_domain || null,
         userId:        payload.id,
         isAdmin:       payload.role === "admin",
         log,
       });
 
-      if (!result) {
-        await env.DB.prepare("UPDATE sites SET status = 'error' WHERE id = ?")
-          .bind(siteId).run().catch(() => {});
+      if (!result || !result.success) {
+        const errMsg = result?.error || "프로비저닝 실패 (알 수 없는 오류)";
+        await log(`❌ 프로비저닝 실패: ${errMsg}`, "error");
+        await env.DB.prepare("UPDATE sites SET status = 'error' WHERE id = ?").bind(siteId).run().catch(() => {});
+        await sendNotification({ success: false, siteName: site.site_name, error: errMsg });
         return;
       }
 
-      // cf-pages-hosting.js 리턴 필드명에 맞게 매핑
-      const workerName    = result.workerName    || null;
-      const workerDomain  = result.workerDomain  || null;
-      const cfPagesUrl    = result.cfPagesUrl    || null;
-      const githubOwner   = result.githubOwner   || null;
-      const githubRepo    = result.githubRepo    || null;
-      const kvCacheId     = result.kvCacheId     || null;
+      const {
+        workerName, workerDomain, cfPagesUrl,
+        githubOwner, githubRepo,
+        kvCacheId,
+        wpAdminUser, wpAdminPass, wpAdminEmail,
+        siteUrl, phpRunnerDeployed,
+      } = result;
 
-      const primaryDomain = workerDomain || cfPagesUrl || null;
+      const primaryDomain = workerDomain || cfPagesUrl || siteUrl;
 
       await env.DB.prepare(`
         UPDATE sites SET
@@ -96,46 +129,51 @@ export async function onRequestPost(context) {
           cf_pages_url      = ?,
           cf_pages_project  = NULL,
           cf_worker_name    = ?,
-          cf_d1_id          = NULL,
+          cf_d1_id          = ?,
           cf_kv_id          = ?,
+          wp_admin_user     = ?,
+          wp_admin_pass     = ?,
+          wp_admin_email    = ?,
           plan              = ?,
           status            = 'active'
         WHERE id = ?
       `).bind(
-        primaryDomain,
-        githubOwner,
-        githubRepo,
-        cfPagesUrl,
-        workerName,
-        kvCacheId,
-        site.plan,
-        siteId
+        primaryDomain, githubOwner || null, githubRepo || null,
+        cfPagesUrl || null, workerName || null, null, kvCacheId || null,
+        wpAdminUser || "admin", wpAdminPass || "", wpAdminEmail || "",
+        site.plan, siteId
       ).run();
 
-      await log("✅ 프로비저닝 완료!");
-      await log(`사이트 URL : ${primaryDomain}`);
-      await log(`GitHub     : https://github.com/${githubOwner}/${githubRepo}`);
-      if (kvCacheId)  await log(`KV Cache   : ${kvCacheId}`);
-      if (workerName) await log(`Worker     : ${workerName}`);
+      await log("━━━ ✅ 호스팅 개설 완료 ━━━");
+      await log(`사이트 URL   : ${primaryDomain}`);
+      await log(`관리자       : ${primaryDomain}/wp-admin/ (${wpAdminUser})`);
+      await log(`KV 캐시       : ${kvCacheId || "없음"}`);
+      await log(`GitHub        : ${githubOwner ? "https://github.com/" + githubOwner + "/" + githubRepo : "없음"}`);
+      await log(`PHP Runner    : ${phpRunnerDeployed ? "✅ 배포됨" : "⚠️ Actions에서 추후 배포"}`);
+      await log(`WP 설치 Action: GitHub Actions install-wordpress.yml 실행 중`);
+
+      await sendNotification({
+        success: true, siteUrl: primaryDomain,
+        siteName: site.site_name,
+        wpAdminUser: wpAdminUser || "admin",
+        wpAdminPass: wpAdminPass || "(대시보드에서 확인)",
+      });
 
     } catch (e) {
       const msg = String(e?.message || e);
       const stk = String(e?.stack   || "").slice(0, 600);
       console.error("[Provision] FATAL:", msg, stk);
-      await log("❌ 오류: " + msg, "error");
-      await log("스택: "   + stk,  "error");
-      await env.DB.prepare("UPDATE sites SET status = 'error' WHERE id = ?")
-        .bind(siteId).run().catch(() => {});
+      await log("❌ 치명적 오류: " + msg, "error");
+      await log("스택: " + stk, "error");
+      await env.DB.prepare("UPDATE sites SET status = 'error' WHERE id = ?").bind(siteId).run().catch(() => {});
+      await sendNotification({ success: false, siteName: site.site_name, error: msg });
     }
   };
 
-  // waitUntil 사용 가능하면 백그라운드로, 아니면 await
   if (typeof context.waitUntil === "function") {
     context.waitUntil(run());
-    return jsonOk({ ok: true, message: "프로비저닝 시작됨" });
+    return jsonOk({ ok: true, message: "프로비저닝 시작됨 (백그라운드 실행 중)" });
   }
-
-  // waitUntil 없으면 동기 실행 (응답 느리지만 안전)
   await run();
   return jsonOk({ ok: true, message: "프로비저닝 완료" });
 }

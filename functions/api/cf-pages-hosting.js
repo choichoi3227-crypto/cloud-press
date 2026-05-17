@@ -758,32 +758,9 @@ jobs:
           PFX="\$DB_PREFIX"
           DB="_db/wordpress.db"
 
-          PASS_HASH=\$(python3 << 'PYEOF'
-import hashlib, os
-pw = os.environ.get('ADMIN_PASS', '')
-itoa64 = './0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz'
-def encode64(h, n):
-    o, i = '', 0
-    while i < n:
-        v = h[i]; i += 1; o += itoa64[v & 0x3f]
-        if i < n: v |= h[i] << 8
-        o += itoa64[(v >> 6) & 0x3f]
-        if i >= n: break
-        i += 1
-        if i < n: v |= h[i] << 16
-        o += itoa64[(v >> 12) & 0x3f]
-        if i >= n: break
-        i += 1; o += itoa64[(v >> 18) & 0x3f]
-    return o
-salt = ''.join([itoa64[b % 64] for b in os.urandom(8)])
-pfx = '$P$' + itoa64[8] + salt
-cnt = 1 << 8
-b = pw.encode()
-h = hashlib.md5((salt + pw).encode()).digest()
-for _ in range(cnt): h = hashlib.md5(bytes(h) + b).digest()
-print(pfx + encode64(list(h), 16))
-PYEOF
-)
+          # phpass 해시 생성 (base64 인코딩으로 YAML 특수문자 충돌 완전 방지)
+          echo "aW1wb3J0IGhhc2hsaWIsIG9zCnB3ID0gb3MuZW52aXJvbi5nZXQoJ0FETUlOX1BBU1MnLCAnJykKaXRvYTY0ID0gJy4vMDEyMzQ1Njc4OUFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaYWJjZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXonCmRlZiBlbmNvZGU2NChoLCBuKToKICAgIG8sIGkgPSAnJywgMAogICAgd2hpbGUgaSA8IG46CiAgICAgICAgdiA9IGhbaV07IGkgKz0gMTsgbyArPSBpdG9hNjRbdiAmIDB4M2ZdCiAgICAgICAgaWYgaSA8IG46IHYgfD0gaFtpXSA8PCA4CiAgICAgICAgbyArPSBpdG9hNjRbKHYgPj4gNikgJiAweDNmXQogICAgICAgIGlmIGkgPj0gbjogYnJlYWsKICAgICAgICBpICs9IDEKICAgICAgICBpZiBpIDwgbjogdiB8PSBoW2ldIDw8IDE2CiAgICAgICAgbyArPSBpdG9hNjRbKHYgPj4gMTIpICYgMHgzZl0KICAgICAgICBpZiBpID49IG46IGJyZWFrCiAgICAgICAgaSArPSAxOyBvICs9IGl0b2E2NFsodiA+PiAxOCkgJiAweDNmXQogICAgcmV0dXJuIG8Kc2FsdCA9ICcnLmpvaW4oW2l0b2E2NFtiICUgNjRdIGZvciBiIGluIG9zLnVyYW5kb20oOCldKQpwZnggPSAnJFAkJyArIGl0b2E2NFs4XSArIHNhbHQKY250ID0gMSA8PCA4CmIgPSBwdy5lbmNvZGUoKQpoID0gaGFzaGxpYi5tZDUoKHNhbHQgKyBwdykuZW5jb2RlKCkpLmRpZ2VzdCgpCmZvciBfIGluIHJhbmdlKGNudCk6IGggPSBoYXNobGliLm1kNShieXRlcyhoKSArIGIpLmRpZ2VzdCgpCnByaW50KHBmeCArIGVuY29kZTY0KGxpc3QoaCksIDE2KSkK" | base64 -d > /tmp/phpass.py
+          PASS_HASH=\$(python3 /tmp/phpass.py)
           echo "  phpass 앞 6자리: \${PASS_HASH:0:6}..."
           sqlite3 "\$DB" "INSERT OR REPLACE INTO \${PFX}users (ID,user_login,user_pass,user_nicename,user_email,user_url,user_registered,user_status,display_name) VALUES (1,'\$ADMIN_USER','\$PASS_HASH','\$ADMIN_USER','\$ADMIN_EMAIL','\$SITE_URL','\$NOW',0,'\$ADMIN_USER');"
           sqlite3 "\$DB" "INSERT OR IGNORE INTO \${PFX}usermeta (user_id,meta_key,meta_value) VALUES (1,'\${PFX}capabilities','a:1:{s:13:\"administrator\";b:1;}');"
@@ -833,6 +810,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      - name: Node.js 22 설정 (Wrangler 필수)
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
 
       - name: Wrangler 설치
         run: npm install -g wrangler@latest

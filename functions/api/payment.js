@@ -237,6 +237,86 @@ export async function onRequestPost(context) {
     });
   }
 
+  // ── 빌링키 등록 확인 (토스 requestBillingAuth 완료 후) ─────────────
+  if (sub === "billing-key") {
+    const { auth_key, customer_key } = body;
+
+    if (!auth_key || !customer_key)
+      return jsonErr("auth_key, customer_key 모두 필요합니다.", 400);
+
+    const settings = await getSettings(env);
+    const secretKey = settings.toss_secret_key || env.TOSS_SECRET_KEY || "";
+
+    if (!secretKey) return jsonErr("결제 설정이 완료되지 않았습니다.", 503);
+
+    // 토스 빌링키 발급 요청
+    const tossRes = await fetch(`https://api.tosspayments.com/v1/billing/authorizations/${auth_key}`, {
+      method: "POST",
+      headers: {
+        Authorization: `Basic ${btoa(secretKey + ":")}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ customerKey: customer_key }),
+    });
+
+    const tossData = await tossRes.json();
+
+    if (!tossRes.ok) {
+      return jsonErr(tossData.message || "빌링키 발급에 실패했습니다.", tossRes.status);
+    }
+
+    // 카드 정보 추출
+    const card = tossData.card || {};
+    const billingKey = tossData.billingKey || "";
+    const brand = card.issuerCode
+      ? ({"3K":"기업BC","46":"광주","71":"롯데","71M":"롯데","36":"하나","31":"비씨","51":"삼성","38":"새마을","41":"신한","62":"신협","67":"우리","21":"이베스트","61":"우리","43":"우체국","카카오":"카카오","토스":"토스","현대":"현대","NH":"농협","KB":"국민","IBK":"기업","하나":"하나"})[card.issuerCode] || card.issuerCode || "카드"
+      : "카드";
+    const last4 = card.number ? card.number.slice(-4) : "";
+    const expMonth = card.validThru ? card.validThru.slice(0, 2) : "";
+    const expYear  = card.validThru ? "20" + card.validThru.slice(3) : "";
+
+    // payment_cards 테이블에 저장
+    await env.DB.prepare(`
+      CREATE TABLE IF NOT EXISTS payment_cards (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id TEXT NOT NULL,
+        billing_key TEXT NOT NULL,
+        card_name TEXT NOT NULL DEFAULT '카드',
+        brand TEXT NOT NULL DEFAULT '',
+        last4 TEXT NOT NULL DEFAULT '',
+        exp_month TEXT NOT NULL DEFAULT '',
+        exp_year TEXT NOT NULL DEFAULT '',
+        is_default INTEGER NOT NULL DEFAULT 0,
+        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+      )
+    `).run().catch(() => {});
+
+    const existing = await env.DB.prepare(
+      "SELECT COUNT(*) as cnt FROM payment_cards WHERE user_id = ?"
+    ).bind(payload.id).first();
+    const isDefault = (existing?.cnt || 0) === 0 ? 1 : 0;
+
+    await env.DB.prepare(
+      `INSERT INTO payment_cards (user_id, billing_key, card_name, brand, last4, exp_month, exp_year, is_default, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`
+    ).bind(
+      payload.id,
+      billingKey,
+      brand + (last4 ? " " + last4 : ""),
+      brand,
+      last4,
+      expMonth,
+      expYear,
+      isDefault
+    ).run();
+
+    return jsonOk({
+      success: true,
+      message: "카드가 등록되었습니다.",
+      card: { brand, last4 },
+    });
+  }
+
   return jsonErr("알 수 없는 경로", 404);
 }
 

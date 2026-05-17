@@ -271,9 +271,46 @@ async function runWordpress(payload, env, ctx) {
     } catch {}
   }
 
-  // 6. 준비 중 안내
+  // 6. 설치 완료 여부 확인 (wp-config.php 또는 wp-includes/version.php 기준)
   const repoUrl    = owner && repo ? "https://github.com/" + owner + "/" + repo : "";
   const actionsUrl = repoUrl ? repoUrl + "/actions/workflows/install-wordpress.yml" : "";
+
+  // wp-config.php 존재 시 설치 완료로 판단 (Actions 완료 후 항상 존재)
+  let wpInstalled = false;
+  if (owner && repo) {
+    try {
+      const cfgRes = await ghFetch(owner, repo, branch, "wp-config.php", token, true);
+      if (cfgRes) {
+        wpInstalled = true;
+      } else {
+        const verRes = await ghFetch(owner, repo, branch, "wp-includes/version.php", token, true);
+        wpInstalled = !!verRes;
+      }
+    } catch {}
+  }
+
+  // 설치 완료인데 여기까지 온 경우: 캐시 아직 없음 → 대기 안내
+  if (wpInstalled) {
+    return new Response(
+      "<!DOCTYPE html><html lang=\"ko\"><head><meta charset=\"UTF-8\"><meta http-equiv=\"refresh\" content=\"15\">" +
+      "<title>거의 준비됨</title>" +
+      "<style>*{box-sizing:border-box}body{font-family:-apple-system,sans-serif;background:#f0f0f1;" +
+      "display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;padding:20px}" +
+      ".card{background:#fff;border:1px solid #c3c4c7;border-radius:4px;max-width:500px;width:100%;padding:40px;text-align:center}" +
+      ".badge{background:#00a32a;color:#fff;font-size:11px;font-weight:700;padding:3px 10px;border-radius:3px;display:inline-block;margin-bottom:14px}" +
+      "h1{color:#1d2327;font-size:20px;margin:0 0 10px}p{color:#646970;font-size:14px;line-height:1.6;margin:0 0 14px}" +
+      "a.btn{display:inline-block;background:#2271b1;color:#fff;text-decoration:none;padding:8px 18px;border-radius:3px;font-size:13px;margin:4px}" +
+      ".note{font-size:12px;color:#a7aaad;margin-top:14px}</style></head>" +
+      "<body><div class=\"card\">" +
+      "<div class=\"badge\">ALMOST READY</div>" +
+      "<h1>\uD83C\uDF89 WordPress 설치 완료!</h1>" +
+      "<p>정적 캐시를 생성하고 있습니다. 잠시 후 사이트가 자동으로 열립니다.</p>" +
+      (repoUrl ? " <a class=\"btn\" style=\"background:#6e7d88\" href=\"" + repoUrl + "\" target=\"_blank\">\uD83D\uDCC1 GitHub 레포 보기</a>" : "") +
+      "<p class=\"note\">15초마다 자동 새로고침됩니다</p>" +
+      "</div></body></html>",
+      { status: 503, headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store", "Retry-After": "15" } }
+    );
+  }
 
   if (path.startsWith("/wp-admin") || path.startsWith("/wp-login")) {
     return new Response(

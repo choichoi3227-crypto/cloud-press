@@ -158,9 +158,69 @@ async function checkInstalled(db, kv) {
 
 // ─── WordPress DB 초기화 ───────────────────────────────────────────────────
 
-async function initWordPressDB(db, siteUrl, adminUser, adminPass, adminEmail) {
+async function phpassHash(password) {
+  function md5(input) {
+    const buf = typeof input === "string" ? new TextEncoder().encode(input) : input;
+    const u8  = buf instanceof Uint8Array ? buf : new Uint8Array(buf);
+    function safeAdd(x,y){const l=(x&0xffff)+(y&0xffff);return(((x>>16)+(y>>16)+(l>>16))<<16)|(l&0xffff)}
+    function rol(n,c){return(n<<c)|(n>>>(32-c))}
+    function cmn(q,a,b,x,s,t){return safeAdd(rol(safeAdd(safeAdd(a,q),safeAdd(x,t)),s),b)}
+    function ff(a,b,c,d,x,s,t){return cmn((b&c)|((~b)&d),a,b,x,s,t)}
+    function gg(a,b,c,d,x,s,t){return cmn((b&d)|(c&(~d)),a,b,x,s,t)}
+    function hh(a,b,c,d,x,s,t){return cmn(b^c^d,a,b,x,s,t)}
+    function ii(a,b,c,d,x,s,t){return cmn(c^(b|(~d)),a,b,x,s,t)}
+    const n=u8.length,l=Math.ceil((n+9)/64)*16,m=new Int32Array(l);
+    for(let i=0;i<n;i++)m[i>>2]|=(u8[i]<<((i%4)*8));
+    m[n>>2]|=(0x80<<((n%4)*8));m[l-2]=n*8;
+    let a=1732584193,b=-271733879,c=-1732584194,d=271733878;
+    for(let i=0;i<l;i+=16){
+      const[oa,ob,oc,od]=[a,b,c,d];
+      a=ff(a,b,c,d,m[i],7,-680876936);d=ff(d,a,b,c,m[i+1],12,-389564586);c=ff(c,d,a,b,m[i+2],17,606105819);b=ff(b,c,d,a,m[i+3],22,-1044525330);
+      a=ff(a,b,c,d,m[i+4],7,-176418897);d=ff(d,a,b,c,m[i+5],12,1200080426);c=ff(c,d,a,b,m[i+6],17,-1473231341);b=ff(b,c,d,a,m[i+7],22,-45705983);
+      a=ff(a,b,c,d,m[i+8],7,1770035416);d=ff(d,a,b,c,m[i+9],12,-1958414417);c=ff(c,d,a,b,m[i+10],17,-42063);b=ff(b,c,d,a,m[i+11],22,-1990404162);
+      a=ff(a,b,c,d,m[i+12],7,1804603682);d=ff(d,a,b,c,m[i+13],12,-40341101);c=ff(c,d,a,b,m[i+14],17,-1502002290);b=ff(b,c,d,a,m[i+15],22,1236535329);
+      a=gg(a,b,c,d,m[i+1],5,-165796510);d=gg(d,a,b,c,m[i+6],9,-1069501632);c=gg(c,d,a,b,m[i+11],14,643717713);b=gg(b,c,d,a,m[i],20,-373897302);
+      a=gg(a,b,c,d,m[i+5],5,-701558691);d=gg(d,a,b,c,m[i+10],9,38016083);c=gg(c,d,a,b,m[i+15],14,-660478335);b=gg(b,c,d,a,m[i+4],20,-405537848);
+      a=gg(a,b,c,d,m[i+9],5,568446438);d=gg(d,a,b,c,m[i+14],9,-1019803690);c=gg(c,d,a,b,m[i+3],14,-187363961);b=gg(b,c,d,a,m[i+8],20,1163531501);
+      a=gg(a,b,c,d,m[i+13],5,-1444681467);d=gg(d,a,b,c,m[i+2],9,-51403784);c=gg(c,d,a,b,m[i+7],14,1735328473);b=gg(b,c,d,a,m[i+12],20,-1926607734);
+      a=hh(a,b,c,d,m[i+5],4,-378558);d=hh(d,a,b,c,m[i+8],11,-2022574463);c=hh(c,d,a,b,m[i+11],16,1839030562);b=hh(b,c,d,a,m[i+14],23,-35309556);
+      a=hh(a,b,c,d,m[i+1],4,-1530992060);d=hh(d,a,b,c,m[i+4],11,1272893353);c=hh(c,d,a,b,m[i+7],16,-155497632);b=hh(b,c,d,a,m[i+10],23,-1094730640);
+      a=hh(a,b,c,d,m[i+13],4,681279174);d=hh(d,a,b,c,m[i],11,-358537222);c=hh(c,d,a,b,m[i+3],16,-722521979);b=hh(b,c,d,a,m[i+6],23,76029189);
+      a=hh(a,b,c,d,m[i+9],4,-640364487);d=hh(d,a,b,c,m[i+12],11,-421815835);c=hh(c,d,a,b,m[i+15],16,530742520);b=hh(b,c,d,a,m[i+2],23,-995338651);
+      a=ii(a,b,c,d,m[i],6,-198630844);d=ii(d,a,b,c,m[i+7],10,1126891415);c=ii(c,d,a,b,m[i+14],15,-1416354905);b=ii(b,c,d,a,m[i+5],21,-57434055);
+      a=ii(a,b,c,d,m[i+12],6,1700485571);d=ii(d,a,b,c,m[i+3],10,-1894986606);c=ii(c,d,a,b,m[i+10],15,-1051523);b=ii(b,c,d,a,m[i+1],21,-2054922799);
+      a=ii(a,b,c,d,m[i+8],6,1873313359);d=ii(d,a,b,c,m[i+15],10,-30611744);c=ii(c,d,a,b,m[i+6],15,-1560198380);b=ii(b,c,d,a,m[i+13],21,1309151649);
+      a=ii(a,b,c,d,m[i+4],6,-145523070);d=ii(d,a,b,c,m[i+11],10,-1120210379);c=ii(c,d,a,b,m[i+2],15,718787259);b=ii(b,c,d,a,m[i+9],21,-343485551);
+      a=safeAdd(a,oa);b=safeAdd(b,ob);c=safeAdd(c,oc);d=safeAdd(d,od);
+    }
+    const r=new Uint8Array(16),v=new DataView(r.buffer);
+    v.setInt32(0,a,true);v.setInt32(4,b,true);v.setInt32(8,c,true);v.setInt32(12,d,true);
+    return r;
+  }
+  const ITOA64="./0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+  function encode64(h,count){
+    let o="",i=0;
+    do{let v=h[i++];o+=ITOA64[v&0x3f];if(i<count)v|=h[i]<<8;o+=ITOA64[(v>>6)&0x3f];if(i++>=count)break;if(i<count)v|=h[i]<<16;o+=ITOA64[(v>>12)&0x3f];if(i++>=count)break;o+=ITOA64[(v>>18)&0x3f];}while(i<count);
+    return o;
+  }
+  const rnd=new Uint8Array(6); crypto.getRandomValues(rnd);
+  let salt=""; for(const b of rnd) salt+=ITOA64[b&63];
+  const prefix=`$P$${ITOA64[8]}${salt}`;
+  let count=256;
+  const pb=new TextEncoder().encode(password);
+  const sb=new TextEncoder().encode(salt);
+  const init=new Uint8Array(sb.length+pb.length); init.set(sb); init.set(pb,sb.length);
+  let h=md5(init);
+  while(count--){const c=new Uint8Array(h.length+pb.length);c.set(h);c.set(pb,h.length);h=md5(c);}
+  return prefix+encode64(Array.from(h),16);
+}
+
+async function initWordPressDB(db, siteUrl, adminUser, adminPass, adminEmail, blogname) {
   if (!db) return false;
+  blogname = blogname || "WordPress 사이트";
   const now = new Date().toISOString().slice(0, 19).replace("T", " ");
+  const hashedPass = await phpassHash(adminPass);
+  const blognameSafe = blogname.replace(/'/g, "''");
   const sqls = [
     `CREATE TABLE IF NOT EXISTS wp_options (option_id INTEGER PRIMARY KEY AUTOINCREMENT, option_name TEXT UNIQUE NOT NULL, option_value TEXT NOT NULL DEFAULT '', autoload TEXT NOT NULL DEFAULT 'yes')`,
     `CREATE TABLE IF NOT EXISTS wp_users (ID INTEGER PRIMARY KEY AUTOINCREMENT, user_login TEXT NOT NULL DEFAULT '', user_pass TEXT NOT NULL DEFAULT '', user_nicename TEXT NOT NULL DEFAULT '', user_email TEXT NOT NULL DEFAULT '', user_url TEXT NOT NULL DEFAULT '', user_registered TEXT NOT NULL DEFAULT '', user_status INTEGER NOT NULL DEFAULT 0, display_name TEXT NOT NULL DEFAULT '')`,
@@ -172,17 +232,207 @@ async function initWordPressDB(db, siteUrl, adminUser, adminPass, adminEmail) {
     `CREATE TABLE IF NOT EXISTS wp_term_relationships (object_id INTEGER NOT NULL DEFAULT 0, term_taxonomy_id INTEGER NOT NULL DEFAULT 0, term_order INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (object_id, term_taxonomy_id))`,
     `CREATE TABLE IF NOT EXISTS wp_comments (comment_ID INTEGER PRIMARY KEY AUTOINCREMENT, comment_post_ID INTEGER NOT NULL DEFAULT 0, comment_author TEXT NOT NULL DEFAULT '', comment_author_email TEXT NOT NULL DEFAULT '', comment_author_url TEXT NOT NULL DEFAULT '', comment_author_IP TEXT NOT NULL DEFAULT '', comment_date TEXT NOT NULL DEFAULT '', comment_content TEXT NOT NULL DEFAULT '', comment_approved TEXT NOT NULL DEFAULT '1', comment_type TEXT NOT NULL DEFAULT 'comment', comment_parent INTEGER NOT NULL DEFAULT 0, user_id INTEGER NOT NULL DEFAULT 0)`,
     `CREATE TABLE IF NOT EXISTS wp_commentmeta (meta_id INTEGER PRIMARY KEY AUTOINCREMENT, comment_id INTEGER NOT NULL DEFAULT 0, meta_key TEXT, meta_value TEXT)`,
-    `INSERT OR IGNORE INTO wp_options (option_name, option_value, autoload) VALUES ('siteurl','${siteUrl}','yes'),('home','${siteUrl}','yes'),('blogname','CloudPress Site','yes'),('blogdescription','WordPress on Cloudflare','yes'),('admin_email','${adminEmail}','yes'),('permalink_structure','/%postname%/','yes'),('template','twentytwentyfour','yes'),('stylesheet','twentytwentyfour','yes'),('active_plugins','','yes'),('blogpublic','1','yes'),('wp_cloudpress_version','4.0','no')`,
-    `INSERT OR IGNORE INTO wp_users (user_login,user_pass,user_nicename,user_email,user_url,user_registered,display_name) VALUES ('${adminUser}','${adminPass}','${adminUser}','${adminEmail}','${siteUrl}','${now}','${adminUser}')`,
+    `INSERT OR IGNORE INTO wp_options (option_name, option_value, autoload) VALUES ('siteurl','${siteUrl}','yes'),('home','${siteUrl}','yes'),('blogname','${blognameSafe}','yes'),('blogdescription','','yes'),('admin_email','${adminEmail}','yes'),('permalink_structure','/%postname%/','yes'),('template','twentytwentyfour','yes'),('stylesheet','twentytwentyfour','yes'),('current_theme','Twenty Twenty-Four','yes'),('active_plugins','a:0:{}','yes'),('blogpublic','1','yes'),('db_version','57155','yes'),('cp_installed_at','${now}','yes')`,
+    `INSERT OR IGNORE INTO wp_terms (term_id,name,slug,term_group) VALUES (1,'미분류','uncategorized',0)`,
+    `INSERT OR IGNORE INTO wp_term_taxonomy (term_taxonomy_id,term_id,taxonomy,description,parent,count) VALUES (1,1,'category','',0,1)`,
+    `INSERT OR IGNORE INTO wp_users (user_login,user_pass,user_nicename,user_email,user_url,user_registered,display_name) VALUES ('${adminUser}','${hashedPass}','${adminUser}','${adminEmail}','${siteUrl}','${now}','${adminUser}')`,
     `INSERT OR IGNORE INTO wp_usermeta (user_id,meta_key,meta_value) VALUES (1,'wp_capabilities','a:1:{s:13:"administrator";b:1;}')`,
     `INSERT OR IGNORE INTO wp_usermeta (user_id,meta_key,meta_value) VALUES (1,'wp_user_level','10')`,
-    `INSERT OR IGNORE INTO wp_posts (post_author,post_date,post_content,post_title,post_status,post_name,post_type,post_modified,guid) VALUES (1,'${now}','CloudPress에 오신 것을 환영합니다!','안녕하세요!','publish','hello-world','post','${now}','${siteUrl}/?p=1')`,
+    `INSERT OR IGNORE INTO wp_usermeta (user_id,meta_key,meta_value) VALUES (1,'admin_color','fresh')`,
+    `INSERT OR IGNORE INTO wp_posts (post_author,post_date,post_content,post_title,post_status,post_name,post_type,post_modified,guid,comment_status,ping_status) VALUES (1,'${now}','WordPress에 오신 것을 환영합니다!','안녕하세요!','publish','hello-world','post','${now}','${siteUrl}/?p=1','open','open')`,
   ];
   for (const sql of sqls) {
     const r = await d1Run(db, sql);
-    if (!r.ok) console.warn("[d1-init]", r.error, sql.slice(0, 60));
+    if (!r.ok) console.warn("[d1-init]", r.error, sql.slice(0, 80));
   }
   return true;
+}
+
+
+function buildInstallPage(siteUrl, opts) {
+  opts = opts || {};
+  const error      = opts.error      || "";
+  const title      = opts.weblog_title || opts.blogname || "";
+  const admin_user = opts.user_login  || "admin";
+  const admin_email= opts.admin_email || "";
+  return `<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>WordPress 설치</title>
+<link rel="stylesheet" href="/wp-admin/css/install.min.css">
+<style>
+html{background:#f0f0f1}
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;font-size:14px;color:#3c434a;margin:0}
+#wpwrap{display:flex;justify-content:center;padding:40px 16px 60px}
+#wpinstall{width:100%;max-width:600px}
+h1.wp-logo{text-align:center;margin:0 0 28px}
+h1.wp-logo a{display:inline-block;background:url('/wp-admin/images/wordpress-logo.svg') no-repeat center;background-size:contain;width:84px;height:84px;text-indent:-9999px;overflow:hidden}
+.setup-install-steps{background:#fff;border:1px solid #c3c4c7;border-radius:3px;padding:26px 30px;box-shadow:0 1px 1px rgba(0,0,0,.04)}
+.setup-install-steps h1{font-size:23px;font-weight:400;margin:0 0 18px;padding:0 0 14px;border-bottom:1px solid #dcdcde}
+.form-table{width:100%;border-collapse:collapse;margin-bottom:16px}
+.form-table th{width:160px;padding:14px 4px 14px 0;font-weight:600;vertical-align:top;text-align:left}
+.form-table td{padding:10px 0}
+.form-table input[type=text],
+.form-table input[type=email],
+.form-table input[type=password]{width:100%;max-width:340px;padding:7px 10px;border:1px solid #8c8f94;border-radius:3px;font-size:14px;box-sizing:border-box}
+.form-table input:focus{border-color:#2271b1;outline:2px solid #2271b1;outline-offset:0}
+.form-table p.description{font-size:13px;color:#646970;margin:4px 0 0}
+.wp-pwd{display:flex;gap:8px;align-items:center;max-width:340px}
+.wp-pwd input{flex:1;min-width:0}
+.button-hero{background:#2271b1;border:1px solid #2271b1;color:#fff;padding:10px 24px;font-size:14px;font-weight:600;border-radius:3px;cursor:pointer}
+.button-hero:hover{background:#135e96;border-color:#135e96}
+.notice-error{background:#fff;border-left:4px solid #d63638;border-radius:0 3px 3px 0;padding:12px 16px;margin:0 0 18px;font-size:14px}
+hr{border:none;border-top:1px solid #dcdcde;margin:18px 0}
+#pass-strength{font-size:13px;margin-top:4px;min-height:18px}
+.strong{color:#00a32a;font-weight:600}.good{color:#72aee6;font-weight:600}.weak{color:#dba617;font-weight:600}.bad{color:#d63638;font-weight:600}
+#loading-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9999;align-items:center;justify-content:center}
+#loading-overlay.show{display:flex}
+.spinner-wrap{background:#fff;border-radius:8px;padding:32px 40px;text-align:center;min-width:260px}
+.spinner{width:36px;height:36px;border:4px solid #e0e0e0;border-top-color:#2271b1;border-radius:50%;animation:spin .8s linear infinite;margin:0 auto 14px}
+@keyframes spin{to{transform:rotate(360deg)}}
+.spinner-wrap p{color:#3c434a;font-size:14px;margin:0}
+</style>
+</head>
+<body>
+<div id="wpwrap"><div id="wpinstall">
+  <h1 class="wp-logo"><a href="https://wordpress.org/">WordPress</a></h1>
+  <div class="setup-install-steps">
+    <h1>WordPress에 오신 것을 환영합니다</h1>
+    <p style="margin:0 0 16px;color:#646970">아래 정보를 입력하여 WordPress를 설치하세요. 시작하기 전에 데이터베이스 설정이 완료되어 있어야 합니다.</p>
+    ${error ? \`<div class="notice-error"><strong>오류:</strong> \${error}</div>\` : ""}
+    <form id="setup-form">
+      <table class="form-table">
+        <tr>
+          <th><label for="weblog_title">사이트 제목</label></th>
+          <td><input name="weblog_title" id="weblog_title" type="text" value="${title}" autocomplete="off" required></td>
+        </tr>
+        <tr>
+          <th><label for="user_login">사용자명</label></th>
+          <td>
+            <input name="user_login" id="user_login" type="text" value="${admin_user}" autocomplete="off" required>
+            <p class="description">영문자, 숫자, 밑줄(_), 붙임표(-), 마침표(.), @만 사용 가능합니다.</p>
+          </td>
+        </tr>
+        <tr>
+          <th><label for="admin_password">비밀번호</label></th>
+          <td>
+            <div class="wp-pwd">
+              <input name="admin_password" id="admin_password" type="password" autocomplete="new-password" required>
+              <button type="button" id="toggle-pw" style="padding:7px 10px;background:#f0f0f1;border:1px solid #8c8f94;border-radius:3px;cursor:pointer;font-size:13px;white-space:nowrap">보기</button>
+            </div>
+            <div id="pass-strength"></div>
+            <p class="description">강력한 비밀번호를 사용하세요.</p>
+          </td>
+        </tr>
+        <tr>
+          <th><label for="admin_email">이메일 주소</label></th>
+          <td>
+            <input name="admin_email" id="admin_email" type="email" value="${admin_email}" required>
+            <p class="description">이메일 주소를 정확히 입력해 주세요.</p>
+          </td>
+        </tr>
+      </table>
+      <hr>
+      <p><button type="submit" class="button-hero" id="submit-btn">WordPress 설치</button></p>
+    </form>
+  </div>
+</div></div>
+<div id="loading-overlay">
+  <div class="spinner-wrap">
+    <div class="spinner"></div>
+    <p id="loading-msg">WordPress를 설치하는 중입니다...<br>잠시만 기다려 주세요.</p>
+  </div>
+</div>
+<script>
+document.getElementById('toggle-pw').onclick = function() {
+  const pw = document.getElementById('admin_password');
+  const show = pw.type === 'password';
+  pw.type = show ? 'text' : 'password';
+  this.textContent = show ? '숨기기' : '보기';
+};
+document.getElementById('admin_password').oninput = function() {
+  const pw = this.value, el = document.getElementById('pass-strength');
+  if (!pw) { el.textContent=''; return; }
+  let s=0;
+  if(pw.length>=8)s++;if(pw.length>=12)s++;
+  if(/[A-Z]/.test(pw))s++;if(/[0-9]/.test(pw))s++;if(/[^a-zA-Z0-9]/.test(pw))s++;
+  el.innerHTML = s>=5?'<span class="strong">강력함</span>':s>=3?'<span class="good">보통</span>':s>=2?'<span class="weak">약함</span>':'<span class="bad">매우 약함</span>';
+};
+document.getElementById('setup-form').onsubmit = async function(e) {
+  e.preventDefault();
+  const f = e.target;
+  if (!f.weblog_title.value.trim()) { alert('사이트 제목을 입력해 주세요.'); return; }
+  if (!f.user_login.value.trim())   { alert('사용자명을 입력해 주세요.'); return; }
+  if (!f.admin_password.value)      { alert('비밀번호를 입력해 주세요.'); return; }
+  if (!f.admin_email.value.trim())  { alert('이메일 주소를 입력해 주세요.'); return; }
+  document.getElementById('loading-overlay').classList.add('show');
+  document.getElementById('submit-btn').disabled = true;
+  try {
+    const body = new URLSearchParams({
+      weblog_title:   f.weblog_title.value.trim(),
+      user_login:     f.user_login.value.trim(),
+      admin_password: f.admin_password.value,
+      admin_email:    f.admin_email.value.trim(),
+    });
+    const res = await fetch('/wp-admin/install.php?step=2', {
+      method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'}, body: body.toString()
+    });
+    const text = await res.text();
+    if (res.ok && text.includes('cp-install-success')) {
+      document.getElementById('loading-msg').innerHTML = '설치 완료!<br>로그인 페이지로 이동합니다...';
+      setTimeout(() => { location.href = '/wp-login.php'; }, 1200);
+    } else {
+      document.open(); document.write(text); document.close();
+    }
+  } catch(err) {
+    document.getElementById('loading-overlay').classList.remove('show');
+    document.getElementById('submit-btn').disabled = false;
+    alert('설치 중 오류가 발생했습니다: ' + err.message);
+  }
+};
+</script>
+</body>
+</html>`;
+}
+
+function buildInstallSuccessPage(adminUser) {
+  return `<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>WordPress 설치 완료</title>
+<link rel="stylesheet" href="/wp-admin/css/install.min.css">
+<style>
+html{background:#f0f0f1}body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;margin:0}
+#wpwrap{display:flex;justify-content:center;padding:40px 16px 60px}
+#wpinstall{width:100%;max-width:600px}
+h1.wp-logo{text-align:center;margin:0 0 28px}
+h1.wp-logo a{display:inline-block;background:url('/wp-admin/images/wordpress-logo.svg') no-repeat center;background-size:contain;width:84px;height:84px;text-indent:-9999px;overflow:hidden}
+.box{background:#fff;border:1px solid #c3c4c7;border-radius:3px;padding:26px 30px;box-shadow:0 1px 1px rgba(0,0,0,.04)}
+.box h1{font-size:23px;font-weight:400;margin:0 0 18px}
+.notice-success{background:#fff;border-left:4px solid #00a32a;padding:12px 16px;margin-bottom:18px;font-size:14px}
+.button-large{background:#2271b1;color:#fff;padding:10px 24px;font-size:14px;font-weight:600;border-radius:3px;text-decoration:none;display:inline-block;border:none;cursor:pointer}
+</style>
+<!-- cp-install-success -->
+</head>
+<body>
+<div id="wpwrap"><div id="wpinstall">
+  <h1 class="wp-logo"><a href="https://wordpress.org/">WordPress</a></h1>
+  <div class="box">
+    <h1>설치 성공!</h1>
+    <div class="notice-success"><strong>WordPress</strong>가 성공적으로 설치되었습니다.</div>
+    <table style="width:100%;border-collapse:collapse;margin-bottom:20px;font-size:14px">
+      <tr><th style="text-align:left;padding:8px 0;width:120px;font-weight:600">사용자명</th><td style="padding:8px 0"><strong>${adminUser}</strong></td></tr>
+      <tr><th style="text-align:left;padding:8px 0;font-weight:600">비밀번호</th><td style="padding:8px 0">설정하신 비밀번호</td></tr>
+    </table>
+    <a href="/wp-login.php" class="button-large">로그인 →</a>
+  </div>
+</div></div>
+<script>setTimeout(()=>{ location.href='/wp-login.php'; }, 2000);</script>
+</body>
+</html>`;
 }
 
 // ─── wp-config.php 생성 ────────────────────────────────────────────────────
@@ -602,6 +852,79 @@ ${repoUrl ? `<a class="btn" style="background:#6e7d88" href="${repoUrl}" target=
   ]);
   const wpConfig = wpConfigRes ? await wpConfigRes.text() : "";
   const dbPhp    = dbPhpRes    ? await dbPhpRes.text()    : "";
+
+  // ── WordPress 미설치 감지 → install.php 처리 ────────────────────────────
+  const isInstalled = !!wpConfig;
+
+  // /wp-admin/install.php 직접 처리 (GET: 설치 폼 / POST step=2: 설치 실행)
+  if (path === "/wp-admin/install.php" || path === "/wp-admin/install") {
+    const step = url.searchParams.get("step");
+
+    // GET or step=1 → 설치 폼 표시
+    if (method === "GET" || step === "1" || !step) {
+      if (isInstalled) {
+        // 이미 설치됨 → 관리자로 리다이렉트
+        return new Response(null, { status: 302, headers: { Location: "/wp-admin/" } });
+      }
+      return new Response(buildInstallPage(siteUrl), {
+        headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" },
+      });
+    }
+
+    // POST step=2 → 설치 실행
+    if (method === "POST" && step === "2") {
+      let formData;
+      try {
+        const body = await request.text();
+        formData = Object.fromEntries(new URLSearchParams(body));
+      } catch {
+        formData = {};
+      }
+      const { weblog_title, user_login, admin_password, admin_email } = formData;
+
+      // 유효성 검사
+      if (!weblog_title || !user_login || !admin_password || !admin_email) {
+        return new Response(buildInstallPage(siteUrl, { error: "모든 필드를 입력해 주세요.", ...formData }), {
+          headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" },
+        });
+      }
+      if (!/^[a-z0-9.@_-]+$/i.test(user_login)) {
+        return new Response(buildInstallPage(siteUrl, { error: "사용자명에 허용되지 않는 문자가 포함되어 있습니다.", ...formData }), {
+          headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" },
+        });
+      }
+
+      // 1) D1 DB 초기화
+      const d = env.DB || env.SITE_DB;
+      if (d) {
+        const ok = await initWordPressDB(d, siteUrl, user_login, admin_password, admin_email, weblog_title);
+        if (!ok) {
+          return new Response(buildInstallPage(siteUrl, { error: "데이터베이스 초기화에 실패했습니다. DB 바인딩을 확인해 주세요.", ...formData }), {
+            headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" },
+          });
+        }
+        // 설치 완료 KV 플래그 저장
+        await kvSet("wp:installed", "1", 86400 * 30);
+      }
+
+      // 2) wp-config.php를 GitHub 레포에 저장
+      const newWpConfig = buildWpConfig(env, siteUrl);
+      await mirror.put("wp-config.php", newWpConfig, "install: WordPress wp-config.php");
+
+      // 3) 성공 응답
+      return new Response(buildInstallSuccessPage(user_login), {
+        headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" },
+      });
+    }
+  }
+
+  // ── 미설치 상태에서 다른 경로 접근 → install.php로 리다이렉트 ───────────
+  if (!isInstalled && !STATIC_EXT.test(path)) {
+    return new Response(null, {
+      status: 302,
+      headers: { Location: "/wp-admin/install.php", "Cache-Control": "no-store" },
+    });
+  }
 
   // PHP 파일 경로 결정
   let phpFile = path;

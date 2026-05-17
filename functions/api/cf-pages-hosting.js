@@ -1124,7 +1124,7 @@ export async function provisionCloudflarePagesHosting({
   await log(`DB        : GitHub 레포 _db/wordpress.db (SQLite)`);
 
   // ── 1. 자격증명 생성 ──────────────────────────────────────────────────────
-  const wpAdminUser  = "admin";
+  const wpAdminUser  = "wp_" + randomStr(8);
   const wpAdminPass  = randomPass(16);
   const wpAdminEmail = `admin@${shortId}.cloudpress.app`;
 

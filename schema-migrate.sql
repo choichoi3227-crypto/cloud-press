@@ -40,6 +40,7 @@ ALTER TABLE php_logs ADD COLUMN is_read INTEGER DEFAULT 0;
 CREATE TABLE IF NOT EXISTS file_snapshots (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,
     site_id       TEXT NOT NULL,
+    path          TEXT NOT NULL DEFAULT '',
     backup_path   TEXT,
     snapshot_type TEXT DEFAULT 'manual',
     label         TEXT,
@@ -61,3 +62,7 @@ CREATE TABLE IF NOT EXISTS notices (
     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
+
+-- ── file_snapshots.path 컬럼 추가 (기존 DB 마이그레이션) ──────────────────
+-- 이미 테이블이 있고 path 컬럼이 없는 경우 실행
+-- ALTER TABLE file_snapshots ADD COLUMN path TEXT NOT NULL DEFAULT '';

@@ -235,6 +235,13 @@ async function cfReq(apiToken, method, path, body, cfEmail) {
   return { ok: res.ok, status: res.status, data };
 }
 
+// ─── Cloudflare 계정 Workers 서브도메인 조회 ─────────────────────────────────
+// 실제 Worker URL: {workerName}.{accountSubdomain}.workers.dev
+async function getAccountWorkerSubdomain(cfToken, cfAccountId, cfEmail) {
+  const res = await cfReq(cfToken, "GET", `/accounts/${cfAccountId}/workers/subdomain`, null, cfEmail);
+  return res.data?.result?.subdomain || null;
+}
+
 // ─── KV 네임스페이스 생성 ────────────────────────────────────────────────────
 async function createKVNamespace({ cfToken, cfAccountId, cfEmail, title, log }) {
   if (!cfToken || !cfAccountId) return null;
@@ -585,13 +592,14 @@ function buildWorkerSource({ siteId, githubOwner, githubRepo, ghPagesUrl }) {
 }
 
 // ─── wrangler.toml ────────────────────────────────────────────────────────────
-function buildWranglerToml({ workerName, kvCacheId, kvCacheName, siteId, ghOwner, ghRepo, ghPagesUrl }) {
+function buildWranglerToml({ workerName, kvCacheId, kvCacheName, siteId, ghOwner, ghRepo, ghPagesUrl, workerUrl }) {
   const phpRunnerName = `${workerName}-php`;
   return `# CloudPress WordPress Worker 배포 설정 (자동 생성)
 name               = "${workerName}"
 main               = "worker.js"
 compatibility_date = "2025-04-01"
 compatibility_flags = ["nodejs_compat"]
+# Worker URL: ${workerUrl || `https://${workerName}.<your-subdomain>.workers.dev`}
 
 ${kvCacheId ? `[[kv_namespaces]]
 binding = "CACHE"
@@ -932,7 +940,8 @@ CloudPress로 생성된 WordPress 사이트입니다.
 ## 사이트 정보
 - **URL**: ${siteUrl}
 - **관리자**: ${siteUrl}/wp-admin/ (ID: \`${wpAdminUser}\`)
-- **Worker**: \`${workerName}\`
+- **Worker 이름**: \`${workerName}\`
+- **Worker URL**: ${siteUrl}
 - **GitHub**: [${owner}/${repoName}](https://github.com/${owner}/${repoName})
 
 ## 아키텍처
@@ -1034,7 +1043,12 @@ async function deployMirrorWorker({ cfToken, cfAccountId, cfEmail, workerName, w
     return null;
   }
   await cfReq(cfToken, "POST", `/accounts/${cfAccountId}/workers/scripts/${workerName}/subdomain`, { enabled: true }, cfEmail).catch(() => {});
-  const workerDomain = `https://${workerName}.workers.dev`;
+
+  // 실제 계정 서브도메인 조회 → {workerName}.{accountSubdomain}.workers.dev
+  const accountSubdomain = await getAccountWorkerSubdomain(cfToken, cfAccountId, cfEmail).catch(() => null);
+  const workerDomain = accountSubdomain
+    ? `https://${workerName}.${accountSubdomain}.workers.dev`
+    : `https://${workerName}.workers.dev`; // fallback (subdomain 조회 실패 시)
   await log(`  ✅ 미러링 Worker 배포 완료: ${workerDomain}`);
   if (ghToken && ghOwner) {
     await setWorkerSecret(cfToken, cfAccountId, cfEmail, workerName, "GITHUB_TOKEN", ghToken, log);
@@ -1125,7 +1139,18 @@ export async function provisionCloudflarePagesHosting({
   }
 
   // ── 6. 미러링 Worker 소스 빌드 + 배포 ────────────────────────────────────
-  const siteUrl    = initialDomain ? `https://${initialDomain}` : `https://${workerName}.workers.dev`;
+  // 실제 계정 서브도메인 미리 조회 (workerName.accountSubdomain.workers.dev 형식)
+  let accountSubdomain = null;
+  if (cfToken && cfAccountId) {
+    accountSubdomain = await getAccountWorkerSubdomain(cfToken, cfAccountId, cfEmail).catch(() => null);
+    if (accountSubdomain) await log(`  계정 Workers 서브도메인: ${accountSubdomain}`);
+    else await log("  ⚠️ 계정 서브도메인 조회 실패 — workers.dev fallback 사용", "warn");
+  }
+
+  const realWorkerUrl = accountSubdomain
+    ? `https://${workerName}.${accountSubdomain}.workers.dev`
+    : `https://${workerName}.workers.dev`;
+  const siteUrl    = initialDomain ? `https://${initialDomain}` : realWorkerUrl;
   const ghPagesUrl = owner ? `https://${owner}.github.io/${repoName}` : "";
 
   const workerSource = buildWorkerSource({ siteId, githubOwner: owner || "", githubRepo: repoName, ghPagesUrl });
@@ -1158,7 +1183,7 @@ export async function provisionCloudflarePagesHosting({
       const filesToPush = [
         { path: "wp-config.php", content: buildWpConfig({ siteId, siteUrl, dbPrefix, authKey, secureAuthKey, loggedInKey, nonceKey, authSalt, secureAuthSalt, loggedInSalt, nonceSalt }) },
         { path: "worker.js", content: workerSource },
-        { path: "wrangler.toml", content: buildWranglerToml({ workerName, kvCacheId, kvCacheName, siteId, ghOwner: owner, ghRepo: repoName, ghPagesUrl }) },
+        { path: "wrangler.toml", content: buildWranglerToml({ workerName, kvCacheId, kvCacheName, siteId, ghOwner: owner, ghRepo: repoName, ghPagesUrl, workerUrl: realWorkerUrl }) },
         { path: "wrangler-php.toml", content: buildPhpRunnerWranglerToml({ workerName, kvCacheId, siteId, ghOwner: owner, ghRepo: repoName }) },
         ...(phpRunnerSourceCode ? [{ path: "php-runner.js", content: phpRunnerSourceCode }] : []),
         { path: "_db/.gitkeep", content: "# wordpress.db SQLite DB가 이 폴더에 생성됩니다.\n" },
@@ -1244,8 +1269,8 @@ export async function provisionCloudflarePagesHosting({
   return {
     success,
     workerName,
-    workerDomain:  workerDomain || null,
-    cfPagesUrl:    workerDomain || null,
+    workerDomain:  workerDomain || realWorkerUrl || null,
+    cfPagesUrl:    workerDomain || realWorkerUrl || null,
     githubRepoUrl,
     githubOwner:   owner,
     githubRepo:    repoName,

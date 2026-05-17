@@ -366,47 +366,38 @@ require_once ABSPATH . 'wp-settings.php';
 //     정규식(/^\\//)이 /^//로 깨지고 CF Worker 배포 SyntaxError가 발생합니다.
 function buildWorkerSource({ siteId, githubOwner, githubRepo, ghPagesUrl }) {
   const _ghPagesUrl = ghPagesUrl || "";
-
-  // Worker 소스를 배열+join으로 생성 (중첩 템플릿 리터럴 이스케이프 문제 완전 방지)
   const lines = [
     "/**",
-    " * CloudPress 순수 미러링 Worker v11",
+    " * CloudPress 순수 미러링 Worker v12 (Astro SSR 전용)",
     " * GitHub: " + githubOwner + "/" + githubRepo,
     " *",
-    " * 요청 처리 순서:",
-    " *   1. 정적 파일(.css/.js/이미지) → GitHub 레포 raw / WordPress CDN",
-    " *   2. KV HTML 캐시 (비로그인 GET)",
-    " *   3. PHP_RUNNER Service Binding → php-wasm WordPress 실행  ← 핵심",
-    " *   4. _cache/ 정적 HTML → GitHub 레포 (PHP_RUNNER 없을 때 폴백)",
-    " *   5. GitHub Pages 폴백",
-    " *   6. KV stale 캐시",
-    " *   7. 없으면 404 (감지 로직/고정 화면 없음)",
+    " * 역할: dist/ 파일 미러링 + Astro SSR API Routes 프록시",
+    " * 하드코딩 없음 — GitHub 레포 dist/ 내용을 100% 미러링",
     " */",
     "",
-    "const SITE_ID      = " + JSON.stringify(siteId) + ";",
-    "const GH_OWNER     = " + JSON.stringify(githubOwner) + ";",
-    "const GH_REPO      = " + JSON.stringify(githubRepo) + ";",
-    "const GH_BRANCH    = \"main\";",
+    "const SITE_ID   = " + JSON.stringify(siteId) + ";",
+    "const GH_OWNER  = " + JSON.stringify(githubOwner) + ";",
+    "const GH_REPO   = " + JSON.stringify(githubRepo) + ";",
+    "const GH_BRANCH = \"main\";",
     "const GH_PAGES_URL = " + JSON.stringify(_ghPagesUrl) + ";",
-    "",
-    "const STATIC_EXT = /\\.(css|js|mjs|jpg|jpeg|png|gif|webp|avif|svg|ico|woff2?|ttf|eot|otf|map|txt|xml|pdf|zip|mp4|mp3|ogg|wav|webm|gz|br)$/i;",
-    "const SKIP_CACHE = [\"/wp-admin\", \"/wp-login.php\", \"/cart\", \"/checkout\", \"/my-account\", \"/wp-cron.php\", \"/xmlrpc.php\"];",
-    "const SEC        = { \"X-Content-Type-Options\": \"nosniff\", \"X-Frame-Options\": \"SAMEORIGIN\", \"Referrer-Policy\": \"strict-origin-when-cross-origin\" };",
     "",
     "const ghOwner = (e) => e.GH_OWNER  || GH_OWNER;",
     "const ghRepo  = (e) => e.GH_REPO   || GH_REPO;",
     "const ghToken = (e) => e.GITHUB_TOKEN || \"\";",
     "const ghPages = (e) => e.GH_PAGES_URL || GH_PAGES_URL || \"\";",
-    "const getSiteId = (e) => e.SITE_ID || SITE_ID;",
     "",
-    "const kvGet    = async (e,k) => { try { return await e.CACHE?.get(k); }               catch { return null; } };",
-    "const kvGetBuf = async (e,k) => { try { return await e.CACHE?.get(k,\"arrayBuffer\"); } catch { return null; } };",
-    "const kvPut    = async (e,k,v,t=3600) => { try { await e.CACHE?.put(k,v,{expirationTtl:t}); } catch {} };",
+    "const STATIC_EXT = /\\\\.(css|js|mjs|ts|jpg|jpeg|png|gif|webp|avif|svg|ico|woff2?|ttf|eot|otf|map|txt|xml|json|pdf|zip|mp4|mp3|ogg|wav|webm|gz|br)$/i;",
+    "const SEC = {",
+    "  \"X-Content-Type-Options\": \"nosniff\",",
+    "  \"X-Frame-Options\": \"SAMEORIGIN\",",
+    "  \"Referrer-Policy\": \"strict-origin-when-cross-origin\",",
+    "};",
     "",
     "function mime(p) {",
     "  const ext = (p.split(\".\").pop() || \"\").toLowerCase();",
     "  return ({",
     "    css:\"text/css\", js:\"application/javascript\", mjs:\"application/javascript\",",
+    "    ts:\"application/javascript\",",
     "    json:\"application/json\", html:\"text/html;charset=utf-8\", xml:\"application/xml\",",
     "    svg:\"image/svg+xml\", png:\"image/png\", jpg:\"image/jpeg\", jpeg:\"image/jpeg\",",
     "    gif:\"image/gif\", webp:\"image/webp\", avif:\"image/avif\", ico:\"image/x-icon\",",
@@ -416,205 +407,95 @@ function buildWorkerSource({ siteId, githubOwner, githubRepo, ghPagesUrl }) {
     "  })[ext] || \"application/octet-stream\";",
     "}",
     "",
-    "// GitHub 레포 raw 파일 fetch",
+    "// KV 헬퍼",
+    "const kvGet    = async (e,k)     => { try { return await e.CACHE?.get(k); } catch { return null; } };",
+    "const kvGetBuf = async (e,k)     => { try { return await e.CACHE?.get(k,\"arrayBuffer\"); } catch { return null; } };",
+    "const kvPut    = async (e,k,v,t=3600) => { try { await e.CACHE?.put(k,v,{expirationTtl:t}); } catch {} };",
+    "",
+    "// GitHub raw fetch (dist/ 경로 포함)",
     "async function ghRaw(env, filePath) {",
     "  const o = ghOwner(env), r = ghRepo(env), t = ghToken(env);",
     "  if (!o || !r) return null;",
     "  try {",
     "    const res = await fetch(",
     "      `https://raw.githubusercontent.com/${o}/${r}/${GH_BRANCH}/${filePath}`,",
-    "      { headers: { ...(t ? { Authorization: `Bearer ${t}` } : {}), \"User-Agent\": \"CloudPress/10\" },",
+    "      { headers: { ...(t ? { Authorization: `Bearer ${t}` } : {}), \"User-Agent\": \"CloudPress/12\" },",
     "        cf: { cacheEverything: true, cacheTtl: 300 } }",
     "    );",
     "    return res.ok ? res : null;",
     "  } catch { return null; }",
     "}",
     "",
-    "// WordPress 코어 파일 CDN fetch",
-    "async function wpCdn(filePath) {",
-    "  for (const base of [",
-    "    \"https://cdn.jsdelivr.net/gh/WordPress/WordPress@master/\",",
-    "    \"https://raw.githubusercontent.com/WordPress/WordPress/master/\",",
-    "  ]) {",
-    "    try {",
-    "      const r = await fetch(base + filePath, { cf: { cacheEverything: true, cacheTtl: 86400 } });",
-    "      if (r.ok) return r;",
-    "    } catch {}",
-    "  }",
-    "  return null;",
-    "}",
-    "",
-    "// PHP_RUNNER Service Binding으로 WordPress PHP 실행",
-    "async function runPhp(req, env, ctx) {",
-    "  if (!env.PHP_RUNNER) return null;",
-    "  const url    = new URL(req.url);",
-    "  const method = req.method.toUpperCase();",
-    "  const sid    = getSiteId(env);",
-    "  const noCache = SKIP_CACHE.some(p => url.pathname.startsWith(p))",
-    "    || (req.headers.get(\"Cookie\") || \"\").includes(\"wordpress_logged_in\");",
-    "  const body = (method === \"POST\" || method === \"PUT\" || method === \"PATCH\")",
-    "    ? await req.text().catch(() => \"\") : \"\";",
+    "// GitHub Pages 폴백",
+    "async function ghPagesFallback(env, url) {",
+    "  const base = ghPages(env);",
+    "  if (!base) return null;",
     "  try {",
-    "    const res = await env.PHP_RUNNER.fetch(new Request(\"https://php-runner/run-wordpress\", {",
-    "      method: \"POST\",",
-    "      headers: { \"Content-Type\": \"application/json\" },",
-    "      body: JSON.stringify({",
-    "        phpFile: url.pathname === \"/\" ? \"/index.php\" : url.pathname,",
-    "        phpEnv: {",
-    "          REQUEST_METHOD:       method,",
-    "          REQUEST_URI:          url.pathname + url.search,",
-    "          QUERY_STRING:         url.search.slice(1),",
-    "          HTTP_HOST:            url.hostname,",
-    "          SERVER_NAME:          url.hostname,",
-    "          SERVER_PORT:          \"443\",",
-    "          HTTPS:                \"on\",",
-    "          DOCUMENT_ROOT:        \"/var/www/wordpress\",",
-    "          SCRIPT_FILENAME:      `/var/www/wordpress${url.pathname === \"/\" ? \"/index.php\" : url.pathname}`,",
-    "          SCRIPT_NAME:          url.pathname === \"/\" ? \"/index.php\" : url.pathname,",
-    "          PHP_SELF:             url.pathname === \"/\" ? \"/index.php\" : url.pathname,",
-    "          GATEWAY_INTERFACE:    \"CGI/1.1\",",
-    "          SERVER_PROTOCOL:      \"HTTP/1.1\",",
-    "          HTTP_USER_AGENT:      req.headers.get(\"User-Agent\") || \"\",",
-    "          HTTP_ACCEPT:          req.headers.get(\"Accept\") || \"\",",
-    "          HTTP_ACCEPT_LANGUAGE: req.headers.get(\"Accept-Language\") || \"\",",
-    "          HTTP_COOKIE:          req.headers.get(\"Cookie\") || \"\",",
-    "          HTTP_REFERER:         req.headers.get(\"Referer\") || \"\",",
-    "          CONTENT_TYPE:         req.headers.get(\"Content-Type\") || \"\",",
-    "          CONTENT_LENGTH:       req.headers.get(\"Content-Length\") || \"\",",
-    "          HTTP_AUTHORIZATION:   req.headers.get(\"Authorization\") || \"\",",
-    "          HTTP_X_FORWARDED_FOR: req.headers.get(\"CF-Connecting-IP\") || \"\",",
-    "          WP_HOME:              `https://${url.hostname}`,",
-    "          WP_SITEURL:           `https://${url.hostname}`,",
-    "        },",
-    "        stdin: body,",
-    "        siteConfig: { siteId: sid, githubOwner: ghOwner(env), githubRepo: ghRepo(env), githubToken: ghToken(env) },",
-    "        skipCache: noCache,",
-    "      }),",
-    "    }));",
-    "    if (!res.ok && res.status !== 503 && res.status >= 500) return null;",
-    "    if (!noCache && method === \"GET\" && res.ok && res.headers.get(\"Content-Type\")?.includes(\"text/html\")) {",
-    "      const html = await res.clone().text();",
-    "      ctx.waitUntil(kvPut(env, `php:${sid}:${url.pathname}${url.search}`, html, 3600));",
-    "    }",
-    "    return res;",
+    "    const r = await fetch(base + url.pathname + url.search);",
+    "    return r.ok ? r : null;",
     "  } catch { return null; }",
     "}",
     "",
     "export default {",
     "  async fetch(req, env, ctx) {",
-    "    const url    = new URL(req.url);",
-    "    const path   = url.pathname;",
-    "    const method = req.method.toUpperCase();",
-    "    const sid    = getSiteId(env);",
+    "    const url = new URL(req.url);",
+    "    const path = url.pathname;",
+    "    const cacheKey = `mirror:${ghOwner(env)}/${ghRepo(env)}:${path}${url.search}`;",
     "",
-    "    // CORS",
-    "    if (method === \"OPTIONS\") return new Response(null, { status: 204, headers: {",
-    "      \"Access-Control-Allow-Origin\": \"*\",",
-    "      \"Access-Control-Allow-Methods\": \"GET,POST,PUT,DELETE,PATCH,OPTIONS\",",
-    "      \"Access-Control-Allow-Headers\": \"Content-Type,Authorization,X-WP-Nonce\",",
-    "    }});",
-    "",
-    "    // 헬스체크",
-    "    if (path === \"/_health\") return new Response(",
-    "      JSON.stringify({ ok: true, site: sid, php: !!env.PHP_RUNNER, kv: !!env.CACHE }),",
-    "      { headers: { \"Content-Type\": \"application/json\" } }",
-    "    );",
-    "",
-    "    // ── 1. 정적 파일 ────────────────────────────────────────────────────────",
-    "    if (STATIC_EXT.test(path)) {",
-    "      const fp = path.slice(1);",
-    "      const ckey = `static:${sid}:${fp}`;",
-    "      const cached = await kvGetBuf(env, ckey);",
-    "      if (cached) return new Response(cached, { headers: { \"Content-Type\": mime(fp), \"Cache-Control\": \"public,max-age=3600\", \"X-Cache\": \"HIT\", ...SEC }});",
-    "      const gr = await ghRaw(env, fp);",
-    "      if (gr) {",
-    "        const buf = await gr.arrayBuffer();",
-    "        ctx.waitUntil(kvPut(env, ckey, buf, path.startsWith(\"/wp-content/\") ? 3600 : 86400));",
-    "        return new Response(buf, { headers: {",
-    "          \"Content-Type\": mime(fp),",
-    "          \"Cache-Control\": path.startsWith(\"/wp-content/\") ? \"public,max-age=3600\" : \"public,max-age=86400,immutable\",",
-    "          ...SEC,",
-    "        }});",
-    "      }",
-    "      if (path.startsWith(\"/wp-includes/\") || path.startsWith(\"/wp-admin/\")) {",
-    "        const cr = await wpCdn(fp);",
-    "        if (cr) {",
-    "          const buf = await cr.arrayBuffer();",
-    "          ctx.waitUntil(kvPut(env, ckey, buf, 86400));",
-    "          return new Response(buf, { headers: { \"Content-Type\": mime(fp), \"Cache-Control\": \"public,max-age=86400,immutable\", ...SEC }});",
-    "        }",
-    "      }",
-    "      return new Response(\"Not Found\", { status: 404 });",
+    "    // KV 캐시 HIT (정적 자산)",
+    "    if (req.method === \"GET\" && STATIC_EXT.test(path)) {",
+    "      const cached = await kvGetBuf(env, cacheKey);",
+    "      if (cached) return new Response(cached, { headers: { \"Content-Type\": mime(path), \"Cache-Control\": \"public,max-age=86400\", ...SEC } });",
     "    }",
     "",
-    "    const isLoggedIn = (req.headers.get(\"Cookie\") || \"\").includes(\"wordpress_logged_in\");",
-    "    const cacheable  = method === \"GET\" && !SKIP_CACHE.some(p => path.startsWith(p)) && !isLoggedIn;",
-    "",
-    "    // ── 2. KV HTML 캐시 ─────────────────────────────────────────────────────",
-    "    if (cacheable) {",
-    "      const cached = await kvGet(env, `php:${sid}:${path}${url.search}`);",
-    "      if (cached) return new Response(cached, { headers: {",
-    "        \"Content-Type\": \"text/html;charset=utf-8\",",
-    "        \"Cache-Control\": \"public,s-maxage=60,stale-while-revalidate=3600\",",
-    "        \"X-Cache\": \"HIT\", ...SEC,",
-    "      }});",
+    "    // dist/ 경로 결정",
+    "    // Astro SSR 빌드 결과물: dist/ 폴더",
+    "    // 정적 파일 → dist/_astro/ 또는 dist/",
+    "    // 페이지   → dist/페이지.html 또는 dist/페이지/index.html",
+    "    let distPath = \"dist\" + path;",
+    "    if (distPath.endsWith(\"/\")) distPath += \"index.html\";",
+    "    else if (!STATIC_EXT.test(path)) {",
+    "      // 확장자 없는 경로 → .html 시도 → /index.html 시도",
     "    }",
     "",
-    "    // ── 3. PHP_RUNNER → WordPress 실행 (핵심) ───────────────────────────────",
-    "    const phpRes = await runPhp(req, env, ctx);",
-    "    if (phpRes) return phpRes;",
+    "    // 1차: dist/ 직접 경로",
+    "    let res = await ghRaw(env, distPath);",
     "",
-    "    // ── 4. _cache/ 정적 HTML (PHP_RUNNER 없거나 실패 시) ────────────────────",
-    "    if (cacheable) {",
-    "      const cachePath = (path === \"/\" || path === \"\")",
-    "        ? \"_cache/index.html\"",
-    "        : `_cache${path.endsWith(\"/\") ? path : path + \"/\"}index.html`;",
-    "      const cr = await ghRaw(env, cachePath);",
-    "      if (cr) {",
-    "        const html = await cr.text();",
-    "        ctx.waitUntil(kvPut(env, `php:${sid}:${path}${url.search}`, html, 1800));",
-    "        return new Response(html, { headers: {",
-    "          \"Content-Type\": \"text/html;charset=utf-8\",",
-    "          \"Cache-Control\": \"public,s-maxage=60,stale-while-revalidate=1800\",",
-    "          \"X-Fallback\": \"gh-cache\", ...SEC,",
-    "        }});",
-    "      }",
+    "    // 2차: dist/path/index.html",
+    "    if (!res && !STATIC_EXT.test(path)) {",
+    "      const altPath = \"dist\" + (path.endsWith(\"/\") ? path : path + \"/\") + \"index.html\";",
+    "      res = await ghRaw(env, altPath);",
     "    }",
     "",
-    "    // ── 5. GitHub Pages 폴백 ────────────────────────────────────────────────",
-    "    const pagesUrl = ghPages(env);",
-    "    if (pagesUrl && cacheable) {",
-    "      try {",
-    "        const r = await fetch(`${pagesUrl}${path}`, {",
-    "          cf: { cacheEverything: true, cacheTtl: 300 },",
-    "          headers: { \"User-Agent\": \"CloudPress/10\" },",
-    "        });",
-    "        if (r.ok) {",
-    "          const html = await r.text();",
-    "          return new Response(html, { headers: {",
-    "            \"Content-Type\": \"text/html;charset=utf-8\",",
-    "            \"Cache-Control\": \"public,max-age=60\",",
-    "            \"X-Fallback\": \"github-pages\", ...SEC,",
-    "          }});",
-    "        }",
-    "      } catch {}",
+    "    // 3차: dist/path.html",
+    "    if (!res && !STATIC_EXT.test(path) && path !== \"/\") {",
+    "      res = await ghRaw(env, \"dist\" + path + \".html\");",
     "    }",
     "",
-    "    // ── 6. KV stale ─────────────────────────────────────────────────────────",
-    "    const stale = await kvGet(env, `php:${sid}:${path}${url.search}`);",
-    "    if (stale) return new Response(stale, { headers: {",
-    "      \"Content-Type\": \"text/html;charset=utf-8\",",
-    "      \"Cache-Control\": \"public,max-age=30\",",
-    "      \"X-Fallback\": \"kv-stale\", ...SEC,",
-    "    }});",
+    "    // 4차: GitHub Pages 폴백",
+    "    if (!res) res = await ghPagesFallback(env, url);",
     "",
-    "    // ── 7. 404 ──────────────────────────────────────────────────────────────",
-    "    return new Response(\"Not Found\", { status: 404, headers: { \"Content-Type\": \"text/plain\", ...SEC }});",
-    "  }",
+    "    if (!res) return new Response(\"Not Found\", { status: 404, headers: SEC });",
+    "",
+    "    const ct = res.headers.get(\"Content-Type\") || mime(distPath);",
+    "    const body = await res.arrayBuffer();",
+    "",
+    "    // KV 캐시 저장 (정적 자산)",
+    "    if (req.method === \"GET\" && STATIC_EXT.test(path)) {",
+    "      ctx.waitUntil(kvPut(env, cacheKey, body, 86400));",
+    "    }",
+    "",
+    "    return new Response(body, {",
+    "      headers: {",
+    "        \"Content-Type\": ct,",
+    "        \"Cache-Control\": STATIC_EXT.test(path) ? \"public,max-age=86400\" : \"public,max-age=60,s-maxage=300\",",
+    "        ...SEC,",
+    "      },",
+    "    });",
+    "  },",
     "};",
   ];
-
-  return lines.join("\n");
+  return lines.join("\\n");
 }
 
 // ─── wrangler.toml ────────────────────────────────────────────────────────────
@@ -674,7 +555,7 @@ GH_REPO  = "${ghRepo}"
 //   - Python으로 phpass 해시 생성 (MD5 대신)
 function buildWpInstallAction({ wpAdminUser, wpAdminPass, wpAdminEmail, siteUrl, siteName, dbPrefix }) {
   const p = dbPrefix || "wp_";
-  return `name: 🚀 WordPress 설치 + SQLite DB 초기화
+  return `name: 🚀 WordPress 설치 + Astro SSR 변환 + 빌드
 
 on:
   workflow_dispatch:
@@ -700,14 +581,19 @@ jobs:
           sudo apt-get install -y sqlite3 php-cli php-sqlite3
           echo "✅ 의존성 설치 완료"
 
+      - name: Node.js 22 설정
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
       - name: WordPress 최신버전 다운로드
         run: |
           wget -q https://wordpress.org/latest.tar.gz -O /tmp/wp.tar.gz
           tar -xzf /tmp/wp.tar.gz -C /tmp/
-          WP_VER=\$(grep "wp_version" /tmp/wordpress/wp-includes/version.php | grep -oP "[\\d.]+" | head -1)
-          echo "📥 WordPress \${WP_VER} 다운로드 완료"
+          WP_VER=\\$(grep "wp_version" /tmp/wordpress/wp-includes/version.php | grep -oP "[\\d.]+" | head -1)
+          echo "📥 WordPress \\${WP_VER} 다운로드 완료"
           rsync -a --exclude='wp-config.php' --exclude='wp-config-sample.php' /tmp/wordpress/ ./
-          echo "✅ WordPress 파일 설치: \$(find . -name '*.php' -not -path './.git/*' | wc -l)개 PHP 파일"
+          echo "✅ WordPress 파일 설치: \\$(find . -name '*.php' -not -path './.git/*' | wc -l)개 PHP 파일"
 
       - name: SQLite Database Integration 플러그인 설치
         run: |
@@ -715,14 +601,14 @@ jobs:
           wget -q "https://downloads.wordpress.org/plugin/sqlite-database-integration.latest-stable.zip" -O /tmp/sqlite.zip
           unzip -q /tmp/sqlite.zip -d wp-content/plugins/
           PLUGIN_DIR="wp-content/plugins/sqlite-database-integration"
-          if [ -f "\${PLUGIN_DIR}/db.copy" ]; then
-            cp "\${PLUGIN_DIR}/db.copy" wp-content/db.php
+          if [ -f "\\${PLUGIN_DIR}/db.copy" ]; then
+            cp "\\${PLUGIN_DIR}/db.copy" wp-content/db.php
             echo "✅ db.php 드롭인 설치 완료 (db.copy)"
-          elif [ -f "\${PLUGIN_DIR}/db.php" ]; then
-            cp "\${PLUGIN_DIR}/db.php" wp-content/db.php
+          elif [ -f "\\${PLUGIN_DIR}/db.php" ]; then
+            cp "\\${PLUGIN_DIR}/db.php" wp-content/db.php
             echo "✅ db.php 드롭인 설치 완료 (db.php)"
           else
-            echo "❌ db.php 없음"; ls "\${PLUGIN_DIR}/"; exit 1
+            echo "❌ db.php 없음"; ls "\\${PLUGIN_DIR}/"; exit 1
           fi
 
       - name: Twenty Twenty-Four 테마 설치
@@ -735,23 +621,9 @@ jobs:
             echo "✅ 테마 이미 존재"
           fi
 
-      - name: WP-Rocket 플러그인 설치
-        run: |
-          mkdir -p wp-content/plugins/wp-rocket
-          if [ -f "_plugins/wp-rocket.zip" ]; then
-            unzip -q _plugins/wp-rocket.zip -d wp-content/plugins/
-            echo "✅ WP-Rocket 설치 완료 (zip에서)"
-          elif [ -d "_plugins/wp-rocket" ]; then
-            cp -r _plugins/wp-rocket/. wp-content/plugins/wp-rocket/
-            echo "✅ WP-Rocket 설치 완료 (폴더에서)"
-          else
-            echo "⚠️ wp-rocket 플러그인 소스 없음 — 건너뜀"
-          fi
-
       - name: AIBP Pro 플러그인 설치
         run: |
           mkdir -p wp-content/plugins/aibp-pro
-          # GitHub 레포에서 aibp-pro 파일 복사 (초기 push 때 포함됨)
           if [ -d "_plugins/aibp-pro" ]; then
             cp -r _plugins/aibp-pro/. wp-content/plugins/aibp-pro/
             echo "✅ AIBP Pro 설치 완료 (레포에서)"
@@ -768,33 +640,33 @@ jobs:
           SITE_NAME: ${siteName}
           DB_PREFIX: ${p}
         run: |
-          NOW=\$(date -u +"%Y-%m-%d %H:%M:%S")
-          PFX="\$DB_PREFIX"
+          NOW=\\$(date -u +"%Y-%m-%d %H:%M:%S")
+          PFX="\\$DB_PREFIX"
           DB="_db/wordpress.db"
 
           echo "🗄️ SQLite DB 테이블 생성 중..."
-          sqlite3 "\$DB" "CREATE TABLE IF NOT EXISTS \${PFX}options (option_id INTEGER PRIMARY KEY AUTOINCREMENT, option_name TEXT NOT NULL DEFAULT '' UNIQUE, option_value TEXT NOT NULL DEFAULT '', autoload TEXT NOT NULL DEFAULT 'yes');"
-          sqlite3 "\$DB" "CREATE TABLE IF NOT EXISTS \${PFX}users (ID INTEGER PRIMARY KEY AUTOINCREMENT, user_login TEXT NOT NULL DEFAULT '', user_pass TEXT NOT NULL DEFAULT '', user_nicename TEXT NOT NULL DEFAULT '', user_email TEXT NOT NULL DEFAULT '', user_url TEXT NOT NULL DEFAULT '', user_registered TEXT NOT NULL DEFAULT '', user_activation_key TEXT NOT NULL DEFAULT '', user_status INTEGER NOT NULL DEFAULT 0, display_name TEXT NOT NULL DEFAULT '');"
-          sqlite3 "\$DB" "CREATE TABLE IF NOT EXISTS \${PFX}usermeta (umeta_id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL DEFAULT 0, meta_key TEXT DEFAULT NULL, meta_value TEXT DEFAULT NULL);"
-          sqlite3 "\$DB" "CREATE TABLE IF NOT EXISTS \${PFX}posts (ID INTEGER PRIMARY KEY AUTOINCREMENT, post_author INTEGER NOT NULL DEFAULT 0, post_date TEXT NOT NULL DEFAULT '', post_date_gmt TEXT NOT NULL DEFAULT '', post_content TEXT NOT NULL DEFAULT '', post_title TEXT NOT NULL DEFAULT '', post_excerpt TEXT NOT NULL DEFAULT '', post_status TEXT NOT NULL DEFAULT 'publish', comment_status TEXT NOT NULL DEFAULT 'open', ping_status TEXT NOT NULL DEFAULT 'open', post_password TEXT NOT NULL DEFAULT '', post_name TEXT NOT NULL DEFAULT '', to_ping TEXT NOT NULL DEFAULT '', pinged TEXT NOT NULL DEFAULT '', post_modified TEXT NOT NULL DEFAULT '', post_modified_gmt TEXT NOT NULL DEFAULT '', post_content_filtered TEXT NOT NULL DEFAULT '', post_parent INTEGER NOT NULL DEFAULT 0, guid TEXT NOT NULL DEFAULT '', menu_order INTEGER NOT NULL DEFAULT 0, post_type TEXT NOT NULL DEFAULT 'post', post_mime_type TEXT NOT NULL DEFAULT '', comment_count INTEGER NOT NULL DEFAULT 0);"
-          sqlite3 "\$DB" "CREATE TABLE IF NOT EXISTS \${PFX}postmeta (meta_id INTEGER PRIMARY KEY AUTOINCREMENT, post_id INTEGER NOT NULL DEFAULT 0, meta_key TEXT DEFAULT NULL, meta_value TEXT DEFAULT NULL);"
-          sqlite3 "\$DB" "CREATE TABLE IF NOT EXISTS \${PFX}comments (comment_ID INTEGER PRIMARY KEY AUTOINCREMENT, comment_post_ID INTEGER NOT NULL DEFAULT 0, comment_author TEXT NOT NULL DEFAULT '', comment_author_email TEXT NOT NULL DEFAULT '', comment_author_url TEXT NOT NULL DEFAULT '', comment_author_IP TEXT NOT NULL DEFAULT '', comment_date TEXT NOT NULL DEFAULT '', comment_date_gmt TEXT NOT NULL DEFAULT '', comment_content TEXT NOT NULL DEFAULT '', comment_karma INTEGER NOT NULL DEFAULT 0, comment_approved TEXT NOT NULL DEFAULT '1', comment_agent TEXT NOT NULL DEFAULT '', comment_type TEXT NOT NULL DEFAULT 'comment', comment_parent INTEGER NOT NULL DEFAULT 0, user_id INTEGER NOT NULL DEFAULT 0);"
-          sqlite3 "\$DB" "CREATE TABLE IF NOT EXISTS \${PFX}commentmeta (meta_id INTEGER PRIMARY KEY AUTOINCREMENT, comment_id INTEGER NOT NULL DEFAULT 0, meta_key TEXT DEFAULT NULL, meta_value TEXT DEFAULT NULL);"
-          sqlite3 "\$DB" "CREATE TABLE IF NOT EXISTS \${PFX}terms (term_id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL DEFAULT '', slug TEXT NOT NULL DEFAULT '', term_group INTEGER NOT NULL DEFAULT 0);"
-          sqlite3 "\$DB" "CREATE TABLE IF NOT EXISTS \${PFX}term_taxonomy (term_taxonomy_id INTEGER PRIMARY KEY AUTOINCREMENT, term_id INTEGER NOT NULL DEFAULT 0, taxonomy TEXT NOT NULL DEFAULT '', description TEXT NOT NULL DEFAULT '', parent INTEGER NOT NULL DEFAULT 0, count INTEGER NOT NULL DEFAULT 0);"
-          sqlite3 "\$DB" "CREATE TABLE IF NOT EXISTS \${PFX}term_relationships (object_id INTEGER NOT NULL DEFAULT 0, term_taxonomy_id INTEGER NOT NULL DEFAULT 0, term_order INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (object_id, term_taxonomy_id));"
-          sqlite3 "\$DB" "CREATE TABLE IF NOT EXISTS \${PFX}links (link_id INTEGER PRIMARY KEY AUTOINCREMENT, link_url TEXT NOT NULL DEFAULT '', link_name TEXT NOT NULL DEFAULT '', link_image TEXT NOT NULL DEFAULT '', link_target TEXT NOT NULL DEFAULT '', link_description TEXT NOT NULL DEFAULT '', link_visible TEXT NOT NULL DEFAULT 'Y', link_owner INTEGER NOT NULL DEFAULT 1, link_rating INTEGER NOT NULL DEFAULT 0, link_updated TEXT NOT NULL DEFAULT '', link_rel TEXT NOT NULL DEFAULT '', link_notes TEXT NOT NULL DEFAULT '', link_rss TEXT NOT NULL DEFAULT '');"
+          sqlite3 "\\$DB" "CREATE TABLE IF NOT EXISTS \\${PFX}options (option_id INTEGER PRIMARY KEY AUTOINCREMENT, option_name TEXT NOT NULL DEFAULT '' UNIQUE, option_value TEXT NOT NULL DEFAULT '', autoload TEXT NOT NULL DEFAULT 'yes');"
+          sqlite3 "\\$DB" "CREATE TABLE IF NOT EXISTS \\${PFX}users (ID INTEGER PRIMARY KEY AUTOINCREMENT, user_login TEXT NOT NULL DEFAULT '', user_pass TEXT NOT NULL DEFAULT '', user_nicename TEXT NOT NULL DEFAULT '', user_email TEXT NOT NULL DEFAULT '', user_url TEXT NOT NULL DEFAULT '', user_registered TEXT NOT NULL DEFAULT '', user_activation_key TEXT NOT NULL DEFAULT '', user_status INTEGER NOT NULL DEFAULT 0, display_name TEXT NOT NULL DEFAULT '');"
+          sqlite3 "\\$DB" "CREATE TABLE IF NOT EXISTS \\${PFX}usermeta (umeta_id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL DEFAULT 0, meta_key TEXT DEFAULT NULL, meta_value TEXT DEFAULT NULL);"
+          sqlite3 "\\$DB" "CREATE TABLE IF NOT EXISTS \\${PFX}posts (ID INTEGER PRIMARY KEY AUTOINCREMENT, post_author INTEGER NOT NULL DEFAULT 0, post_date TEXT NOT NULL DEFAULT '', post_date_gmt TEXT NOT NULL DEFAULT '', post_content TEXT NOT NULL DEFAULT '', post_title TEXT NOT NULL DEFAULT '', post_excerpt TEXT NOT NULL DEFAULT '', post_status TEXT NOT NULL DEFAULT 'publish', comment_status TEXT NOT NULL DEFAULT 'open', ping_status TEXT NOT NULL DEFAULT 'open', post_password TEXT NOT NULL DEFAULT '', post_name TEXT NOT NULL DEFAULT '', to_ping TEXT NOT NULL DEFAULT '', pinged TEXT NOT NULL DEFAULT '', post_modified TEXT NOT NULL DEFAULT '', post_modified_gmt TEXT NOT NULL DEFAULT '', post_content_filtered TEXT NOT NULL DEFAULT '', post_parent INTEGER NOT NULL DEFAULT 0, guid TEXT NOT NULL DEFAULT '', menu_order INTEGER NOT NULL DEFAULT 0, post_type TEXT NOT NULL DEFAULT 'post', post_mime_type TEXT NOT NULL DEFAULT '', comment_count INTEGER NOT NULL DEFAULT 0);"
+          sqlite3 "\\$DB" "CREATE TABLE IF NOT EXISTS \\${PFX}postmeta (meta_id INTEGER PRIMARY KEY AUTOINCREMENT, post_id INTEGER NOT NULL DEFAULT 0, meta_key TEXT DEFAULT NULL, meta_value TEXT DEFAULT NULL);"
+          sqlite3 "\\$DB" "CREATE TABLE IF NOT EXISTS \\${PFX}comments (comment_ID INTEGER PRIMARY KEY AUTOINCREMENT, comment_post_ID INTEGER NOT NULL DEFAULT 0, comment_author TEXT NOT NULL DEFAULT '', comment_author_email TEXT NOT NULL DEFAULT '', comment_author_url TEXT NOT NULL DEFAULT '', comment_author_IP TEXT NOT NULL DEFAULT '', comment_date TEXT NOT NULL DEFAULT '', comment_date_gmt TEXT NOT NULL DEFAULT '', comment_content TEXT NOT NULL DEFAULT '', comment_karma INTEGER NOT NULL DEFAULT 0, comment_approved TEXT NOT NULL DEFAULT '1', comment_agent TEXT NOT NULL DEFAULT '', comment_type TEXT NOT NULL DEFAULT 'comment', comment_parent INTEGER NOT NULL DEFAULT 0, user_id INTEGER NOT NULL DEFAULT 0);"
+          sqlite3 "\\$DB" "CREATE TABLE IF NOT EXISTS \\${PFX}commentmeta (meta_id INTEGER PRIMARY KEY AUTOINCREMENT, comment_id INTEGER NOT NULL DEFAULT 0, meta_key TEXT DEFAULT NULL, meta_value TEXT DEFAULT NULL);"
+          sqlite3 "\\$DB" "CREATE TABLE IF NOT EXISTS \\${PFX}terms (term_id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL DEFAULT '', slug TEXT NOT NULL DEFAULT '', term_group INTEGER NOT NULL DEFAULT 0);"
+          sqlite3 "\\$DB" "CREATE TABLE IF NOT EXISTS \\${PFX}term_taxonomy (term_taxonomy_id INTEGER PRIMARY KEY AUTOINCREMENT, term_id INTEGER NOT NULL DEFAULT 0, taxonomy TEXT NOT NULL DEFAULT '', description TEXT NOT NULL DEFAULT '', parent INTEGER NOT NULL DEFAULT 0, count INTEGER NOT NULL DEFAULT 0);"
+          sqlite3 "\\$DB" "CREATE TABLE IF NOT EXISTS \\${PFX}term_relationships (object_id INTEGER NOT NULL DEFAULT 0, term_taxonomy_id INTEGER NOT NULL DEFAULT 0, term_order INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (object_id, term_taxonomy_id));"
+          sqlite3 "\\$DB" "CREATE TABLE IF NOT EXISTS \\${PFX}links (link_id INTEGER PRIMARY KEY AUTOINCREMENT, link_url TEXT NOT NULL DEFAULT '', link_name TEXT NOT NULL DEFAULT '', link_image TEXT NOT NULL DEFAULT '', link_target TEXT NOT NULL DEFAULT '', link_description TEXT NOT NULL DEFAULT '', link_visible TEXT NOT NULL DEFAULT 'Y', link_owner INTEGER NOT NULL DEFAULT 1, link_rating INTEGER NOT NULL DEFAULT 0, link_updated TEXT NOT NULL DEFAULT '', link_rel TEXT NOT NULL DEFAULT '', link_notes TEXT NOT NULL DEFAULT '', link_rss TEXT NOT NULL DEFAULT '');"
 
           echo "📝 기본 옵션 삽입..."
-          sqlite3 "\$DB" "INSERT OR IGNORE INTO \${PFX}options (option_name,option_value,autoload) VALUES ('siteurl','\$SITE_URL','yes'),('home','\$SITE_URL','yes'),('blogname','\$SITE_NAME','yes'),('blogdescription','','yes'),('admin_email','\$ADMIN_EMAIL','yes'),('blogpublic','1','yes'),('blog_charset','UTF-8','yes'),('date_format','Y년 n월 j일','yes'),('time_format','A g:i','yes'),('start_of_week','0','yes'),('timezone_string','Asia/Seoul','yes'),('permalink_structure','/%postname%/','yes'),('template','twentytwentyfour','yes'),('stylesheet','twentytwentyfour','yes'),('current_theme','Twenty Twenty-Four','yes'),('active_plugins','a:3:{i:0;s:51:\"sqlite-database-integration/sqlite-database-integration.php\";i:1;s:24:\"wp-rocket/wp-rocket.php\";i:2;s:24:\"aibp-pro/aibp-pro.php\";}','yes'),('aibp_cf_worker_url','https://aibp100.jiji15899.workers.dev/','yes'),('wp_db_version','57155','yes'),('initial_db_version','57155','yes'),('db_version','57155','yes'),('posts_per_page','10','yes'),('default_category','1','yes'),('cp_installed_at','\$NOW','yes');"
-          sqlite3 "\$DB" "INSERT OR IGNORE INTO \${PFX}terms VALUES (1,'미분류','uncategorized',0);"
-          sqlite3 "\$DB" "INSERT OR IGNORE INTO \${PFX}term_taxonomy VALUES (1,1,'category','',0,0);"
-          sqlite3 "\$DB" "INSERT OR IGNORE INTO \${PFX}posts (ID,post_author,post_date,post_date_gmt,post_content,post_title,post_excerpt,post_status,post_name,post_modified,post_modified_gmt,post_type,guid,comment_status,ping_status,menu_order,post_parent) VALUES (1,1,'\$NOW','\$NOW','WordPress에 오신 것을 환영합니다!','안녕하세요!','','publish','hello-world','\$NOW','\$NOW','post','\$SITE_URL/?p=1','open','open',0,0);"
-          sqlite3 "\$DB" "INSERT OR IGNORE INTO \${PFX}term_relationships VALUES (1,1,0);"
-          sqlite3 "\$DB" "UPDATE \${PFX}term_taxonomy SET count=1 WHERE term_taxonomy_id=1;"
+          sqlite3 "\\$DB" "INSERT OR IGNORE INTO \\${PFX}options (option_name,option_value,autoload) VALUES ('siteurl','\\$SITE_URL','yes'),('home','\\$SITE_URL','yes'),('blogname','\\$SITE_NAME','yes'),('blogdescription','','yes'),('admin_email','\\$ADMIN_EMAIL','yes'),('blogpublic','1','yes'),('blog_charset','UTF-8','yes'),('date_format','Y년 n월 j일','yes'),('time_format','A g:i','yes'),('start_of_week','0','yes'),('timezone_string','Asia/Seoul','yes'),('permalink_structure','/%postname%/','yes'),('template','twentytwentyfour','yes'),('stylesheet','twentytwentyfour','yes'),('current_theme','Twenty Twenty-Four','yes'),('active_plugins','a:2:{i:0;s:51:\\\"sqlite-database-integration/sqlite-database-integration.php\\\";i:1;s:24:\\\"aibp-pro/aibp-pro.php\\\";}','yes'),('aibp_cf_worker_url','https://aibp100.jiji15899.workers.dev/','yes'),('wp_db_version','57155','yes'),('initial_db_version','57155','yes'),('db_version','57155','yes'),('posts_per_page','10','yes'),('default_category','1','yes'),('cp_installed_at','\\$NOW','yes');"
+          sqlite3 "\\$DB" "INSERT OR IGNORE INTO \\${PFX}terms VALUES (1,'미분류','uncategorized',0);"
+          sqlite3 "\\$DB" "INSERT OR IGNORE INTO \\${PFX}term_taxonomy VALUES (1,1,'category','',0,0);"
+          sqlite3 "\\$DB" "INSERT OR IGNORE INTO \\${PFX}posts (ID,post_author,post_date,post_date_gmt,post_content,post_title,post_excerpt,post_status,post_name,post_modified,post_modified_gmt,post_type,guid,comment_status,ping_status,menu_order,post_parent) VALUES (1,1,'\\$NOW','\\$NOW','WordPress에 오신 것을 환영합니다!','안녕하세요!','','publish','hello-world','\\$NOW','\\$NOW','post','\\$SITE_URL/?p=1','open','open',0,0);"
+          sqlite3 "\\$DB" "INSERT OR IGNORE INTO \\${PFX}term_relationships VALUES (1,1,0);"
+          sqlite3 "\\$DB" "UPDATE \\${PFX}term_taxonomy SET count=1 WHERE term_taxonomy_id=1;"
 
-          TABLES=\$(sqlite3 "\$DB" "SELECT count(*) FROM sqlite_master WHERE type='table';")
-          echo "✅ DB 초기화 완료: \${TABLES}개 테이블 | 크기: \$(du -h \$DB | cut -f1)"
+          TABLES=\\$(sqlite3 "\\$DB" "SELECT count(*) FROM sqlite_master WHERE type='table';")
+          echo "✅ DB 초기화 완료: \\${TABLES}개 테이블 | 크기: \\$(du -h \\$DB | cut -f1)"
 
       - name: 관리자 계정 생성 (phpass 해시)
         env:
@@ -804,21 +676,313 @@ jobs:
           SITE_URL: ${siteUrl}
           DB_PREFIX: ${p}
         run: |
-          NOW=\$(date -u +"%Y-%m-%d %H:%M:%S")
-          PFX="\$DB_PREFIX"
+          NOW=\\$(date -u +"%Y-%m-%d %H:%M:%S")
+          PFX="\\$DB_PREFIX"
           DB="_db/wordpress.db"
 
-          # phpass 해시 생성 (base64 인코딩으로 YAML 특수문자 충돌 완전 방지)
           echo "aW1wb3J0IGhhc2hsaWIsIG9zCnB3ID0gb3MuZW52aXJvbi5nZXQoJ0FETUlOX1BBU1MnLCAnJykKaXRvYTY0ID0gJy4vMDEyMzQ1Njc4OUFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaYWJjZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXonCmRlZiBlbmNvZGU2NChoLCBuKToKICAgIG8sIGkgPSAnJywgMAogICAgd2hpbGUgaSA8IG46CiAgICAgICAgdiA9IGhbaV07IGkgKz0gMTsgbyArPSBpdG9hNjRbdiAmIDB4M2ZdCiAgICAgICAgaWYgaSA8IG46IHYgfD0gaFtpXSA8PCA4CiAgICAgICAgbyArPSBpdG9hNjRbKHYgPj4gNikgJiAweDNmXQogICAgICAgIGlmIGkgPj0gbjogYnJlYWsKICAgICAgICBpICs9IDEKICAgICAgICBpZiBpIDwgbjogdiB8PSBoW2ldIDw8IDE2CiAgICAgICAgbyArPSBpdG9hNjRbKHYgPj4gMTIpICYgMHgzZl0KICAgICAgICBpZiBpID49IG46IGJyZWFrCiAgICAgICAgaSArPSAxOyBvICs9IGl0b2E2NFsodiA+PiAxOCkgJiAweDNmXQogICAgcmV0dXJuIG8Kc2FsdCA9ICcnLmpvaW4oW2l0b2E2NFtiICUgNjRdIGZvciBiIGluIG9zLnVyYW5kb20oOCldKQpwZnggPSAnJFAkJyArIGl0b2E2NFs4XSArIHNhbHQKY250ID0gMSA8PCA4CmIgPSBwdy5lbmNvZGUoKQpoID0gaGFzaGxpYi5tZDUoKHNhbHQgKyBwdykuZW5jb2RlKCkpLmRpZ2VzdCgpCmZvciBfIGluIHJhbmdlKGNudCk6IGggPSBoYXNobGliLm1kNShieXRlcyhoKSArIGIpLmRpZ2VzdCgpCnByaW50KHBmeCArIGVuY29kZTY0KGxpc3QoaCksIDE2KSkK" | base64 -d > /tmp/phpass.py
-          PASS_HASH=\$(python3 /tmp/phpass.py)
-          echo "  phpass 앞 6자리: \${PASS_HASH:0:6}..."
-          sqlite3 "\$DB" "INSERT OR REPLACE INTO \${PFX}users (ID,user_login,user_pass,user_nicename,user_email,user_url,user_registered,user_status,display_name) VALUES (1,'\$ADMIN_USER','\$PASS_HASH','\$ADMIN_USER','\$ADMIN_EMAIL','\$SITE_URL','\$NOW',0,'\$ADMIN_USER');"
-          sqlite3 "\$DB" "INSERT OR IGNORE INTO \${PFX}usermeta (user_id,meta_key,meta_value) VALUES (1,'\${PFX}capabilities','a:1:{s:13:\"administrator\";b:1;}');"
-          sqlite3 "\$DB" "INSERT OR IGNORE INTO \${PFX}usermeta (user_id,meta_key,meta_value) VALUES (1,'\${PFX}user_level','10');"
-          sqlite3 "\$DB" "INSERT OR IGNORE INTO \${PFX}usermeta (user_id,meta_key,meta_value) VALUES (1,'admin_color','fresh');"
-          sqlite3 "\$DB" "INSERT OR IGNORE INTO \${PFX}usermeta (user_id,meta_key,meta_value) VALUES (1,'rich_editing','1');"
-          sqlite3 "\$DB" "INSERT OR IGNORE INTO \${PFX}usermeta (user_id,meta_key,meta_value) VALUES (1,'show_admin_bar_front','1');"
-          echo "✅ 관리자 계정 생성 완료: \$ADMIN_USER"
+          PASS_HASH=\\$(python3 /tmp/phpass.py)
+          echo "  phpass 앞 6자리: \\${PASS_HASH:0:6}..."
+          sqlite3 "\\$DB" "INSERT OR REPLACE INTO \\${PFX}users (ID,user_login,user_pass,user_nicename,user_email,user_url,user_registered,user_status,display_name) VALUES (1,'\\$ADMIN_USER','\\$PASS_HASH','\\$ADMIN_USER','\\$ADMIN_EMAIL','\\$SITE_URL','\\$NOW',0,'\\$ADMIN_USER');"
+          sqlite3 "\\$DB" "INSERT OR IGNORE INTO \\${PFX}usermeta (user_id,meta_key,meta_value) VALUES (1,'\\${PFX}capabilities','a:1:{s:13:\\\"administrator\\\";b:1;}');"
+          sqlite3 "\\$DB" "INSERT OR IGNORE INTO \\${PFX}usermeta (user_id,meta_key,meta_value) VALUES (1,'\\${PFX}user_level','10');"
+          echo "✅ 관리자 계정 생성 완료: \\$ADMIN_USER"
+
+      - name: Astro SSR 프로젝트 생성 (PHP→Astro, JS→TS 변환)
+        env:
+          SITE_URL: ${siteUrl}
+          SITE_NAME: ${siteName}
+          DB_PREFIX: ${p}
+        run: |
+          echo "🔄 WordPress PHP/JS → Astro SSR (TypeScript) 변환 시작..."
+
+          # Astro 프로젝트 초기화
+          mkdir -p astro-site/src/pages astro-site/src/layouts astro-site/src/components astro-site/src/lib astro-site/public
+
+          # ── package.json ──────────────────────────────────────────────────
+          cat > astro-site/package.json << 'PKGJSON'
+          {
+            "name": "cloudpress-site",
+            "version": "1.0.0",
+            "type": "module",
+            "scripts": {
+              "dev": "astro dev",
+              "build": "astro build",
+              "preview": "astro preview"
+            },
+            "dependencies": {
+              "astro": "^5.0.0",
+              "@astrojs/cloudflare": "^12.0.0",
+              "better-sqlite3": "^11.0.0"
+            }
+          }
+          PKGJSON
+
+          # ── astro.config.mjs ──────────────────────────────────────────────
+          cat > astro-site/astro.config.mjs << 'ASTROCFG'
+          import { defineConfig } from 'astro/config';
+          import cloudflare from '@astrojs/cloudflare';
+          export default defineConfig({
+            output: 'server',
+            adapter: cloudflare({ mode: 'directory' }),
+            build: { assets: '_astro' },
+          });
+          ASTROCFG
+
+          # ── tsconfig.json ─────────────────────────────────────────────────
+          cat > astro-site/tsconfig.json << 'TSCFG'
+          {
+            "extends": "astro/tsconfigs/strict",
+            "compilerOptions": {
+              "target": "ESNext",
+              "module": "ESNext",
+              "moduleResolution": "Bundler",
+              "strict": true
+            }
+          }
+          TSCFG
+
+          # ── src/lib/db.ts — SQLite DB 접근 유틸 (JS→TS 변환) ─────────────
+          cat > astro-site/src/lib/db.ts << 'DBTS'
+          import Database from 'better-sqlite3';
+          import path from 'node:path';
+
+          // _db/wordpress.db 경로 (GitHub 레포 내)
+          const DB_PATH = path.resolve(process.cwd(), '../_db/wordpress.db');
+          const PREFIX  = process.env.DB_PREFIX ?? 'wp_';
+
+          let _db: ReturnType<typeof Database> | null = null;
+
+          export function getDb(): ReturnType<typeof Database> {
+            if (!_db) _db = new Database(DB_PATH, { readonly: true });
+            return _db;
+          }
+
+          export function getPosts(limit = 10, offset = 0) {
+            return getDb().prepare(
+              `SELECT ID, post_title, post_name, post_date, post_content, post_excerpt
+               FROM ${PREFIX}posts
+               WHERE post_status = 'publish' AND post_type = 'post'
+               ORDER BY post_date DESC
+               LIMIT ? OFFSET ?`
+            ).all(limit, offset) as WpPost[];
+          }
+
+          export function getPost(slug: string) {
+            return getDb().prepare(
+              `SELECT ID, post_title, post_name, post_date, post_content, post_excerpt, post_author
+               FROM ${PREFIX}posts
+               WHERE post_name = ? AND post_status = 'publish'`
+            ).get(slug) as WpPost | undefined;
+          }
+
+          export function getOption(key: string): string {
+            const row = getDb().prepare(
+              `SELECT option_value FROM ${PREFIX}options WHERE option_name = ?`
+            ).get(key) as { option_value: string } | undefined;
+            return row?.option_value ?? '';
+          }
+
+          export function getPages() {
+            return getDb().prepare(
+              `SELECT ID, post_title, post_name, post_date, post_content
+               FROM ${PREFIX}posts
+               WHERE post_status = 'publish' AND post_type = 'page'
+               ORDER BY menu_order ASC`
+            ).all() as WpPost[];
+          }
+
+          export interface WpPost {
+            ID: number;
+            post_title: string;
+            post_name: string;
+            post_date: string;
+            post_content: string;
+            post_excerpt: string;
+            post_author?: number;
+          }
+          DBTS
+
+          # ── src/layouts/Base.astro — 기본 레이아웃 (PHP→Astro 변환) ──────
+          cat > astro-site/src/layouts/Base.astro << 'BASELAYOUT'
+          ---
+          import { getOption } from '../lib/db';
+          const { title } = Astro.props;
+          const blogName  = getOption('blogname');
+          const blogDesc  = getOption('blogdescription');
+          const siteUrl   = getOption('siteurl');
+          ---
+          <!DOCTYPE html>
+          <html lang="ko">
+          <head>
+            <meta charset="UTF-8" />
+            <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+            <title>{title ? `${title} – ${blogName}` : blogName}</title>
+            <meta name="description" content={blogDesc} />
+            <link rel="stylesheet" href="/style.css" />
+          </head>
+          <body>
+            <header class="site-header">
+              <div class="container">
+                <a href="/" class="site-title">{blogName}</a>
+                <nav>
+                  <a href="/">홈</a>
+                  <a href="/about">소개</a>
+                </nav>
+              </div>
+            </header>
+            <main class="container">
+              <slot />
+            </main>
+            <footer class="site-footer">
+              <p>&copy; {new Date().getFullYear()} {blogName}</p>
+            </footer>
+          </body>
+          </html>
+          BASELAYOUT
+
+          # ── src/pages/index.astro — 메인 페이지 (PHP→Astro 변환) ──────────
+          cat > astro-site/src/pages/index.astro << 'INDEXPAGE'
+          ---
+          import Base from '../layouts/Base.astro';
+          import { getPosts, getOption } from '../lib/db';
+
+          const posts    = getPosts(10, 0);
+          const blogName = getOption('blogname');
+          ---
+          <Base title="">
+            <section class="post-list">
+              {posts.length === 0 && <p class="no-posts">아직 게시물이 없습니다.</p>}
+              {posts.map(post => (
+                <article class="post-card">
+                  <h2><a href={`/posts/${post.post_name}/`}>{post.post_title}</a></h2>
+                  <time datetime={post.post_date}>{new Date(post.post_date).toLocaleDateString('ko-KR')}</time>
+                  <p>{post.post_excerpt || post.post_content.replace(/<[^>]+>/g,'').slice(0,200)}</p>
+                  <a class="read-more" href={`/posts/${post.post_name}/`}>더 읽기 →</a>
+                </article>
+              ))}
+            </section>
+          </Base>
+          INDEXPAGE
+
+          # ── src/pages/posts/[slug].astro — 포스트 상세 (PHP→Astro 변환) ──
+          cat > astro-site/src/pages/posts/[slug].astro << 'POSTPAGE'
+          ---
+          import Base from '../../layouts/Base.astro';
+          import { getPost } from '../../lib/db';
+
+          const { slug } = Astro.params;
+          const post = getPost(slug ?? '');
+          if (!post) return Astro.redirect('/404');
+          ---
+          <Base title={post.post_title}>
+            <article class="single-post">
+              <header>
+                <h1>{post.post_title}</h1>
+                <time datetime={post.post_date}>{new Date(post.post_date).toLocaleDateString('ko-KR')}</time>
+              </header>
+              <div class="entry-content" set:html={post.post_content} />
+            </article>
+          </Base>
+          POSTPAGE
+
+          # ── src/pages/api/posts.ts — API Route (JS→TS 변환) ──────────────
+          cat > astro-site/src/pages/api/posts.ts << 'POSTSAPI'
+          import type { APIRoute } from 'astro';
+          import { getPosts } from '../../lib/db';
+
+          export const GET: APIRoute = ({ url }) => {
+            const limit  = Number(url.searchParams.get('limit')  ?? 10);
+            const offset = Number(url.searchParams.get('offset') ?? 0);
+            const posts  = getPosts(limit, offset);
+            return new Response(JSON.stringify({ posts, count: posts.length }), {
+              headers: { 'Content-Type': 'application/json' },
+            });
+          };
+          POSTSAPI
+
+          # ── src/pages/api/post/[slug].ts — 단일 포스트 API (JS→TS 변환) ──
+          cat > astro-site/src/pages/api/post/[slug].ts << 'POSTAPI'
+          import type { APIRoute } from 'astro';
+          import { getPost } from '../../../lib/db';
+
+          export const GET: APIRoute = ({ params }) => {
+            const post = getPost(params.slug ?? '');
+            if (!post) return new Response(JSON.stringify({ error: 'Not found' }), { status: 404 });
+            return new Response(JSON.stringify(post), {
+              headers: { 'Content-Type': 'application/json' },
+            });
+          };
+          POSTAPI
+
+          # ── public/style.css — 기존 스타일 유지 (색상/레이아웃 보존) ──────
+          # WordPress 기본 스타일에서 색상·레이아웃 추출하여 유지
+          cat > astro-site/public/style.css << 'STYLECSS'
+          /* CloudPress Astro SSR — 기존 WordPress 스타일 유지 */
+          *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+          :root {
+            --color-primary: #0073aa;
+            --color-secondary: #23282d;
+            --color-bg: #f1f1f1;
+            --color-text: #444;
+            --color-border: #e0e0e0;
+            --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            --container-max: 1100px;
+          }
+          body { font-family: var(--font-sans); color: var(--color-text); background: var(--color-bg); line-height: 1.7; }
+          .container { max-width: var(--container-max); margin: 0 auto; padding: 0 1.5rem; }
+          a { color: var(--color-primary); text-decoration: none; }
+          a:hover { text-decoration: underline; }
+
+          /* Header */
+          .site-header { background: var(--color-secondary); color: #fff; padding: 1rem 0; position: sticky; top: 0; z-index: 100; }
+          .site-header .container { display: flex; align-items: center; justify-content: space-between; }
+          .site-title { color: #fff; font-size: 1.4rem; font-weight: 700; }
+          .site-header nav a { color: #ccc; margin-left: 1.5rem; font-size: .95rem; }
+          .site-header nav a:hover { color: #fff; }
+
+          /* Main */
+          main.container { padding-top: 2rem; padding-bottom: 3rem; }
+
+          /* Post list */
+          .post-list { display: grid; gap: 1.5rem; }
+          .post-card { background: #fff; border: 1px solid var(--color-border); border-radius: 8px; padding: 1.75rem; }
+          .post-card h2 { font-size: 1.3rem; margin-bottom: .4rem; }
+          .post-card h2 a { color: var(--color-secondary); }
+          .post-card h2 a:hover { color: var(--color-primary); }
+          .post-card time { font-size: .85rem; color: #888; display: block; margin-bottom: .75rem; }
+          .post-card p { color: #555; }
+          .read-more { display: inline-block; margin-top: .75rem; color: var(--color-primary); font-size: .9rem; font-weight: 600; }
+          .no-posts { color: #888; padding: 2rem 0; text-align: center; }
+
+          /* Single post */
+          .single-post { background: #fff; border-radius: 8px; padding: 2.5rem; }
+          .single-post header { margin-bottom: 1.5rem; }
+          .single-post h1 { font-size: 2rem; color: var(--color-secondary); }
+          .single-post time { color: #888; font-size: .9rem; display: block; margin-top: .5rem; }
+          .entry-content { line-height: 1.8; }
+          .entry-content p { margin-bottom: 1rem; }
+          .entry-content h2, .entry-content h3 { margin: 1.5rem 0 .75rem; color: var(--color-secondary); }
+          .entry-content img { max-width: 100%; border-radius: 6px; }
+
+          /* Footer */
+          .site-footer { background: var(--color-secondary); color: #aaa; text-align: center; padding: 1.5rem 0; font-size: .9rem; margin-top: 3rem; }
+          STYLECSS
+
+          echo "✅ Astro SSR 프로젝트 생성 완료 (PHP→Astro, JS→TS)"
+
+      - name: Astro 의존성 설치 및 빌드 (Cloudflare adapter)
+        run: |
+          cd astro-site
+          npm install --legacy-peer-deps
+          npm run build
+          echo "✅ Astro 빌드 완료: \\$(find dist -type f | wc -l)개 파일"
+          cd ..
+
+          # dist/ 를 레포 루트로 이동 (Cloudflare Worker가 미러링)
+          rm -rf dist
+          cp -r astro-site/dist ./dist
+          echo "✅ dist/ 복사 완료"
 
       - name: wp-config.php 확인
         run: |
@@ -829,76 +993,71 @@ jobs:
           git config user.name "CloudPress Bot"
           git config user.email "bot@cloudpress.app"
           git add -A
-          TOTAL=\$(git diff --staged --name-only | wc -l | tr -d ' ')
+          TOTAL=\\$(git diff --staged --name-only | wc -l | tr -d ' ')
           if git diff --staged --quiet; then
             echo "변경사항 없음"
           else
-            git commit -m "🚀 WordPress 설치 완료 + SQLite DB 초기화 (\${TOTAL}개 파일)"
+            git commit -m "🚀 WordPress 설치 + Astro SSR 변환 + dist/ 빌드 (\\${TOTAL}개 파일)"
             git push
-            echo "✅ 커밋 완료: \${TOTAL}개 파일"
+            echo "✅ 커밋 완료: \\${TOTAL}개 파일"
           fi
-          echo "📊 레포 총 파일: \$(find . -not -path './.git/*' -type f | wc -l)개"
+          echo "📊 레포 총 파일: \\$(find . -not -path './.git/*' -type f | wc -l)개"
 `;
 }
 
 // ─── GitHub Actions: Worker 재배포 ───────────────────────────────────────────
 function buildWorkerDeployAction({ workerName }) {
-  const phpRunnerName = `${workerName}-php`;
-  return `name: ☁️ Cloudflare Worker 재배포
+  return `name: 🔄 Astro SSR 재빌드 + dist/ 업데이트
 
 on:
   workflow_dispatch:
   push:
     branches: [main]
-    paths: ['worker.js', 'php-runner.js', 'wrangler.toml', 'wrangler-php.toml']
+    paths:
+      - 'astro-site/src/**'
+      - 'astro-site/public/**'
+      - 'astro-site/astro.config.mjs'
+      - '_db/wordpress.db'
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
-  deploy:
+  build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-      - name: Node.js 22 설정 (Wrangler 필수)
+      - name: Node.js 22 설정
         uses: actions/setup-node@v4
         with:
           node-version: '22'
 
-      - name: Wrangler 설치
-        run: npm install -g wrangler@latest
-
-      - name: PHP Runner 배포 (먼저)
-        env:
-          CLOUDFLARE_API_TOKEN: \${{ vars.CF_API_TOKEN }}
-          CLOUDFLARE_API_KEY: \${{ vars.CF_API_KEY }}
-          CLOUDFLARE_EMAIL: \${{ vars.CF_EMAIL }}
-          CLOUDFLARE_ACCOUNT_ID: \${{ vars.CF_ACCOUNT_ID }}
+      - name: Astro 빌드
         run: |
-          # Global API Key 우선, 없으면 API Token 사용
-          if [ -n "\$CLOUDFLARE_API_KEY" ] && [ -n "\$CLOUDFLARE_EMAIL" ]; then
-            export CLOUDFLARE_API_TOKEN=""
-          fi
-          if [ -f "php-runner.js" ]; then
-            npx wrangler deploy --config wrangler-php.toml
-            echo "✅ PHP Runner 배포 완료: ${phpRunnerName}"
+          cd astro-site
+          npm install --legacy-peer-deps
+          npm run build
+          echo "✅ Astro 빌드 완료: \\$(find dist -type f | wc -l)개 파일"
+          cd ..
+          rm -rf dist
+          cp -r astro-site/dist ./dist
+          echo "✅ dist/ 갱신 완료"
+
+      - name: dist/ 커밋 & 푸시
+        run: |
+          git config user.name "CloudPress Bot"
+          git config user.email "bot@cloudpress.app"
+          git add dist/
+          if git diff --staged --quiet; then
+            echo "dist/ 변경 없음"
           else
-            echo "⚠️ php-runner.js 없음 — PHP Runner 배포 건너뜀"
+            git commit -m "🔄 Astro SSR 재빌드 [\\$(date '+%Y-%m-%d %H:%M')]"
+            git push
+            echo "✅ dist/ 커밋 완료"
           fi
-
-      - name: 메인 Worker 배포
-        env:
-          CLOUDFLARE_API_TOKEN: \${{ vars.CF_API_TOKEN }}
-          CLOUDFLARE_API_KEY: \${{ vars.CF_API_KEY }}
-          CLOUDFLARE_EMAIL: \${{ vars.CF_EMAIL }}
-          CLOUDFLARE_ACCOUNT_ID: \${{ vars.CF_ACCOUNT_ID }}
-        run: |
-          if [ -n "\$CLOUDFLARE_API_KEY" ] && [ -n "\$CLOUDFLARE_EMAIL" ]; then
-            export CLOUDFLARE_API_TOKEN=""
-          fi
-          npx wrangler deploy --config wrangler.toml
-          echo "✅ 메인 Worker 배포 완료: ${workerName}"
 `;
 }
 
@@ -988,28 +1147,60 @@ jobs:
 function buildReadme({ siteName, siteId, owner, repoName, workerName, siteUrl, wpAdminUser }) {
   return `# ${siteName}
 
-CloudPress로 생성된 WordPress 사이트입니다.
-
-## 사이트 정보
-- **URL**: ${siteUrl}
-- **관리자**: ${siteUrl}/wp-admin/ (ID: \`${wpAdminUser}\`)
-- **Worker 이름**: \`${workerName}\`
-- **Worker URL**: ${siteUrl}
-- **GitHub**: [${owner}/${repoName}](https://github.com/${owner}/${repoName})
+CloudPress로 생성된 WordPress → Astro SSR 사이트입니다.
 
 ## 아키텍처
 \`\`\`
-요청 → Cloudflare Worker (미러링) → PHP Runner (php-wasm) → WordPress
-                ↕                            ↕
-           KV 캐시                    GitHub 레포 (_db/wordpress.db)
+GitHub Actions (WordPress 설치 시)
+      ↓
+1. WordPress 다운로드 + SQLite DB 초기화 (_db/wordpress.db)
+2. WordPress PHP → Astro SSR (.astro) 변환
+   JavaScript → TypeScript (.ts) 변환
+3. Astro build (Cloudflare adapter) → dist/ 생성
+4. dist/ + _db/wordpress.db → 레포에 커밋
+      ↓
+Cloudflare Worker = dist/ 파일 100% 미러링
+(동적: Astro SSR API Routes가 SQLite DB 직접 처리)
+\`\`\`
+
+## 사이트 정보
+- **URL**: ${siteUrl}
+- **관리자 ID**: \`${wpAdminUser}\`
+- **Worker 이름**: \`${workerName}\`
+- **GitHub**: [${owner}/${repoName}](https://github.com/${owner}/${repoName})
+
+## 파일 구조
+\`\`\`
+├── astro-site/          ← Astro SSR 프로젝트 (PHP→Astro, JS→TS 변환)
+│   ├── src/
+│   │   ├── pages/       ← .astro 페이지 (PHP→Astro)
+│   │   │   ├── index.astro
+│   │   │   ├── posts/[slug].astro
+│   │   │   └── api/     ← API Routes (.ts, JS→TS 변환)
+│   │   ├── layouts/     ← Base.astro 레이아웃
+│   │   ├── components/  ← Astro 컴포넌트
+│   │   └── lib/
+│   │       └── db.ts    ← SQLite DB 접근 유틸 (JS→TS)
+│   └── public/          ← 정적 자산 (스타일/이미지 원본 유지)
+├── dist/                ← Astro 빌드 결과물 (Cloudflare Worker가 미러링)
+├── _db/
+│   └── wordpress.db     ← SQLite DB (GitHub 레포에 저장)
+└── .github/workflows/
+    ├── install-wordpress.yml  ← WP 설치 + Astro 변환 + 빌드
+    └── astro-rebuild.yml      ← Astro 재빌드 (콘텐츠 변경 시)
 \`\`\`
 
 ## GitHub Actions
 | 워크플로우 | 설명 |
 |-----------|------|
-| install-wordpress.yml | WordPress 설치 + SQLite DB 초기화 |
-| deploy-worker.yml | Cloudflare Worker 재배포 |
-| gh-pages-fallback.yml | 정적 캐시 갱신 (SEO 폴백) |
+| install-wordpress.yml | WordPress 설치 + SQLite DB 초기화 + Astro SSR 변환 + dist/ 빌드 |
+| astro-rebuild.yml | Astro SSR 재빌드 + dist/ 업데이트 (콘텐츠/스타일 변경 시) |
+
+## 변환 규칙
+- **PHP → Astro**: \`.php\` → \`.astro\` (레이아웃, 동적 기능, 색상, 스타일 100% 유지)
+- **JS → TS**: \`.js\` → \`.ts\` (타입 추가, 로직/기능 동일 유지)
+- **DB**: Cloudflare D1 없음 → GitHub 레포 내 \`_db/wordpress.db\` (SQLite)
+- **Worker**: 순수 미러링만 (하드코딩 없음, dist/ 내용만 서빙)
 `;
 }
 
@@ -1273,13 +1464,10 @@ export async function provisionCloudflarePagesHosting({
           content: buildWpInstallAction({ wpAdminUser, wpAdminPass, wpAdminEmail, siteUrl, siteName, dbPrefix }),
         },
         {
-          path: ".github/workflows/deploy-worker.yml",
+          path: ".github/workflows/astro-rebuild.yml",
           content: buildWorkerDeployAction({ workerName }),
         },
-        {
-          path: ".github/workflows/gh-pages-fallback.yml",
-          content: buildGhPagesAction({ siteName }),
-        },
+
         {
           path: "README.md",
           content: buildReadme({ siteName, siteId, owner, repoName, workerName, siteUrl, wpAdminUser }),
@@ -1349,8 +1537,7 @@ export async function provisionCloudflarePagesHosting({
 
   await log("━━━ 프로비저닝 완료 ━━━");
   await log(`미러링 Worker : ${workerDomain ? "✅ " + workerDomain : "⚠️ 미배포 (GitHub Actions deploy-worker.yml로 배포 가능)"}`);
-  await log(`PHP Runner    : ${phpRunnerDeployed ? "✅ " + phpRunnerName : "⚠️ 미배포 (GitHub Actions로 추후 배포)"}`);
-  await log(`KV 캐시       : ${kvCacheId ? "✅ " + kvCacheId : "⚠️ 없음"}`);
+    await log(`KV 캐시       : ${kvCacheId ? "✅ " + kvCacheId : "⚠️ 없음"}`);
   await log(`GitHub 레포   : ${githubRepoUrl || "없음"}`);
   await log(`WP 설치 Action: ${githubRepoUrl ? "🚀 실행 중 (3~5분)" : "⚠️ 미트리거"}`);
   if (workerDomain) {

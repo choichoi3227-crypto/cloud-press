@@ -886,6 +886,12 @@ import {
   onRequestPost as adminCmsPost,
 } from "./functions/api/admin/cms-settings.js";
 import {
+  onRequestGet    as adminNoticesGet,
+  onRequestPost   as adminNoticesPost,
+  onRequestPut    as adminNoticesPut,
+  onRequestDelete as adminNoticesDelete,
+} from "./functions/api/admin/notices.js";
+import {
   onRequestGet    as editorGet,
   onRequestPost   as editorPost,
 } from "./functions/api/editor.js";
@@ -965,6 +971,14 @@ async function handleApiRequest(request, env, _workerCtx = null) {
   if (path === "/api/admin/cms-settings") {
     if (method === "GET")  return runWithMiddleware(adminCmsGet);
     if (method === "POST") return runWithMiddleware(adminCmsPost);
+  }
+
+  // ── 공지 관리
+  if (path === "/api/admin/notices" || path.startsWith("/api/admin/notices/")) {
+    if (method === "GET")    return runWithMiddleware(adminNoticesGet);
+    if (method === "POST")   return runWithMiddleware(adminNoticesPost);
+    if (method === "PUT")    return runWithMiddleware(adminNoticesPut);
+    if (method === "DELETE") return runWithMiddleware(adminNoticesDelete);
   }
 
   // ── 관리자 (stats, users, sites, settings, quota-stats)

@@ -464,10 +464,11 @@ export async function onRequestDelete(context) {
 
   // ── 7. DB 레코드 삭제 ────────────────────────────────────────────────────
   try {
-    await env.DB.prepare("DELETE FROM domain_aliases WHERE site_id = ?").bind(id).run();
-    await env.DB.prepare("DELETE FROM site_ssh_keys  WHERE site_id = ?").bind(id).run();
-    await env.DB.prepare("DELETE FROM php_logs        WHERE site_id = ?").bind(id).run();
-    await env.DB.prepare("DELETE FROM sites           WHERE id = ?").bind(id).run();
+    await env.DB.prepare("DELETE FROM domain_aliases  WHERE site_id = ?").bind(id).run();
+    await env.DB.prepare("DELETE FROM site_ssh_keys   WHERE site_id = ?").bind(id).run();
+    await env.DB.prepare("DELETE FROM php_logs         WHERE site_id = ?").bind(id).run();
+    await env.DB.prepare("DELETE FROM file_snapshots   WHERE site_id = ?").bind(id).run();
+    await env.DB.prepare("DELETE FROM sites            WHERE id = ?").bind(id).run();
   } catch (e) {
     return jsonErr("DB 삭제 오류: " + e.message, 500);
   }

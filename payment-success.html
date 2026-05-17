@@ -85,8 +85,59 @@ const planNames = { starter: '스타터 플랜', pro: '프로 플랜' };
 
 (async () => {
     const params = new URLSearchParams(location.search);
+    const type = params.get('type');
 
-    // 토스 결제 성공 리다이렉트 파라미터
+    // ── 빌링키 등록 (카드 추가) 흐름 ────────────────────────────────
+    if (type === 'billing') {
+        const authKey     = params.get('authKey');
+        const customerKey = params.get('customerKey');
+
+        if (!authKey || !customerKey) {
+            showError('빌링 인증 정보가 올바르지 않습니다.');
+            return;
+        }
+        if (!TOKEN) {
+            showError('로그인이 필요합니다.');
+            return;
+        }
+
+        try {
+            const res  = await fetch('/api/payment/billing-key', {
+                method: 'POST',
+                headers: HEADERS,
+                body: JSON.stringify({ auth_key: authKey, customer_key: customerKey }),
+            });
+            const text = await res.text();
+            let data;
+            try { data = JSON.parse(text); } catch { throw new Error('서버 응답 오류'); }
+
+            if (!res.ok) throw new Error(data.error || '카드 등록 실패');
+
+            // 성공 화면 (카드 등록용)
+            document.getElementById('state-loading').classList.add('hidden');
+            document.getElementById('state-success').classList.remove('hidden');
+
+            document.getElementById('success-msg').textContent = '카드가 성공적으로 등록되었습니다!';
+            document.getElementById('success-expire').textContent =
+                data.card?.brand && data.card?.last4
+                    ? `등록 카드: ${data.card.brand} •••• ${data.card.last4}`
+                    : '결제 수단 목록에서 확인하세요.';
+
+            document.getElementById('info-plan').textContent   = '카드 등록';
+            document.getElementById('info-amount').textContent = '-';
+            document.getElementById('info-expire').textContent = '-';
+
+            document.getElementById('link-console').href = '/payment';
+            document.getElementById('link-console').innerHTML =
+                '<i class="fas fa-credit-card mr-2"></i>결제 수단 관리로 이동';
+
+        } catch (e) {
+            showError(e.message);
+        }
+        return;
+    }
+
+    // ── 일반 결제 흐름 ───────────────────────────────────────────────
     const paymentKey = params.get('paymentKey');
     const orderId    = params.get('orderId');
     const amount     = params.get('amount');

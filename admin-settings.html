@@ -497,6 +497,53 @@
             챗봇 처리 순서: <strong>정해진 스크립트</strong> → <strong>Cloudflare AI</strong> → <strong>Gemini (폴백)</strong>
         </div>
     </div>
+
+    <!-- ── 내장 플러그인 관리 ── -->
+    <div class="section-card space-y-4">
+        <div class="flex items-center gap-3 mb-2">
+            <i class="fas fa-puzzle-piece text-green-400 text-lg"></i>
+            <div>
+                <div class="font-bold text-white">내장 플러그인 관리</div>
+                <div class="text-xs text-gray-500">호스팅 생성 시 자동으로 설치되는 플러그인</div>
+            </div>
+        </div>
+
+        <!-- aibp-pro (내장) -->
+        <div class="bg-white/5 border border-white/10 rounded-xl p-4">
+            <div class="flex items-center justify-between">
+                <div>
+                    <div class="font-bold text-sm text-white">AIBP Pro <span class="text-xs text-green-400 ml-2">내장됨</span></div>
+                    <div class="text-xs text-gray-500 mt-0.5">AI 블로그 자동 작성 · 이미지 생성 URL: <code class="bg-white/10 px-1 rounded">https://aibp100.jiji15899.workers.dev/</code></div>
+                </div>
+                <span class="text-xs bg-green-500/20 text-green-400 border border-green-500/30 px-2 py-1 rounded-full">✅ 준비됨</span>
+            </div>
+        </div>
+
+        <!-- wp-rocket (KV 업로드) -->
+        <div class="bg-white/5 border border-white/10 rounded-xl p-4 space-y-3">
+            <div class="flex items-center justify-between">
+                <div>
+                    <div class="font-bold text-sm text-white">WP Rocket</div>
+                    <div class="text-xs text-gray-500 mt-0.5">캐싱 & 성능 최적화 플러그인 (zip 업로드 필요)</div>
+                </div>
+                <span id="wprocket-status-badge" class="text-xs px-2 py-1 rounded-full border">확인 중...</span>
+            </div>
+            <div class="text-xs text-gray-500 font-bold uppercase tracking-wider mb-1">WP Rocket zip 업로드</div>
+            <div class="flex items-center gap-3">
+                <input type="file" id="wprocket-zip-input" accept=".zip" class="hidden">
+                <label for="wprocket-zip-input"
+                    class="cursor-pointer border border-white/20 px-3 py-2 rounded-xl text-xs hover:bg-white/5 transition flex items-center gap-2">
+                    <i class="fas fa-folder-open"></i> <span id="wprocket-file-label">wp-rocket.zip 선택</span>
+                </label>
+                <button onclick="uploadWpRocket()"
+                    id="wprocket-upload-btn"
+                    class="bg-green-700 hover:bg-green-600 transition px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2">
+                    <i class="fas fa-upload"></i> 업로드
+                </button>
+            </div>
+            <div id="wprocket-alert" class="hidden p-3 rounded-xl text-sm"></div>
+        </div>
+    </div>
 </main>
 
 <script src="/src/auth-frontend.js"></script>
@@ -953,6 +1000,72 @@ async function saveGeminiModel() {
         showAlert(alertEl, data.message + ` (${data.model})`, 'success');
     } catch (e) { showAlert(alertEl, e.message, 'error'); }
 }
+
+// ── WP Rocket 업로드 ────────────────────────────────────────────────────
+document.getElementById('wprocket-zip-input')?.addEventListener('change', function() {
+    const file = this.files[0];
+    if (file) {
+        document.getElementById('wprocket-file-label').textContent = file.name;
+    }
+});
+
+async function uploadWpRocket() {
+    const input  = document.getElementById('wprocket-zip-input');
+    const btn    = document.getElementById('wprocket-upload-btn');
+    const alertEl = document.getElementById('wprocket-alert');
+    const file   = input?.files[0];
+
+    if (!file) { showAlert(alertEl, 'zip 파일을 선택하세요.', 'error'); return; }
+    if (!file.name.endsWith('.zip')) { showAlert(alertEl, 'zip 파일만 업로드 가능합니다.', 'error'); return; }
+    if (file.size > 20 * 1024 * 1024) { showAlert(alertEl, '파일 크기가 20MB를 초과합니다.', 'error'); return; }
+
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 업로드 중...';
+    showAlert(alertEl, '업로드 중... 파일 크기에 따라 1~2분 소요될 수 있습니다.', 'info');
+
+    try {
+        const b64 = await new Promise((res, rej) => {
+            const r = new FileReader();
+            r.onload  = () => res(r.result.split(',')[1]);
+            r.onerror = () => rej(new Error('파일 읽기 실패'));
+            r.readAsDataURL(file);
+        });
+
+        const resp = await fetch('/api/admin/plugins', {
+            method: 'POST',
+            headers: HEADERS(),
+            body: JSON.stringify({ slug: 'wp-rocket', filename: file.name, size: file.size, data: b64 }),
+        });
+        const data = await resp.json();
+        if (!resp.ok) throw new Error(data.error || '업로드 실패');
+        showAlert(alertEl, `✅ WP Rocket 업로드 완료 (${(file.size/1024/1024).toFixed(1)}MB)`, 'success');
+        await loadPluginStatus();
+    } catch (e) {
+        showAlert(alertEl, e.message, 'error');
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="fas fa-upload"></i> 업로드';
+    }
+}
+
+async function loadPluginStatus() {
+    try {
+        const res  = await fetch('/api/admin/plugins', { headers: HEADERS() });
+        const data = await res.json();
+        if (!res.ok) return;
+        const badge = document.getElementById('wprocket-status-badge');
+        if (!badge) return;
+        const wp = data.plugins?.find(p => p.slug === 'wp-rocket');
+        if (wp?.status === 'ready') {
+            badge.textContent = '✅ 준비됨';
+            badge.className = 'text-xs bg-green-500/20 text-green-400 border border-green-500/30 px-2 py-1 rounded-full';
+        } else {
+            badge.textContent = '⚠️ 미업로드';
+            badge.className = 'text-xs bg-yellow-500/20 text-yellow-400 border border-yellow-500/30 px-2 py-1 rounded-full';
+        }
+    } catch {}
+}
+loadPluginStatus();
 </script>
 </body>
 </html>

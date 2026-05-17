@@ -2,12 +2,13 @@
 # 플랫폼 메타데이터 Worker (Cloudflare Pages Functions)
 #
 # 호스팅 방식:
-#   GitHub 레포 (스토리지) → Cloudflare Pages (배포, 미러링)
-#   실제 업로드 시 모든 파일을 GitHub 레포에 미러링
+#   GitHub 레포 (스토리지) → Cloudflare Worker (dist/ 순수 미러링)
+#   WordPress PHP → Astro SSR (GitHub Actions에서 자동 변환 + 빌드)
+#   Astro SSR dist/ → GitHub 레포에 커밋 → Worker가 미러링
 #
 # DB:    Cloudflare D1 (플랫폼 메타데이터)
-# Cache: Cloudflare KV (세션/PHP출력/정적자산)
-# PHP:   cloudpress-php Service Binding (php-wasm)
+# Cache: Cloudflare KV (세션)
+# PHP:   없음 — GitHub Actions에서 Astro SSR로 변환됨
 
 name = "cloud-press"
 main = "worker.js"
@@ -30,25 +31,10 @@ database_id   = "a04d0702-b6d8-49d3-8e57-b81ee5028ac7"
 binding = "SESSIONS"
 id      = "19e5e273e99941fbb963300e56dbdf9e"
 
-# ── KV: PHP 출력 캐시 + 정적 자산 캐시 ──────────────────────────────────────
-[[kv_namespaces]]
-binding = "CACHE"
-id      = "9b8370d20a9646b9aa73f63c9200379f"
-
 # ── KV: 설치 상태 / 기타 ─────────────────────────────────────────────────────
 [[kv_namespaces]]
 binding = "KV"
 id      = "9b8370d20a9646b9aa73f63c9200379f"
-
-# ── PHP Runner: 진짜 WordPress PHP 실행 (php-wasm) ────────────────────────────
-# 플랫폼 메인 Worker(cloud-press)는 PHP를 직접 실행하지 않습니다.
-# PHP 실행은 각 사이트별 Worker가 cloudpress-php Service Binding으로 처리합니다.
-#
-# 배포 순서:
-#   1. wrangler deploy --config wrangler-php.toml   ← cloudpress-php 먼저 배포
-#   2. wrangler deploy                               ← 메인 플랫폼 Worker 배포
-#
-# (package.json의 "deploy" 스크립트가 이 순서를 자동으로 처리합니다)
 
 # ── Secrets (wrangler secret put 명령으로 설정) ───────────────────────────────
 #
@@ -67,11 +53,11 @@ id      = "9b8370d20a9646b9aa73f63c9200379f"
 #     ← Cloudflare 계정 ID
 
 [vars]
-# 플랫폼 도메인 (Cloudflare Pages .pages.dev 또는 커스텀 도메인)
+# 플랫폼 도메인
 PLATFORM_DOMAIN = "cloud-press.co.kr"
 
-# WordPress 버전
-WP_VERSION = "latest"
+# WordPress → Astro 변환 활성화
+ASTRO_CONVERT = "true"
 
 [observability]
 enabled            = false

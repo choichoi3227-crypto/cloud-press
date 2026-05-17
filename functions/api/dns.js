@@ -66,25 +66,37 @@ export async function onRequestGet(context) {
   const zoneId = await getZoneId(env, payload.id, domain);
   if (!zoneId) return jsonErr("Cloudflare Zone을 찾을 수 없습니다. 도메인을 먼저 등록해주세요.", 404);
 
-  const res = await cfReq("GET", `/zones/${zoneId}/dns_records?per_page=100`, user.cf_global_api_key, user.cf_email);
-  if (!res.success) {
-    return jsonErr(res.errors?.[0]?.message || "DNS 레코드를 가져오지 못했습니다.", 500);
+  // DNS 레코드 + Zone 정보를 병렬로 조회
+  const [recsRes, zoneRes] = await Promise.all([
+    cfReq("GET", `/zones/${zoneId}/dns_records?per_page=100&order=type`, user.cf_global_api_key, user.cf_email),
+    cfReq("GET", `/zones/${zoneId}`, user.cf_global_api_key, user.cf_email),
+  ]);
+
+  if (!recsRes.success) {
+    return jsonErr(recsRes.errors?.[0]?.message || "DNS 레코드를 가져오지 못했습니다.", 500);
   }
 
-  const records = (res.result || []).map(r => ({
-    id:        r.id,
-    type:      r.type,
-    name:      r.name,
-    content:   r.content,
-    ttl:       r.ttl,
-    proxied:   r.proxied,
-    priority:  r.priority,
-    zone_id:   r.zone_id,
-    created_on: r.created_on,
+  const records = (recsRes.result || []).map(r => ({
+    id:          r.id,
+    type:        r.type,
+    name:        r.name,
+    content:     r.content,
+    ttl:         r.ttl,
+    proxied:     r.proxied,
+    priority:    r.priority,
+    zone_id:     r.zone_id,
+    created_on:  r.created_on,
     modified_on: r.modified_on,
   }));
 
-  return jsonOk({ success: true, records, zone_id: zoneId });
+  // Zone 메타 정보
+  const zoneData = zoneRes.result || {};
+  const zone_status   = zoneData.status || "unknown";
+  const nameservers   = (zone_status !== "active" && zoneData.name_servers?.length)
+    ? zoneData.name_servers
+    : [];
+
+  return jsonOk({ success: true, records, zone_id: zoneId, zone_status, nameservers });
 }
 
 // ── POST (추가) ───────────────────────────────────────────────────────────────

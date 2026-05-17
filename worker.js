@@ -1130,6 +1130,7 @@ import {
 import {
   onRequestGet    as dnsGet,
   onRequestPost   as dnsPost,
+  onRequestPut    as dnsPut,
   onRequestDelete as dnsDelete,
 } from "./functions/api/dns.js";
 import {
@@ -1319,6 +1320,7 @@ async function handleApiRequest(request, env, _workerCtx = null) {
   if (path === "/api/dns") {
     if (method === "GET")    return runWithMiddleware(dnsGet);
     if (method === "POST")   return runWithMiddleware(dnsPost);
+    if (method === "PUT")    return runWithMiddleware(dnsPut);
     if (method === "DELETE") return runWithMiddleware(dnsDelete);
   }
 

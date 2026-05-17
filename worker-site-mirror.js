@@ -373,49 +373,77 @@ a.btn{display:inline-block;background:#2271b1;color:#fff;text-decoration:none;
   margin:14px 0;font-size:13px;color:#3c434a;line-height:2}
 .note{font-size:12px;color:#a7aaad;margin-top:14px}`;
 
+    // Coming Soon 공통 스타일 (워드프레스 기본 테마 느낌)
+    const comingSoonStyle = `
+      *{box-sizing:border-box;margin:0;padding:0}
+      body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Malgun Gothic,sans-serif;
+        background:#fff;color:#3c434a;display:flex;flex-direction:column;min-height:100vh}
+      header{background:#1d2327;padding:18px 32px;display:flex;align-items:center;gap:12px}
+      header svg{width:28px;height:28px;fill:#fff;opacity:.9}
+      header span{color:#fff;font-size:18px;font-weight:700;letter-spacing:-.3px}
+      .hero{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;
+        padding:60px 24px;text-align:center}
+      .emoji{font-size:64px;margin-bottom:24px;line-height:1}
+      h1{font-size:36px;font-weight:800;color:#1d2327;margin-bottom:12px;line-height:1.2}
+      .sub{font-size:16px;color:#646970;line-height:1.6;max-width:420px;margin-bottom:32px}
+      .progress-bar{width:240px;height:4px;background:#f0f0f1;border-radius:4px;overflow:hidden;margin-bottom:12px}
+      .progress-fill{height:100%;background:#2271b1;border-radius:4px;animation:prog 2s ease-in-out infinite alternate}
+      @keyframes prog{from{width:30%}to{width:80%}}
+      .status-text{font-size:13px;color:#a7aaad}
+      footer{padding:24px;text-align:center;font-size:12px;color:#a7aaad;border-top:1px solid #f0f0f1}
+    `;
+
     let statusHtml;
+    const siteHost = url.hostname || "이 사이트";
+
     if (wpInstalled) {
-      // 설치 완료, 캐시 생성 대기 중
+      // 설치 완료 — 사이트가 거의 준비된 상태
       statusHtml = `<!DOCTYPE html>
-<html lang="ko"><head><meta charset="UTF-8"><meta http-equiv="refresh" content="20">
-<title>캐시 생성 중</title>
-<style>${commonStyle}</style></head>
-<body><div class="card">
-<div class="badge" style="background:#00a32a;color:#fff">ALMOST READY</div>
-<h1>🎉 WordPress 설치 완료!</h1>
-<p>정적 캐시를 생성하고 있습니다. 잠시 후 사이트가 열립니다.<br>
-완료 후 이 페이지가 자동으로 갱신됩니다.</p>
-<ol class="steps">
-  <li>✅ GitHub 레포지토리 생성</li>
-  <li>✅ WordPress 최신버전 설치 완료</li>
-  <li>✅ 데이터베이스 초기화 완료</li>
-  <li>⏳ 정적 캐시 생성 중 (gh-pages-fallback.yml)...</li>
-</ol>
-\${ghPagesActionsUrl ? \`<a class="btn" href="\${ghPagesActionsUrl}" target="_blank">🔄 캐시 생성 진행상황 보기</a>\` : ""}
-\${repoUrl ? \` <a class="btn" style="background:#6e7d88" href="\${repoUrl}" target="_blank">📁 GitHub 레포 보기</a>\` : ""}
-<p class="note">20초마다 자동 새로고침됩니다</p>
-</div></body></html>`;
+<html lang="ko"><head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="refresh" content="20">
+<title>준비 중 — ${siteHost}</title>
+<style>${comingSoonStyle}</style>
+</head>
+<body>
+<header>
+  <svg viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg"><path d="M10 0C4.48 0 0 4.48 0 10s4.48 10 10 10 10-4.48 10-10S15.52 0 10 0zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm-1-13h2v6H9zm0 8h2v2H9z"/></svg>
+  <span>${siteHost}</span>
+</header>
+<div class="hero">
+  <div class="emoji">🚀</div>
+  <h1>사이트 준비 중입니다</h1>
+  <p class="sub">WordPress 설치가 완료되었습니다. 첫 번째 페이지가 생성되는 동안 잠시만 기다려 주세요.</p>
+  <div class="progress-bar"><div class="progress-fill"></div></div>
+  <p class="status-text">자동으로 갱신됩니다 (20초마다)</p>
+</div>
+<footer>Powered by CloudPress · WordPress Hosting</footer>
+</body></html>`;
     } else {
       // 설치 진행 중
       statusHtml = `<!DOCTYPE html>
-<html lang="ko"><head><meta charset="UTF-8"><meta http-equiv="refresh" content="30">
-<title>WordPress 준비 중</title>
-<style>${commonStyle}</style></head>
-<body><div class="card">
-<div class="badge" style="background:#f0b849;color:#fff">WORDPRESS INSTALLING</div>
-<h1>⚙️ WordPress 설치 진행 중</h1>
-<p>GitHub Actions가 WordPress 최신버전을 자동으로 설치하고 있습니다.<br>
-완료 후 이 페이지가 자동으로 갱신됩니다.</p>
-<ol class="steps">
-  <li>✅ GitHub 레포지토리 생성</li>
-  <li>⏳ WordPress 최신버전 전체 파일 설치 중...</li>
-  <li>⏳ 데이터베이스 초기화 중...</li>
-  <li>⏳ 정적 캐시 생성 중...</li>
-</ol>
-\${actionsUrl ? \`<a class="btn" href="\${actionsUrl}" target="_blank">🔄 설치 진행상황 보기</a>\` : ""}
-\${repoUrl ? \` <a class="btn" style="background:#6e7d88" href="\${repoUrl}" target="_blank">📁 GitHub 레포 보기</a>\` : ""}
-<p class="note">30초마다 자동 새로고침됩니다</p>
-</div></body></html>`;
+<html lang="ko"><head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="refresh" content="30">
+<title>설치 중 — ${siteHost}</title>
+<style>${comingSoonStyle}</style>
+</head>
+<body>
+<header>
+  <svg viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg"><path d="M10 0C4.48 0 0 4.48 0 10s4.48 10 10 10 10-4.48 10-10S15.52 0 10 0zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm-1-13h2v6H9zm0 8h2v2H9z"/></svg>
+  <span>${siteHost}</span>
+</header>
+<div class="hero">
+  <div class="emoji">⚙️</div>
+  <h1>사이트를 설정하고 있습니다</h1>
+  <p class="sub">WordPress를 자동으로 설치하고 있습니다. 보통 3~5분 정도 소요됩니다.</p>
+  <div class="progress-bar"><div class="progress-fill"></div></div>
+  <p class="status-text">자동으로 갱신됩니다 (30초마다)</p>
+</div>
+<footer>Powered by CloudPress · WordPress Hosting</footer>
+</body></html>`;
     }
 
     return new Response(statusHtml,

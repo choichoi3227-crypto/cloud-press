@@ -80,9 +80,6 @@
                 <button class="tab-btn border border-white/10 px-3 py-2 rounded-xl text-sm font-bold whitespace-nowrap" onclick="switchTab('backup',this)">
                     <i class="fas fa-archive mr-1"></i> 백업
                 </button>
-                <button class="tab-btn border border-white/10 px-3 py-2 rounded-xl text-sm font-bold whitespace-nowrap" onclick="switchTab('ssh',this)">
-                    <i class="fas fa-terminal mr-1"></i> SSH/SFTP
-                </button>
                 <button class="tab-btn border border-white/10 px-3 py-2 rounded-xl text-sm font-bold whitespace-nowrap" onclick="switchTab('domain',this)">
                     <i class="fas fa-globe mr-1"></i> 도메인
                 </button>
@@ -354,40 +351,6 @@
                 </div>
             </div>
 
-            <!-- ── SSH/SFTP 탭 ── -->
-            <div id="tab-ssh" class="tab-content hidden space-y-4">
-                <div class="section-card space-y-4">
-                    <h3 class="font-bold flex items-center gap-2"><i class="fas fa-terminal text-cyan-400"></i> SSH / SFTP 접속 정보</h3>
-                    <div class="p-3 bg-blue-900/20 border border-blue-500/20 rounded-xl text-sm text-blue-300">
-                        <i class="fas fa-info-circle mr-2"></i>
-                        아래 정보를 사용하여 SSH 클라이언트(Terminal, PuTTY 등)로 접속하세요.
-                    </div>
-                    <div id="ssh-info-content" class="space-y-3">
-                        <div class="text-center py-6 text-gray-500 text-sm">
-                            <i class="fas fa-spinner fa-spin mr-2"></i> 접속 정보 로딩 중...
-                        </div>
-                    </div>
-                </div>
-
-                <div class="section-card space-y-4">
-                    <h3 class="font-bold flex items-center gap-2"><i class="fas fa-key text-yellow-400"></i> SSH 공개키 관리</h3>
-                    <p class="text-xs text-gray-500">등록한 공개키로 비밀번호 없이 SSH/SFTP 접속이 가능합니다.</p>
-                    <div id="ssh-keys-list" class="space-y-2 mb-4">
-                        <div class="text-center py-4 text-gray-500 text-sm"><i class="fas fa-spinner fa-spin mr-2"></i> 키 목록 로딩 중...</div>
-                    </div>
-                    <div class="border-t border-white/10 pt-4 space-y-3">
-                        <p class="text-sm font-bold">공개키 등록</p>
-                        <input id="key-name" type="text" placeholder="키 이름 (예: MacBook)"
-                            class="w-full p-3 bg-white/5 border border-white/10 rounded-xl outline-none focus:border-yellow-500 transition text-sm">
-                        <textarea id="public-key" rows="3" placeholder="ssh-rsa AAAA... 또는 ssh-ed25519 AAAA..."
-                            class="w-full p-3 bg-white/5 border border-white/10 rounded-xl outline-none focus:border-yellow-500 transition text-sm font-mono resize-none"></textarea>
-                        <button onclick="addSshKey()" class="bg-yellow-700 px-5 py-2 rounded-xl font-bold hover:bg-yellow-600 transition text-sm">
-                            <i class="fas fa-plus mr-1"></i> 키 등록
-                        </button>
-                    </div>
-                </div>
-            </div>
-
             <!-- ── 도메인 탭 ── -->
             <div id="tab-domain" class="tab-content hidden space-y-4">
                 <div class="section-card bg-blue-900/10 border-blue-500/20 space-y-3">
@@ -567,7 +530,7 @@
         let   editingFilePath = '';
         let   blockedIPs = [];
 
-        if (!siteId) { alert('사이트 ID가 없습니다.'); window.location.href = '/hosting'; }
+        if (!siteId) { window.location.href = '/hosting'; }
 
         // ── 탭 전환 ──────────────────────────────────────────────────────────
         function switchTab(name, btn) {
@@ -580,7 +543,6 @@
             // 탭별 데이터 로드
             if (name === 'php') loadPhpVersions();
             else if (name === 'backup') loadBackups();
-            else if (name === 'ssh') loadSshInfo();
             else if (name === 'domain') renderDomains();
             else if (name === 'logs') loadLogs();
             else if (name === 'security') { loadCountryBlocks(); loadSuspiciousIPs(); }
@@ -972,90 +934,6 @@
                 const res  = await fetch(`/api/backups?id=${id}`, { method: 'DELETE', headers: HEADERS });
                 const data = await res.json();
                 if (res.ok) { showAlert('백업이 삭제되었습니다.'); loadBackups(); }
-                else showAlert(data.error || '삭제에 실패했습니다.', 'error');
-            } catch { showAlert('오류가 발생했습니다.', 'error'); }
-        }
-
-        // ── SSH ───────────────────────────────────────────────────────────────
-        async function loadSshInfo() {
-            // SSH 키 목록
-            try {
-                const res  = await fetch(`/api/ssh-keys?site_id=${siteId}`, { headers: HEADERS });
-                const data = await res.json();
-                const keys = data.keys || [];
-                const el   = document.getElementById('ssh-keys-list');
-                if (!keys.length) {
-                    el.innerHTML = '<p class="text-sm text-gray-500 text-center py-3">등록된 SSH 키가 없습니다.</p>';
-                } else {
-                    el.innerHTML = keys.map(k => `
-                        <div class="flex items-center justify-between p-3 bg-white/5 border border-white/10 rounded-xl text-sm">
-                            <div>
-                                <p class="font-bold">${escHtml(k.key_name)}</p>
-                                <p class="text-xs text-gray-500">${new Date(k.created_at).toLocaleDateString('ko-KR')}</p>
-                            </div>
-                            <button onclick="deleteSshKey(${k.id})" class="text-red-400 hover:text-red-300 transition text-xs px-2 py-1">
-                                <i class="fas fa-trash"></i>
-                            </button>
-                        </div>`).join('');
-                }
-            } catch {}
-
-            // SSH 접속 정보 표시
-            if (siteData) {
-                const host = siteData.primary_domain || 'your-domain.com';
-                document.getElementById('ssh-info-content').innerHTML = `
-                    <div class="space-y-3">
-                        <div class="grid grid-cols-2 gap-3 text-sm">
-                            <div class="bg-white/5 rounded-xl p-3">
-                                <div class="text-gray-500 text-xs mb-1">호스트</div>
-                                <code class="text-xs text-cyan-300">${escHtml(host)}</code>
-                            </div>
-                            <div class="bg-white/5 rounded-xl p-3">
-                                <div class="text-gray-500 text-xs mb-1">포트 (SSH)</div>
-                                <code class="text-xs text-cyan-300">${siteData.ssh_port || 22}</code>
-                            </div>
-                            <div class="bg-white/5 rounded-xl p-3">
-                                <div class="text-gray-500 text-xs mb-1">포트 (SFTP)</div>
-                                <code class="text-xs text-cyan-300">${siteData.sftp_port || 2222}</code>
-                            </div>
-                            <div class="bg-white/5 rounded-xl p-3">
-                                <div class="text-gray-500 text-xs mb-1">사용자</div>
-                                <code class="text-xs text-cyan-300">wp-${siteData.id?.substring(0,8) || 'user'}</code>
-                            </div>
-                        </div>
-                        <div class="p-3 bg-black/40 border border-white/10 rounded-xl">
-                            <p class="text-xs text-gray-500 mb-2">SSH 접속 명령어</p>
-                            <code class="text-xs text-green-400">ssh wp-${siteData.id?.substring(0,8) || 'user'}@${escHtml(host)} -p ${siteData.ssh_port || 22}</code>
-                        </div>
-                    </div>`;
-            }
-        }
-
-        async function addSshKey() {
-            const name = document.getElementById('key-name').value.trim();
-            const key  = document.getElementById('public-key').value.trim();
-            if (!name || !key) { showAlert('키 이름과 공개키를 입력해주세요.', 'error'); return; }
-            try {
-                const res  = await fetch('/api/ssh-keys', {
-                    method: 'POST', headers: HEADERS,
-                    body: JSON.stringify({ site_id: siteId, key_name: name, public_key: key }),
-                });
-                const data = await res.json();
-                if (res.ok && data.success) {
-                    showAlert('SSH 키가 등록되었습니다.');
-                    document.getElementById('key-name').value = '';
-                    document.getElementById('public-key').value = '';
-                    loadSshInfo();
-                } else showAlert(data.error || '등록에 실패했습니다.', 'error');
-            } catch { showAlert('오류가 발생했습니다.', 'error'); }
-        }
-
-        async function deleteSshKey(id) {
-            if (!confirm('이 SSH 키를 삭제하시겠습니까?')) return;
-            try {
-                const res  = await fetch(`/api/ssh-keys?id=${id}`, { method: 'DELETE', headers: HEADERS });
-                const data = await res.json();
-                if (res.ok) { showAlert('SSH 키가 삭제되었습니다.'); loadSshInfo(); }
                 else showAlert(data.error || '삭제에 실패했습니다.', 'error');
             } catch { showAlert('오류가 발생했습니다.', 'error'); }
         }

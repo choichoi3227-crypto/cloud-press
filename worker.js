@@ -789,51 +789,41 @@ async function handleWordPressRequest(request, env, ctx) {
     const ghRes = await serveGhPages();
     if (ghRes) return ghRes;
 
-    // 정적 캐시도 없으면 WordPress 설치 안내 (GitHub Actions 실행 유도)
-    const repoUrl = mirror.enabled
-      ? `https://github.com/${mirror.owner}/${mirror.repo}`
-      : "";
-    const actionsUrl = repoUrl
-      ? `${repoUrl}/actions/workflows/install-wordpress.yml`
-      : "";
+    // 정적 캐시도 없으면 사이트 준비 중 안내
     return new Response(`<!DOCTYPE html>
-<html lang="ko"><head><meta charset="UTF-8"><meta http-equiv="refresh" content="30">
-<title>WordPress 준비 중</title>
+<html lang="ko"><head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="refresh" content="30">
+<title>준비 중 — ${url.hostname}</title>
 <style>
-*{box-sizing:border-box}
+*{box-sizing:border-box;margin:0;padding:0}
 body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Malgun Gothic,sans-serif;
-  background:#f0f0f1;display:flex;align-items:center;justify-content:center;
-  min-height:100vh;margin:0;padding:20px}
-.card{background:#fff;border:1px solid #c3c4c7;border-radius:4px;
-  max-width:520px;width:100%;padding:40px;text-align:center}
-.icon{font-size:48px;margin-bottom:16px}
-h1{color:#1d2327;font-size:20px;font-weight:600;margin:0 0 10px}
-p{color:#646970;line-height:1.6;margin:0 0 16px;font-size:14px}
-.badge{display:inline-block;background:#f0b849;color:#fff;font-size:11px;
-  font-weight:700;padding:3px 10px;border-radius:3px;margin-bottom:14px;letter-spacing:.5px}
-a.btn{display:inline-block;background:#2271b1;color:#fff;text-decoration:none;
-  padding:8px 18px;border-radius:3px;font-size:13px;font-weight:600;margin:4px}
-.steps{text-align:left;background:#f6f7f7;border-radius:4px;padding:16px 20px;
-  margin:16px 0;font-size:13px;color:#3c434a;line-height:2}
-.steps li{margin:0}
+  background:#fff;display:flex;flex-direction:column;min-height:100vh}
+header{background:#1d2327;padding:18px 32px}
+header span{color:#fff;font-size:18px;font-weight:700}
+.hero{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;
+  padding:60px 24px;text-align:center}
+.emoji{font-size:64px;margin-bottom:24px}
+h1{font-size:34px;font-weight:800;color:#1d2327;margin-bottom:12px}
+.sub{font-size:16px;color:#646970;max-width:400px;line-height:1.6;margin-bottom:32px}
+.bar{width:220px;height:4px;background:#f0f0f1;border-radius:4px;overflow:hidden;margin-bottom:12px}
+.fill{height:100%;background:#2271b1;animation:p 2s ease-in-out infinite alternate}
+@keyframes p{from{width:20%}to{width:70%}}
+.note{font-size:13px;color:#a7aaad}
+footer{padding:20px;text-align:center;font-size:12px;color:#a7aaad;border-top:1px solid #f0f0f1}
 </style></head>
-<body><div class="card">
-<div class="icon">⚙️</div>
-<div class="badge">WORDPRESS INITIALIZING</div>
-<h1>WordPress 설치를 완료하는 중입니다</h1>
-<p>GitHub Actions 워크플로우가 WordPress를 자동으로 설치합니다.<br>
-완료 후 이 페이지가 자동으로 갱신됩니다. (30초마다)</p>
-<ol class="steps">
-  <li>✅ GitHub 레포지토리 생성 완료</li>
-  <li>⏳ GitHub Actions: WordPress 최신버전 설치 중...</li>
-  <li>⏳ GitHub Actions: 정적 캐시 생성 중...</li>
-</ol>
-${actionsUrl ? `<a class="btn" href="${actionsUrl}" target="_blank">🔄 Actions 진행상황 보기</a>` : ""}
-${repoUrl ? `<a class="btn" style="background:#6e7d88" href="${repoUrl}" target="_blank">📁 GitHub 레포 보기</a>` : ""}
-<p style="margin-top:16px;font-size:12px;color:#a7aaad">
-  CloudPress · 페이지는 30초 후 자동 새로고침됩니다
-</p>
-</div></body></html>`,
+<body>
+<header><span>${url.hostname}</span></header>
+<div class="hero">
+  <div class="emoji">⚙️</div>
+  <h1>사이트를 설정하고 있습니다</h1>
+  <p class="sub">WordPress를 설치하고 있습니다. 보통 3~5분 정도 소요됩니다.</p>
+  <div class="bar"><div class="fill"></div></div>
+  <p class="note">30초마다 자동 새로고침됩니다</p>
+</div>
+<footer>Powered by CloudPress · WordPress Hosting</footer>
+</body></html>`,
       { status: 503, headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" } }
     );
   }

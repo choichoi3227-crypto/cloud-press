@@ -198,6 +198,10 @@
                             <button onclick="verifyDomain(${d.id})" class="text-xs bg-yellow-600/20 border border-yellow-500/30 text-yellow-400 px-3 py-1.5 rounded-lg hover:bg-yellow-600/30 transition">
                                 <i class="fas fa-sync mr-1"></i> NS 확인
                             </button>` : ''}
+                            <button onclick="gotoDns('${escHtml(d.domain)}', '${d.site_id || ''}')"
+                                class="text-xs bg-purple-900/20 border border-purple-500/30 text-purple-400 px-3 py-1.5 rounded-lg hover:bg-purple-600/30 transition">
+                                <i class="fas fa-network-wired mr-1"></i> DNS 관리
+                            </button>
                             <button onclick="openConnectModal(${d.id}, '${escHtml(d.domain)}', '${d.site_id || ''}')"
                                 class="text-xs ${d.site_id ? 'bg-green-900/20 border-green-500/30 text-green-400' : 'border border-white/10 text-gray-400'} border px-3 py-1.5 rounded-lg hover:bg-white/5 transition">
                                 <i class="fas fa-link mr-1"></i> ${d.site_id ? '연결 변경' : '호스팅 연결'}
@@ -347,6 +351,12 @@
 
         function escHtml(str) {
             return String(str || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+        }
+
+        function gotoDns(domain, siteId) {
+            const params = new URLSearchParams({ domain });
+            if (siteId) params.set('site_id', siteId);
+            window.location.href = '/dns?' + params.toString();
         }
 
         loadAll();

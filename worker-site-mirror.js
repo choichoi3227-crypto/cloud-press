@@ -333,14 +333,29 @@ async function runWordPress(request, env, ctx, phpFile) {
     const ghFallback = await tryGithubPagesFallback(env, url.pathname, "PHP_RUNNER 없음");
     if (ghFallback) return ghFallback;
 
-    // 4. 설치 완료 여부 체크 (_db/wordpress.db 존재 확인)
+    // 4. 설치 완료 여부 체크
+    // wp-config.php 또는 index.php(WP 코어) 중 하나라도 있으면 설치 완료로 판단
+    // (GitHub Actions 완료 후 _db/wordpress.db는 LFS/캐시 문제로 감지 실패 가능)
     const repoUrl    = owner && repo ? `https://github.com/${owner}/${repo}` : "";
     const actionsUrl = repoUrl ? `${repoUrl}/actions/workflows/install-wordpress.yml` : "";
     const ghPagesActionsUrl = repoUrl ? `${repoUrl}/actions/workflows/gh-pages-fallback.yml` : "";
     let wpInstalled = false;
     try {
-      const dbCheck = await fetchFromGitHub(env, "_db/wordpress.db");
-      wpInstalled = !!dbCheck;
+      // wp-config.php 먼저 확인 (Actions가 생성, 항상 레포에 존재)
+      const cfgCheck = await fetchFromGitHub(env, "wp-config.php", true);
+      if (cfgCheck) {
+        wpInstalled = true;
+      } else {
+        // 폴백: wp-includes/version.php (WP 코어 설치 확인)
+        const versionCheck = await fetchFromGitHub(env, "wp-includes/version.php", true);
+        if (versionCheck) {
+          wpInstalled = true;
+        } else {
+          // 최종 폴백: _db/wordpress.db (캐시 우회)
+          const dbCheck = await fetchFromGitHub(env, "_db/wordpress.db", true);
+          wpInstalled = !!dbCheck;
+        }
+      }
     } catch {}
     // 설치 완료 여부에 따라 다른 화면 표시
     const commonStyle = `*{box-sizing:border-box}

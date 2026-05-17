@@ -301,7 +301,7 @@ hr{border:none;border-top:1px solid #dcdcde;margin:18px 0}
   <div class="setup-install-steps">
     <h1>WordPress에 오신 것을 환영합니다</h1>
     <p style="margin:0 0 16px;color:#646970">아래 정보를 입력하여 WordPress를 설치하세요. 시작하기 전에 데이터베이스 설정이 완료되어 있어야 합니다.</p>
-    ${error ? \`<div class="notice-error"><strong>오류:</strong> \${error}</div>\` : ""}
+    ${error ? '<div class="notice-error"><strong>오류:</strong> ' + error + '</div>' : ""}
     <form id="setup-form">
       <table class="form-table">
         <tr>

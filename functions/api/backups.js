@@ -99,9 +99,9 @@ export async function onRequestPost(context) {
     const backupLabel = label || `수동 백업 ${new Date().toLocaleString("ko-KR")}`;
 
     await env.DB.prepare(
-      `INSERT INTO file_snapshots (site_id, backup_path, snapshot_type, label, created_at)
-       VALUES (?, ?, 'manual', ?, ?)`
-    ).bind(site_id, backupPath, backupLabel, new Date().toISOString()).run();
+      `INSERT INTO file_snapshots (site_id, path, backup_path, snapshot_type, label, created_at)
+       VALUES (?, ?, ?, 'manual', ?, ?)`
+    ).bind(site_id, backupPath, backupPath, backupLabel, new Date().toISOString()).run();
 
     return jsonOk({ success: true, message: "백업이 생성되었습니다.", label: backupLabel });
   } catch (e) {

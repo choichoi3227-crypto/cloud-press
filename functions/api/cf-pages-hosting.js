@@ -465,7 +465,7 @@ function buildWorkerSource({ siteId, githubOwner, githubRepo, ghPagesUrl }) {
     "        skipCache: noCache,",
     "      }),",
     "    }));",
-    "    if (!res.ok && res.status >= 500) return null;",
+    "    if (!res.ok && res.status !== 503 && res.status >= 500) return null;",
     "    if (!noCache && method === \"GET\" && res.ok && res.headers.get(\"Content-Type\")?.includes(\"text/html\")) {",
     "      const html = await res.clone().text();",
     "      ctx.waitUntil(kvPut(env, `php:${sid}:${url.pathname}${url.search}`, html, 3600));",
@@ -582,7 +582,52 @@ function buildWorkerSource({ siteId, githubOwner, githubRepo, ghPagesUrl }) {
     "      \"X-Fallback\": \"kv-stale\", ...SEC,",
     "    }});",
     "",
-    "    // ── 7. 404 (고정 화면 없음) ─────────────────────────────────────────────",
+    "    // ── 7. 설치 중 페이지 또는 404 ──────────────────────────────────────────",
+    "    // GH_OWNER/GH_REPO가 있으면 아직 WordPress 설치 중 (GitHub Actions 대기 중)",
+    "    if (ghOwner(env) && ghRepo(env)) {",
+    "      const _repoUrl    = `https://github.com/${ghOwner(env)}/${ghRepo(env)}`;",
+    "      const _actionsUrl = `${_repoUrl}/actions`;",
+    "      const _html = [",
+    "        '<!DOCTYPE html><html lang=\"ko\"><head>',",
+    "        '<meta charset=\"UTF-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">',",
+    "        '<meta http-equiv=\"refresh\" content=\"30\">',",
+    "        '<title>WordPress 설치 중 — CloudPress</title>',",
+    "        '<style>',",
+    "        '*{box-sizing:border-box;margin:0;padding:0}',",
+    "        'body{font-family:-apple-system,BlinkMacSystemFont,\"Segoe UI\",sans-serif;background:#f0f2f5;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px}',",
+    "        '.card{background:#fff;border-radius:16px;padding:48px 40px;max-width:480px;width:100%;text-align:center;box-shadow:0 4px 24px rgba(0,0,0,.08)}',",
+    "        '.spinner{width:56px;height:56px;border:4px solid #e5e7eb;border-top-color:#2563eb;border-radius:50%;animation:spin 1s linear infinite;margin:0 auto 28px}',",
+    "        '@keyframes spin{to{transform:rotate(360deg)}}',",
+    "        'h1{font-size:22px;font-weight:700;color:#111827;margin-bottom:12px}',",
+    "        'p{font-size:15px;color:#6b7280;line-height:1.6;margin-bottom:8px}',",
+    "        '.steps{background:#f9fafb;border-radius:10px;padding:20px 24px;margin:24px 0;text-align:left}',",
+    "        '.step{display:flex;align-items:flex-start;gap:10px;font-size:14px;color:#374151;padding:6px 0;border-bottom:1px solid #f3f4f6}',",
+    "        '.step:last-child{border-bottom:none}',",
+    "        '.dot{width:8px;height:8px;border-radius:50%;background:#2563eb;flex-shrink:0;margin-top:5px;animation:pulse 1.5s ease-in-out infinite}',",
+    "        '@keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}',",
+    "        'a{color:#2563eb;text-decoration:none;font-weight:500}a:hover{text-decoration:underline}',",
+    "        '.note{font-size:13px;color:#9ca3af;margin-top:20px}',",
+    "        '</style></head><body>',",
+    "        '<div class=\"card\">',",
+    "        '<div class=\"spinner\"></div>',",
+    "        '<h1>WordPress 설치 중입니다</h1>',",
+    "        '<p>GitHub Actions가 WordPress를 자동으로 설치하고 있습니다.<br>보통 3~5분 정도 소요됩니다.</p>',",
+    "        '<div class=\"steps\">',",
+    "        '<div class=\"step\"><span class=\"dot\"></span><span>WordPress 파일 다운로드 및 설치</span></div>',",
+    "        '<div class=\"step\"><span class=\"dot\"></span><span>SQLite 데이터베이스 초기화</span></div>',",
+    "        '<div class=\"step\"><span class=\"dot\"></span><span>WordPress 기본 설정 완료</span></div>',",
+    "        '</div>',",
+    "        `<p><a href=\"${_actionsUrl}\" target=\"_blank\">GitHub Actions 진행상황 확인 →</a></p>`,",
+    "        '<p class=\"note\">이 페이지는 30초마다 자동으로 새로고침됩니다</p>',",
+    "        '</div></body></html>',",
+    "      ].join('');",
+    "      return new Response(_html, { status: 503, headers: {",
+    "        'Content-Type': 'text/html;charset=utf-8',",
+    "        'Retry-After': '30',",
+    "        'Cache-Control': 'no-store',",
+    "      }});",
+    "    }",
+    "",
     "    return new Response(\"Not Found\", { status: 404, headers: { \"Content-Type\": \"text/plain\", ...SEC }});",
     "  }",
     "};",
@@ -592,7 +637,7 @@ function buildWorkerSource({ siteId, githubOwner, githubRepo, ghPagesUrl }) {
 }
 
 // ─── wrangler.toml ────────────────────────────────────────────────────────────
-function buildWranglerToml({ workerName, kvCacheId, kvCacheName, siteId, ghOwner, ghRepo, ghPagesUrl, workerUrl }) {
+function buildWranglerToml({ workerName, kvCacheId, kvCacheName, siteId, ghOwner, ghRepo, ghPagesUrl, workerUrl, phpRunnerDeployed }) {
   const phpRunnerName = `${workerName}-php`;
   return `# CloudPress WordPress Worker 배포 설정 (자동 생성)
 name               = "${workerName}"
@@ -605,9 +650,12 @@ ${kvCacheId ? `[[kv_namespaces]]
 binding = "CACHE"
 id      = "${kvCacheId}"` : `# KV CACHE: Cloudflare 대시보드에서 바인딩 설정 필요`}
 
-[[services]]
+${phpRunnerDeployed ? `[[services]]
 binding = "PHP_RUNNER"
-service = "${phpRunnerName}"
+service = "${phpRunnerName}"` : `# PHP_RUNNER: deploy-worker.yml 재실행 시 php-runner가 먼저 배포된 후 아래 주석을 해제하세요
+# [[services]]
+# binding = "PHP_RUNNER"
+# service = "${phpRunnerName}"`}
 
 [vars]
 SITE_ID      = "${siteId}"
@@ -1183,7 +1231,7 @@ export async function provisionCloudflarePagesHosting({
       const filesToPush = [
         { path: "wp-config.php", content: buildWpConfig({ siteId, siteUrl, dbPrefix, authKey, secureAuthKey, loggedInKey, nonceKey, authSalt, secureAuthSalt, loggedInSalt, nonceSalt }) },
         { path: "worker.js", content: workerSource },
-        { path: "wrangler.toml", content: buildWranglerToml({ workerName, kvCacheId, kvCacheName, siteId, ghOwner: owner, ghRepo: repoName, ghPagesUrl, workerUrl: realWorkerUrl }) },
+        { path: "wrangler.toml", content: buildWranglerToml({ workerName, kvCacheId, kvCacheName, siteId, ghOwner: owner, ghRepo: repoName, ghPagesUrl, workerUrl: realWorkerUrl, phpRunnerDeployed }) },
         { path: "wrangler-php.toml", content: buildPhpRunnerWranglerToml({ workerName, kvCacheId, siteId, ghOwner: owner, ghRepo: repoName }) },
         ...(phpRunnerSourceCode ? [{ path: "php-runner.js", content: phpRunnerSourceCode }] : []),
         { path: "_db/.gitkeep", content: "# wordpress.db SQLite DB가 이 폴더에 생성됩니다.\n" },

@@ -759,44 +759,32 @@ jobs:
       - name: PHP-FPM 소켓 및 풀 설정
         run: |
           sudo mkdir -p /run/php
-          printf '%s\n' '[wordpress]' 'user = www-data' 'group = www-data' \
-            'listen = /run/php/php8.3-fpm-wp.sock' \
-            'listen.owner = www-data' 'listen.group = www-data' 'listen.mode = 0660' \
-            'pm = dynamic' 'pm.max_children = 20' 'pm.start_servers = 4' \
-            'pm.min_spare_servers = 2' 'pm.max_spare_servers = 8' 'pm.max_requests = 500' \
-            'php_value[upload_max_filesize] = 64M' 'php_value[post_max_size] = 64M' \
-            'php_value[memory_limit] = 256M' 'php_value[max_execution_time] = 300' \
-            | sudo tee /etc/php/8.3/fpm/pool.d/wordpress.conf > /dev/null
+          {
+            echo '[wordpress]'
+            echo 'user = www-data'
+            echo 'group = www-data'
+            echo 'listen = /run/php/php8.3-fpm-wp.sock'
+            echo 'listen.owner = www-data'
+            echo 'listen.group = www-data'
+            echo 'listen.mode = 0660'
+            echo 'pm = dynamic'
+            echo 'pm.max_children = 20'
+            echo 'pm.start_servers = 4'
+            echo 'pm.min_spare_servers = 2'
+            echo 'pm.max_spare_servers = 8'
+            echo 'pm.max_requests = 500'
+            echo 'php_value[upload_max_filesize] = 64M'
+            echo 'php_value[post_max_size] = 64M'
+            echo 'php_value[memory_limit] = 256M'
+            echo 'php_value[max_execution_time] = 300'
+          } | sudo tee /etc/php/8.3/fpm/pool.d/wordpress.conf > /dev/null
           sudo systemctl restart php8.3-fpm || sudo service php8.3-fpm restart || true
           sleep 2
 
       - name: nginx 설정 (WordPress + PHP-FPM 완전 통합)
         run: |
           WP_ROOT="$(pwd)/wordpress"
-          sudo tee /etc/nginx/sites-available/wordpress > /dev/null << NGINXEOF
-          server {
-              listen 8080;
-              server_name localhost;
-              root \${WP_ROOT};
-              index index.php index.html;
-              client_max_body_size 64M;
-              location / { try_files \$uri \$uri/ /index.php?\$args; }
-              location ~ \.php$ {
-                  include snippets/fastcgi-php.conf;
-                  fastcgi_pass unix:/run/php/php8.3-fpm-wp.sock;
-                  fastcgi_param SCRIPT_FILENAME \$document_root\$fastcgi_script_name;
-                  fastcgi_param HTTP_HOST localhost:8080;
-                  fastcgi_read_timeout 300;
-                  include fastcgi_params;
-              }
-              location ~* \.(css|js|jpg|jpeg|png|gif|ico|svg|woff|woff2|ttf|eot)$ {
-                  expires 30d;
-                  add_header Cache-Control "public, immutable";
-              }
-              location ~ /\. { deny all; }
-              location = /wp-cron.php { allow all; }
-          }
-          NGINXEOF
+          printf 'server {\n  listen 8080;\n  server_name localhost;\n  root %s;\n  index index.php index.html;\n  client_max_body_size 64M;\n  location / { try_files $uri $uri/ /index.php?$args; }\n  location ~ \\.php$ {\n    include snippets/fastcgi-php.conf;\n    fastcgi_pass unix:/run/php/php8.3-fpm-wp.sock;\n    fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;\n    fastcgi_param HTTP_HOST localhost:8080;\n    fastcgi_read_timeout 300;\n    include fastcgi_params;\n  }\n  location ~* \\.(css|js|jpg|jpeg|png|gif|ico|svg|woff|woff2|ttf|eot)$ {\n    expires 30d;\n    add_header Cache-Control "public, immutable";\n  }\n  location ~ /\\. { deny all; }\n  location = /wp-cron.php { allow all; }\n}\n' "$WP_ROOT" | sudo tee /etc/nginx/sites-available/wordpress > /dev/null
           sudo ln -sf /etc/nginx/sites-available/wordpress /etc/nginx/sites-enabled/
           sudo rm -f /etc/nginx/sites-enabled/default
           sudo nginx -t && (sudo systemctl restart nginx || sudo service nginx restart) || true

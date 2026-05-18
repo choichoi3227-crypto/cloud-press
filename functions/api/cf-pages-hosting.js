@@ -663,10 +663,16 @@ jobs:
         run: |
           git config user.name "CloudPress Bot"
           git config user.email "bot@cloudpress.app"
+          git config http.postBuffer 524288000
           echo "_db/wordpress.db" >> .gitignore || true
           git rm --cached _db/wordpress.db 2>/dev/null || true
           git add wordpress/ _db/.gitkeep wp-content/ .gitignore 2>/dev/null || true
-          git diff --staged --quiet || git commit -m "WordPress 설치 완료" && git push || true
+          if git diff --staged --quiet; then
+            echo "변경사항 없음 - 건너뜀"
+          else
+            git commit -m "WordPress 설치 완료"
+            git push
+          fi
           echo "완료"
 `;
 }

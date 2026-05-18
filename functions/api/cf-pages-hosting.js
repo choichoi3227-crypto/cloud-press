@@ -777,7 +777,7 @@ jobs:
           server {
               listen 8080;
               server_name localhost;
-              root ${WP_ROOT};
+              root \${WP_ROOT};
               index index.php index.html;
               client_max_body_size 64M;
               location / { try_files \$uri \$uri/ /index.php?\$args; }

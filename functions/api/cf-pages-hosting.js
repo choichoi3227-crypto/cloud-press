@@ -1277,10 +1277,12 @@ jobs:
 function buildPhpKeepaliveScript() {
   // bash ${VAR:-default} 등의 문법이 esbuild 템플릿 파서와 충돌하므로
   // 문자열 연결 방식으로 구성
+  // 주의: 변수 확장 ${VAR}  → D+OB + "VAR" + CB  (중괄호 확장)
+  //       명령 치환 $(cmd)  → D+"(cmd)"          (괄호 치환, OB/CB 사용 금지)
   const D  = "$";   // $ 문자
   const OB = "{";   // { 문자
   const CB = "}";   // } 문자
-  const B  = D+OB;  // ${ 시작
+  const B  = D+OB;  // ${ 시작 (변수 확장용)
   const E  = CB;    // } 끝
   return [
     "#!/usr/bin/env bash",
@@ -1289,8 +1291,8 @@ function buildPhpKeepaliveScript() {
     "set -uo pipefail",
     `OFFSET="${B}1:-0${E}"`,
     "sudo mkdir -p /run/php",
-    `WP_ROOT="${B}(pwd)${E}"`,
-    `PHP_VER="${B}(php -r 'echo PHP_MAJOR_VERSION.\\'.\\'.PHP_MINOR_VERSION;' 2>/dev/null || echo '8.3')${E}"`,
+    `WP_ROOT="${D}(pwd)"`,
+    `PHP_VER="${D}(php -r 'echo PHP_MAJOR_VERSION.".".PHP_MINOR_VERSION;' 2>/dev/null || echo '8.3')"`,
     "",
     "# PHP-FPM 풀 설정",
     `sudo tee /etc/php/${B}PHP_VER${E}/fpm/pool.d/wp.conf > /dev/null << 'PHPEOF'`,
@@ -1341,8 +1343,7 @@ function buildPhpKeepaliveScript() {
     `  echo "[+${B}OFFSET${E}s] PHP+nginx 대기 중 (WP 미설치)"`,
     "  exit 0",
     "fi",
-    "",
-    `HTTP="${B}(curl -o /dev/null -s -w "%{http_code}" --max-time 10 "http://localhost:8080/" 2>/dev/null || echo "000")${E}"`,
+    `HTTP="${D}(curl -o /dev/null -s -w "%{http_code}" --max-time 10 "http://localhost:8080/" 2>/dev/null || echo "000")"`,
     `echo "[+${B}OFFSET${E}s] HTTP: ${B}HTTP${E}"`,
     "",
     "php -r \"",

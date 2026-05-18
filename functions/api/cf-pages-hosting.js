@@ -596,7 +596,17 @@ jobs:
           else
             curl -sL "https://wordpress.org/latest.zip" -o /tmp/wordpress.zip
             unzip -q /tmp/wordpress.zip -d /tmp/
-            rsync -a --delete /tmp/wordpress/ ./
+            rsync -a --delete \
+              --exclude='.git/' \
+              --exclude='.github/' \
+              --exclude='_db/' \
+              --exclude='_cache/' \
+              --exclude='_plugins/' \
+              --exclude='wp-content/' \
+              --exclude='*.toml' \
+              --exclude='*.js' \
+              --exclude='README.md' \
+              /tmp/wordpress/ ./
             echo "WordPress 다운로드 완료"
           fi
 

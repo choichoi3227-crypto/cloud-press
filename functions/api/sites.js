@@ -13,7 +13,7 @@
 
 import { jsonOk, jsonErr, requireAuth, PLAN_LIMITS } from "../_shared.js";
 import { provisionCloudflarePagesHosting } from "./cf-pages-hosting.js";
-import { pickGithubToken } from "./github-storage.js";
+import { pickGithubToken, ghReq } from "./github-storage.js";
 
 // ── Cloudflare API 헬퍼 ────────────────────────────────────────────────────
 
@@ -51,6 +51,19 @@ export async function onRequestGet(context) {
 
   try {
     if (id) {
+      // 보안 탭: 국가/IP 차단 목록 조회
+      const security = url.searchParams.get("security");
+      if (security === "country_blocks") {
+        await env.DB.prepare("CREATE TABLE IF NOT EXISTS site_country_blocks (site_id TEXT NOT NULL, country_code TEXT NOT NULL, PRIMARY KEY (site_id, country_code))").run().catch(() => {});
+        const { results } = await env.DB.prepare("SELECT country_code FROM site_country_blocks WHERE site_id = ?").bind(id).all();
+        return jsonOk({ success: true, blocked_countries: (results || []).map(r => r.country_code) });
+      }
+      if (security === "ip_blocks") {
+        await env.DB.prepare("CREATE TABLE IF NOT EXISTS site_ip_blocks (site_id TEXT NOT NULL, ip TEXT NOT NULL, created_at TEXT DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY (site_id, ip))").run().catch(() => {});
+        const { results } = await env.DB.prepare("SELECT ip, created_at FROM site_ip_blocks WHERE site_id = ? ORDER BY rowid DESC").bind(id).all();
+        return jsonOk({ success: true, blocked_ips: results || [] });
+      }
+
       const site = await env.DB.prepare(
         "SELECT * FROM sites WHERE id = ? AND (user_id = ? OR ? = 'admin')"
       ).bind(id, payload.id, payload.role).first();
@@ -351,6 +364,42 @@ export async function onRequestPut(context) {
   if (!site) return jsonErr("사이트를 찾을 수 없습니다.", 404);
   if (site.user_id !== payload.id && payload.role !== "admin")
     return jsonErr("권한이 없습니다.", 403);
+
+  // ── 보안: 국가 차단 ────────────────────────────────────────────────────────
+  if (body.block_country !== undefined || body.unblock_country !== undefined) {
+    try {
+      await env.DB.prepare("CREATE TABLE IF NOT EXISTS site_country_blocks (site_id TEXT NOT NULL, country_code TEXT NOT NULL, PRIMARY KEY (site_id, country_code))").run().catch(() => {});
+      if (body.block_country) {
+        const code = body.block_country.toUpperCase().slice(0, 2);
+        await env.DB.prepare("INSERT OR IGNORE INTO site_country_blocks (site_id, country_code) VALUES (?, ?)").bind(id, code).run();
+        return jsonOk({ success: true, message: `${code} 국가 차단이 설정되었습니다.` });
+      }
+      if (body.unblock_country) {
+        const code = body.unblock_country.toUpperCase().slice(0, 2);
+        await env.DB.prepare("DELETE FROM site_country_blocks WHERE site_id = ? AND country_code = ?").bind(id, code).run();
+        return jsonOk({ success: true, message: `${code} 국가 차단이 해제되었습니다.` });
+      }
+    } catch (e) {
+      return jsonErr("차단 설정 오류: " + e.message, 500);
+    }
+  }
+
+  // ── 보안: IP 차단 ─────────────────────────────────────────────────────────
+  if (body.block_ip !== undefined || body.unblock_ip !== undefined) {
+    try {
+      await env.DB.prepare("CREATE TABLE IF NOT EXISTS site_ip_blocks (site_id TEXT NOT NULL, ip TEXT NOT NULL, created_at TEXT DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY (site_id, ip))").run().catch(() => {});
+      if (body.block_ip) {
+        await env.DB.prepare("INSERT OR IGNORE INTO site_ip_blocks (site_id, ip) VALUES (?, ?)").bind(id, body.block_ip).run();
+        return jsonOk({ success: true, message: `${body.block_ip} IP 차단이 설정되었습니다.` });
+      }
+      if (body.unblock_ip) {
+        await env.DB.prepare("DELETE FROM site_ip_blocks WHERE site_id = ? AND ip = ?").bind(id, body.unblock_ip).run();
+        return jsonOk({ success: true, message: `${body.unblock_ip} IP 차단이 해제되었습니다.` });
+      }
+    } catch (e) {
+      return jsonErr("IP 차단 설정 오류: " + e.message, 500);
+    }
+  }
 
   const allowed = ["php_version", "cache_enabled", "cache_ttl", "status"];
   const updates = [], values = [];

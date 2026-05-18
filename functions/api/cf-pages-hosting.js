@@ -613,26 +613,27 @@ jobs:
 
       - name: wp-config.php 생성
         run: |
-          cat > wordpress/wp-config.php << 'EOF'
-<?php
-define('DB_DIR',    __DIR__ . '/../_db/');
-define('DB_FILE',   'wordpress.db');
-define('DB_ENGINE', 'sqlite');
-define('AUTH_KEY',         'put your unique phrase here 1');
-define('SECURE_AUTH_KEY',  'put your unique phrase here 2');
-define('LOGGED_IN_KEY',    'put your unique phrase here 3');
-define('NONCE_KEY',        'put your unique phrase here 4');
-define('AUTH_SALT',        'put your unique phrase here 5');
-define('SECURE_AUTH_SALT', 'put your unique phrase here 6');
-define('LOGGED_IN_SALT',   'put your unique phrase here 7');
-define('NONCE_SALT',       'put your unique phrase here 8');
-$table_prefix = 'wp_';
-define('WP_HOME',    getenv('SITE_URL') ?: '${siteUrl}');
-define('WP_SITEURL', getenv('SITE_URL') ?: '${siteUrl}');
-define('WP_DEBUG', false);
-define('ABSPATH', __DIR__ . '/');
-require_once ABSPATH . 'wp-settings.php';
-EOF
+          WP_CFG_URL="\${SITE_URL:-${siteUrl}}"
+          {
+            echo '<?php'
+            echo "define('DB_DIR', __DIR__ . '/../_db/');"
+            echo "define('DB_FILE', 'wordpress.db');"
+            echo "define('DB_ENGINE', 'sqlite');"
+            echo "define('AUTH_KEY', 'put your unique phrase here 1');"
+            echo "define('SECURE_AUTH_KEY', 'put your unique phrase here 2');"
+            echo "define('LOGGED_IN_KEY', 'put your unique phrase here 3');"
+            echo "define('NONCE_KEY', 'put your unique phrase here 4');"
+            echo "define('AUTH_SALT', 'put your unique phrase here 5');"
+            echo "define('SECURE_AUTH_SALT', 'put your unique phrase here 6');"
+            echo "define('LOGGED_IN_SALT', 'put your unique phrase here 7');"
+            echo "define('NONCE_SALT', 'put your unique phrase here 8');"
+            echo "\\$table_prefix = 'wp_';"
+            echo "define('WP_HOME',    getenv('SITE_URL') ?: '\\$WP_CFG_URL');"
+            echo "define('WP_SITEURL', getenv('SITE_URL') ?: '\\$WP_CFG_URL');"
+            echo "define('WP_DEBUG', false);"
+            echo "define('ABSPATH', __DIR__ . '/');"
+            echo "require_once ABSPATH . 'wp-settings.php';"
+          } > wordpress/wp-config.php
           echo "wp-config.php 생성 완료"
 
       - name: WordPress 설치 (WP-CLI)
@@ -758,62 +759,44 @@ jobs:
       - name: PHP-FPM 소켓 및 풀 설정
         run: |
           sudo mkdir -p /run/php
-          sudo tee /etc/php/8.3/fpm/pool.d/wordpress.conf > /dev/null << 'PHPFPM'
-[wordpress]
-user = www-data
-group = www-data
-listen = /run/php/php8.3-fpm-wp.sock
-listen.owner = www-data
-listen.group = www-data
-listen.mode = 0660
-pm = dynamic
-pm.max_children = 20
-pm.start_servers = 4
-pm.min_spare_servers = 2
-pm.max_spare_servers = 8
-pm.max_requests = 500
-php_value[upload_max_filesize] = 64M
-php_value[post_max_size] = 64M
-php_value[memory_limit] = 256M
-php_value[max_execution_time] = 300
-PHPFPM
+          printf '%s\n' '[wordpress]' 'user = www-data' 'group = www-data' \
+            'listen = /run/php/php8.3-fpm-wp.sock' \
+            'listen.owner = www-data' 'listen.group = www-data' 'listen.mode = 0660' \
+            'pm = dynamic' 'pm.max_children = 20' 'pm.start_servers = 4' \
+            'pm.min_spare_servers = 2' 'pm.max_spare_servers = 8' 'pm.max_requests = 500' \
+            'php_value[upload_max_filesize] = 64M' 'php_value[post_max_size] = 64M' \
+            'php_value[memory_limit] = 256M' 'php_value[max_execution_time] = 300' \
+            | sudo tee /etc/php/8.3/fpm/pool.d/wordpress.conf > /dev/null
           sudo systemctl restart php8.3-fpm || sudo service php8.3-fpm restart || true
           sleep 2
 
       - name: nginx 설정 (WordPress + PHP-FPM 완전 통합)
         run: |
           WP_ROOT="$(pwd)/wordpress"
-          sudo tee /etc/nginx/sites-available/wordpress << NGINXCONF
-server {
-    listen 8080;
-    server_name localhost;
-    root \${WP_ROOT};
-    index index.php index.html;
-    client_max_body_size 64M;
-
-    location / {
-        try_files \$uri \$uri/ /index.php?\$args;
-    }
-
-    location ~ \\.php$ {
-        include snippets/fastcgi-php.conf;
-        fastcgi_pass unix:/run/php/php8.3-fpm-wp.sock;
-        fastcgi_param SCRIPT_FILENAME \$document_root\$fastcgi_script_name;
-        fastcgi_param HTTP_HOST localhost:8080;
-        fastcgi_read_timeout 300;
-        include fastcgi_params;
-    }
-
-    location ~* \\.(css|js|jpg|jpeg|png|gif|ico|svg|woff|woff2|ttf|eot)$ {
-        expires 30d;
-        add_header Cache-Control "public, immutable";
-    }
-
-    location ~ /\\. { deny all; }
-    location = /wp-cron.php { allow all; }
-    location ~* /wp-login\\.php { limit_req zone=login burst=5; }
-}
-NGINXCONF
+          sudo tee /etc/nginx/sites-available/wordpress > /dev/null << NGINXEOF
+          server {
+              listen 8080;
+              server_name localhost;
+              root ${WP_ROOT};
+              index index.php index.html;
+              client_max_body_size 64M;
+              location / { try_files \$uri \$uri/ /index.php?\$args; }
+              location ~ \.php$ {
+                  include snippets/fastcgi-php.conf;
+                  fastcgi_pass unix:/run/php/php8.3-fpm-wp.sock;
+                  fastcgi_param SCRIPT_FILENAME \$document_root\$fastcgi_script_name;
+                  fastcgi_param HTTP_HOST localhost:8080;
+                  fastcgi_read_timeout 300;
+                  include fastcgi_params;
+              }
+              location ~* \.(css|js|jpg|jpeg|png|gif|ico|svg|woff|woff2|ttf|eot)$ {
+                  expires 30d;
+                  add_header Cache-Control "public, immutable";
+              }
+              location ~ /\. { deny all; }
+              location = /wp-cron.php { allow all; }
+          }
+          NGINXEOF
           sudo ln -sf /etc/nginx/sites-available/wordpress /etc/nginx/sites-enabled/
           sudo rm -f /etc/nginx/sites-enabled/default
           sudo nginx -t && (sudo systemctl restart nginx || sudo service nginx restart) || true
@@ -951,7 +934,7 @@ jobs:
           sudo apt-get install -y --no-install-recommends nginx 2>/dev/null
       - name: offset 0s 후 PHP 서버 기동
         run: |
-                    bash .github/scripts/php-keepalive.sh 0
+          bash .github/scripts/php-keepalive.sh 0
 
   slot-s020:
     needs: setup
@@ -972,7 +955,7 @@ jobs:
           sudo apt-get install -y --no-install-recommends nginx 2>/dev/null
       - name: offset 20s 후 PHP 서버 기동
         run: |
-                    sleep 20
+          sleep 20
           bash .github/scripts/php-keepalive.sh 20
 
   slot-s040:
@@ -994,7 +977,7 @@ jobs:
           sudo apt-get install -y --no-install-recommends nginx 2>/dev/null
       - name: offset 40s 후 PHP 서버 기동
         run: |
-                    sleep 40
+          sleep 40
           bash .github/scripts/php-keepalive.sh 40
 
   slot-s060:
@@ -1016,7 +999,7 @@ jobs:
           sudo apt-get install -y --no-install-recommends nginx 2>/dev/null
       - name: offset 60s 후 PHP 서버 기동
         run: |
-                    sleep 60
+          sleep 60
           bash .github/scripts/php-keepalive.sh 60
 
   slot-s080:
@@ -1038,7 +1021,7 @@ jobs:
           sudo apt-get install -y --no-install-recommends nginx 2>/dev/null
       - name: offset 80s 후 PHP 서버 기동
         run: |
-                    sleep 80
+          sleep 80
           bash .github/scripts/php-keepalive.sh 80
 
   slot-s100:
@@ -1060,7 +1043,7 @@ jobs:
           sudo apt-get install -y --no-install-recommends nginx 2>/dev/null
       - name: offset 100s 후 PHP 서버 기동
         run: |
-                    sleep 100
+          sleep 100
           bash .github/scripts/php-keepalive.sh 100
 
   slot-s120:
@@ -1082,7 +1065,7 @@ jobs:
           sudo apt-get install -y --no-install-recommends nginx 2>/dev/null
       - name: offset 120s 후 PHP 서버 기동
         run: |
-                    sleep 120
+          sleep 120
           bash .github/scripts/php-keepalive.sh 120
 
   slot-s140:
@@ -1104,7 +1087,7 @@ jobs:
           sudo apt-get install -y --no-install-recommends nginx 2>/dev/null
       - name: offset 140s 후 PHP 서버 기동
         run: |
-                    sleep 140
+          sleep 140
           bash .github/scripts/php-keepalive.sh 140
 
   slot-s160:
@@ -1126,7 +1109,7 @@ jobs:
           sudo apt-get install -y --no-install-recommends nginx 2>/dev/null
       - name: offset 160s 후 PHP 서버 기동
         run: |
-                    sleep 160
+          sleep 160
           bash .github/scripts/php-keepalive.sh 160
 
   slot-s180:
@@ -1148,7 +1131,7 @@ jobs:
           sudo apt-get install -y --no-install-recommends nginx 2>/dev/null
       - name: offset 180s 후 PHP 서버 기동
         run: |
-                    sleep 180
+          sleep 180
           bash .github/scripts/php-keepalive.sh 180
 
   slot-s200:
@@ -1170,7 +1153,7 @@ jobs:
           sudo apt-get install -y --no-install-recommends nginx 2>/dev/null
       - name: offset 200s 후 PHP 서버 기동
         run: |
-                    sleep 200
+          sleep 200
           bash .github/scripts/php-keepalive.sh 200
 
   slot-s220:
@@ -1192,7 +1175,7 @@ jobs:
           sudo apt-get install -y --no-install-recommends nginx 2>/dev/null
       - name: offset 220s 후 PHP 서버 기동
         run: |
-                    sleep 220
+          sleep 220
           bash .github/scripts/php-keepalive.sh 220
 
   slot-s240:
@@ -1214,7 +1197,7 @@ jobs:
           sudo apt-get install -y --no-install-recommends nginx 2>/dev/null
       - name: offset 240s 후 PHP 서버 기동
         run: |
-                    sleep 240
+          sleep 240
           bash .github/scripts/php-keepalive.sh 240
 
   slot-s260:
@@ -1236,7 +1219,7 @@ jobs:
           sudo apt-get install -y --no-install-recommends nginx 2>/dev/null
       - name: offset 260s 후 PHP 서버 기동
         run: |
-                    sleep 260
+          sleep 260
           bash .github/scripts/php-keepalive.sh 260
 
   slot-s280:
@@ -1258,7 +1241,7 @@ jobs:
           sudo apt-get install -y --no-install-recommends nginx 2>/dev/null
       - name: offset 280s 후 PHP 서버 기동
         run: |
-                    sleep 280
+          sleep 280
           bash .github/scripts/php-keepalive.sh 280
 `;
 }

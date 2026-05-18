@@ -2,13 +2,13 @@
 # 플랫폼 메타데이터 Worker (Cloudflare Pages Functions)
 #
 # 호스팅 방식:
-#   GitHub 레포 (스토리지) → Cloudflare Worker (dist/ 순수 미러링)
-#   WordPress PHP → Astro SSR (GitHub Actions에서 자동 변환 + 빌드)
-#   Astro SSR dist/ → GitHub 레포에 커밋 → Worker가 미러링
+#   GitHub Actions → PHP CLI로 WordPress 실제 실행 (SQLite)
+#   정적 캐시(_cache/) → GitHub 레포에 커밋
+#   Cloudflare Worker → _cache/ + wp-content 순수 미러링
 #
 # DB:    Cloudflare D1 (플랫폼 메타데이터)
 # Cache: Cloudflare KV (세션)
-# PHP:   없음 — GitHub Actions에서 Astro SSR로 변환됨
+# PHP:   GitHub Actions PHP CLI (변환 없이 100% 원본 WordPress)
 
 name = "cloud-press"
 main = "worker.js"

@@ -489,7 +489,7 @@ function buildWorkerSource({ siteId, githubOwner, githubRepo, ghPagesUrl }) {
     "  },",
     "};",
   ];
-  return lines.join("\\n");
+  return lines.join("\n");
 }
 
 

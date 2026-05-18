@@ -66,3 +66,13 @@ CREATE TABLE IF NOT EXISTS notices (
 -- ── file_snapshots.path 컬럼 추가 (기존 DB 마이그레이션) ──────────────────
 -- 이미 테이블이 있고 path 컬럼이 없는 경우 실행
 -- ALTER TABLE file_snapshots ADD COLUMN path TEXT NOT NULL DEFAULT '';
+
+-- ── sites 테이블에 플랜/사용량 컬럼 추가 (없으면) ────────────────────────────
+-- 이미 있을 경우 오류가 나도 무시
+-- wrangler d1 execute cloudpress-db --command="ALTER TABLE sites ADD COLUMN plan TEXT DEFAULT 'free'"
+-- wrangler d1 execute cloudpress-db --command="ALTER TABLE sites ADD COLUMN storage_used_mb REAL DEFAULT 0"
+-- wrangler d1 execute cloudpress-db --command="ALTER TABLE sites ADD COLUMN traffic_used_mb REAL DEFAULT 0"
+
+-- ── github_tokens 기본 토큰 (있는 경우 활용) ──────────────────────────────
+-- ALTER TABLE github_tokens ADD COLUMN repo_scope INTEGER DEFAULT 0;
+-- ALTER TABLE github_tokens ADD COLUMN workflow_scope INTEGER DEFAULT 0;

@@ -69,33 +69,40 @@ export async function onRequestGet(context) {
       ).bind(id, payload.id, payload.role).first();
       if (!site) return jsonErr("사이트를 찾을 수 없습니다.", 404);
 
+      // plan/storage/traffic 컬럼이 없는 구 DB 대비 기본값 보장
+      site.plan             = site.plan             ?? "free";
+      site.storage_used_mb  = site.storage_used_mb  ?? 0;
+      site.traffic_used_mb  = site.traffic_used_mb  ?? 0;
+      site.cf_pages_url     = site.cf_pages_url     ?? null;
+      site.cf_pages_project = site.cf_pages_project ?? null;
+
       const { results: domains } = await env.DB.prepare(
         "SELECT * FROM domain_aliases WHERE site_id = ? ORDER BY is_primary DESC"
-      ).bind(id).all();
+      ).bind(id).all().catch(() => ({ results: [] }));
       const { results: sshKeys } = await env.DB.prepare(
         "SELECT id, key_name, created_at FROM site_ssh_keys WHERE site_id = ?"
-      ).bind(id).all();
+      ).bind(id).all().catch(() => ({ results: [] }));
 
       return jsonOk({
-        success: true, site, domains, sshKeys,
+        success: true, site, domains: domains || [], sshKeys: sshKeys || [],
         cf_pages_url: site.cf_pages_url || null,
         hosting_type: "cloudflare_pages",
       });
     }
 
+    // 누락된 컬럼이 있어도 오류 없이 동작하도록 방어적 쿼리
+    // (마이그레이션 전 DB에 plan/storage_used_mb 등이 없을 수 있음)
     const query = payload.role === "admin"
       ? `SELECT id, site_name, primary_domain, php_version, status,
               is_throttled, cache_enabled,
               github_repo_owner, github_repo_name,
               cf_pages_url, cf_pages_project,
-              plan, storage_used_mb, traffic_used_mb,
               created_at
          FROM sites ORDER BY rowid DESC`
       : `SELECT id, site_name, primary_domain, php_version, status,
               is_throttled, cache_enabled,
               github_repo_owner, github_repo_name,
               cf_pages_url, cf_pages_project,
-              plan, storage_used_mb, traffic_used_mb,
               created_at
          FROM sites WHERE user_id = ? ORDER BY rowid DESC`;
     const stmt = payload.role === "admin"
@@ -103,8 +110,24 @@ export async function onRequestGet(context) {
       : env.DB.prepare(query).bind(payload.id);
 
     const { results } = await stmt.all();
+
+    // plan/storage_used_mb/traffic_used_mb 는 별도 쿼리로 가져오거나 기본값 사용
+    const planQuery = payload.role === "admin"
+      ? `SELECT id, plan, storage_used_mb, traffic_used_mb FROM sites ORDER BY rowid DESC`
+      : `SELECT id, plan, storage_used_mb, traffic_used_mb FROM sites WHERE user_id = ? ORDER BY rowid DESC`;
+    const planStmt = payload.role === "admin"
+      ? env.DB.prepare(planQuery)
+      : env.DB.prepare(planQuery).bind(payload.id);
+    const planMap = {};
+    await planStmt.all().then(r => {
+      (r.results || []).forEach(row => { planMap[row.id] = row; });
+    }).catch(() => {}); // 컬럼 없으면 조용히 무시
+
     const sites = (results || []).map(s => ({
       ...s,
+      plan: planMap[s.id]?.plan || "free",
+      storage_used_mb: planMap[s.id]?.storage_used_mb || 0,
+      traffic_used_mb: planMap[s.id]?.traffic_used_mb || 0,
       hosting_type: "cloudflare_pages",
     }));
     return jsonOk({ success: true, sites });

@@ -1435,8 +1435,8 @@ export default {
       '/domains', '/dns', '/traffic', '/storage', '/editor',
       '/account', '/payment', '/payment-success', '/pricing',
       '/login', '/signup', '/admin', '/admin-users', '/admin-sites',
-      '/admin-inquiries', '/admin-settings', '/about', '/contact',
-      '/features', '/faq',
+      '/admin-inquiries', '/admin-notices', '/admin-settings', '/about', '/contact',
+      '/features', '/faq', '/notices', '/chat',
     ];
     // .html/.css/.js/정적파일은 그대로 ASSETS
     const isStaticAsset =
@@ -1445,6 +1445,7 @@ export default {
       url.pathname.endsWith('.js') ||
       url.pathname.startsWith('/src/') ||
       url.pathname.startsWith('/favicon') ||
+      url.pathname.startsWith('/wp-content/') ||
       url.pathname === '/';
     if (isStaticAsset && env.ASSETS) return env.ASSETS.fetch(request);
 

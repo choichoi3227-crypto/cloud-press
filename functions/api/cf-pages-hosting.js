@@ -671,7 +671,8 @@ jobs:
             echo "변경사항 없음 - 건너뜀"
           else
             git commit -m "WordPress 설치 완료"
-            git push
+            git pull --rebase origin main || true
+            git push origin main
           fi
           echo "완료"
 `;

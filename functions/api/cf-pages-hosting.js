@@ -451,10 +451,9 @@ function buildWorkerSource({ siteId, githubOwner, githubRepo, ghPagesUrl }) {
     "      if (cached) return new Response(cached, { headers: { \"Content-Type\": mime(path), \"Cache-Control\": \"public,max-age=86400\", ...SEC } });",
     "    }",
     "",
-    "    // 3차: GitHub 레포 wordpress/wp-content 정적 자산 미러링",
+    "    // 3차: GitHub 레포 wp-content 정적 자산 미러링",
     "    if (STATIC_EXT.test(path) && path.startsWith(\"/wp-content/\")) {",
-    "      const wpPath = \"wordpress\" + path;",
-    "      const res = await ghRaw(env, wpPath);",
+    "      const res = await ghRaw(env, path.slice(1));",
     "      if (res) {",
     "        const body = await res.arrayBuffer();",
     "        ctx.waitUntil(kvPut(env, cacheKey, body, 86400));",
@@ -592,23 +591,23 @@ jobs:
 
       - name: WordPress 다운로드
         run: |
-          if [ -f "wordpress/wp-load.php" ] && [ "\${{ github.event.inputs.force_reinstall }}" != "true" ]; then
+          if [ -f "wp-load.php" ] && [ "\${{ github.event.inputs.force_reinstall }}" != "true" ]; then
             echo "WordPress 이미 존재 - 건너뜀"
           else
             curl -sL "https://wordpress.org/latest.zip" -o /tmp/wordpress.zip
             unzip -q /tmp/wordpress.zip -d /tmp/
-            rsync -a --delete /tmp/wordpress/ ./wordpress/
+            rsync -a --delete /tmp/wordpress/ ./
             echo "WordPress 다운로드 완료"
           fi
 
       - name: SQLite Integration 플러그인 설치
         run: |
-          mkdir -p wordpress/wp-content/plugins _db
-          if [ ! -d "wordpress/wp-content/plugins/sqlite-database-integration" ]; then
+          mkdir -p wp-content/plugins _db
+          if [ ! -d "wp-content/plugins/sqlite-database-integration" ]; then
             curl -sL "https://downloads.wordpress.org/plugin/sqlite-database-integration.latest-stable.zip" -o /tmp/sqlite.zip
-            unzip -q /tmp/sqlite.zip -d wordpress/wp-content/plugins/
+            unzip -q /tmp/sqlite.zip -d wp-content/plugins/
           fi
-          cp -f wordpress/wp-content/plugins/sqlite-database-integration/db.copy wordpress/wp-content/db.php
+          cp -f wp-content/plugins/sqlite-database-integration/db.copy wp-content/db.php
           echo "SQLite 플러그인 준비 완료"
 
       - name: wp-config.php 생성
@@ -630,15 +629,15 @@ jobs:
             echo "\\$table_prefix = 'wp_';"
             echo "define('WP_HOME',    getenv('SITE_URL') ?: '\\$WP_CFG_URL');"
             echo "define('WP_SITEURL', getenv('SITE_URL') ?: '\\$WP_CFG_URL');"
+            echo "define('WP_CONTENT_DIR', __DIR__ . '/wp-content');"
             echo "define('WP_DEBUG', false);"
             echo "define('ABSPATH', __DIR__ . '/');"
             echo "require_once ABSPATH . 'wp-settings.php';"
-          } > wordpress/wp-config.php
+          } > wp-config.php
           echo "wp-config.php 생성 완료"
 
       - name: WordPress 설치 (WP-CLI)
         run: |
-          cd wordpress
           wp core install \\
             --url="\\$SITE_URL" \\
             --title="\\$SITE_NAME" \\
@@ -655,7 +654,6 @@ jobs:
 
       - name: 기본 플러그인 설치
         run: |
-          cd wordpress
           wp plugin install classic-editor --activate --allow-root --path=. 2>&1 || true
           echo "기본 플러그인 설치 완료"
 
@@ -666,7 +664,7 @@ jobs:
           git config http.postBuffer 524288000
           echo "_db/wordpress.db" >> .gitignore || true
           git rm --cached _db/wordpress.db 2>/dev/null || true
-          git add wordpress/ _db/.gitkeep wp-content/ .gitignore 2>/dev/null || true
+          git add wp-admin/ wp-includes/ wp-content/ wp-config.php wp-load.php wp-blog-header.php wp-settings.php wp-cron.php index.php xmlrpc.php _db/.gitkeep .gitignore 2>/dev/null || true
           if git diff --staged --quiet; then
             echo "변경사항 없음 - 건너뜀"
           else
@@ -687,7 +685,7 @@ on:
   push:
     branches: [main]
     paths:
-      - 'wordpress/wp-content/**'
+      - 'wp-content/**'
 
 permissions:
   contents: write
@@ -712,8 +710,7 @@ jobs:
 
       - name: WordPress 코어 업데이트
         run: |
-          if [ -f "wordpress/wp-load.php" ]; then
-            cd wordpress
+          if [ -f "wp-load.php" ]; then
             wp core update --allow-root --path=. 2>&1 || true
             wp plugin update --all --allow-root --path=. 2>&1 || true
             echo "업데이트 완료"
@@ -723,7 +720,7 @@ jobs:
         run: |
           git config user.name "CloudPress Bot"
           git config user.email "bot@cloudpress.app"
-          git add wordpress/ 2>/dev/null || true
+          git add wp-admin/ wp-includes/ wp-content/ wp-config.php 2>/dev/null || true
           git diff --staged --quiet || git commit -m "WordPress 업데이트" && git push || true
 `;
 }
@@ -739,7 +736,9 @@ on:
   push:
     branches: [main]
     paths:
-      - 'wordpress/**'
+      - 'wp-admin/**'
+      - 'wp-content/**'
+      - 'wp-includes/**'
       - '_db/**'
 
 permissions:
@@ -790,7 +789,7 @@ jobs:
 
       - name: nginx 설정 (WordPress + PHP-FPM 완전 통합)
         run: |
-          WP_ROOT="$(pwd)/wordpress"
+          WP_ROOT="$(pwd)"
           {
             echo 'server {'
             echo '  listen 8080;'
@@ -822,7 +821,7 @@ jobs:
 
       - name: WordPress 실시간 실행 검증
         run: |
-          if [ ! -f "wordpress/wp-load.php" ]; then
+          if [ ! -f "wp-load.php" ]; then
             echo "WordPress 미설치 - 건너뜀"
             exit 0
           fi
@@ -837,9 +836,8 @@ jobs:
 
       - name: PHP 동적 기능 실행 테스트
         run: |
-          if [ ! -f "wordpress/wp-load.php" ]; then exit 0; fi
+          if [ ! -f "wp-load.php" ]; then exit 0; fi
           echo "=== PHP 동적 실행 테스트 ==="
-          cd wordpress
           php -r "
           define('ABSPATH', __DIR__ . '/');
           define('WPINC', 'wp-includes');
@@ -858,7 +856,7 @@ jobs:
 
       - name: 정적 캐시 생성 (SEO 폴백)
         run: |
-          if [ ! -f "wordpress/wp-load.php" ]; then exit 0; fi
+          if [ ! -f "wp-load.php" ]; then exit 0; fi
           mkdir -p _cache
           curl -sf -L --max-time 30 "http://localhost:8080/" -o _cache/index.html 2>/dev/null || echo "메인 캐시 실패"
           curl -sf -L --max-time 15 "http://localhost:8080/sitemap.xml" -o /tmp/sitemap.xml 2>/dev/null || true
@@ -886,7 +884,7 @@ jobs:
           mkdir -p _cache
           printf '{"updated":"%s","server":"nginx+php8.3-fpm","wp":"%s"}' \
             "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-            "$([ -f wordpress/wp-load.php ] && echo installed || echo not_installed)" \
+            "$([ -f wp-load.php ] && echo installed || echo not_installed)" \
             > _cache/server-status.json
           git add _cache/
           git diff --staged --quiet || (git commit -m "PHP 서버 캐시 갱신 $(date -u +%Y-%m-%dT%H:%M:%SZ)" && git push) || true
@@ -1281,7 +1279,7 @@ function buildPhpKeepaliveScript() {
     "set -uo pipefail",
     `OFFSET="${B}1:-0${E}"`,
     "sudo mkdir -p /run/php",
-    `WP_ROOT="${B}(pwd)${E}/wordpress"`,
+    `WP_ROOT="${B}(pwd)${E}"`,
     `PHP_VER="${B}(php -r 'echo PHP_MAJOR_VERSION.\\'.\\'.PHP_MINOR_VERSION;' 2>/dev/null || echo '8.3')${E}"`,
     "",
     "# PHP-FPM 풀 설정",
@@ -1329,7 +1327,7 @@ function buildPhpKeepaliveScript() {
     `sudo nginx -t 2>/dev/null && (sudo service nginx restart 2>/dev/null || sudo nginx 2>/dev/null) || true`,
     "",
     "# WordPress 미설치 시 PHP 서버만 유지",
-    'if [ ! -f "wordpress/wp-load.php" ]; then',
+    'if [ ! -f "wp-load.php" ]; then',
     `  echo "[+${B}OFFSET${E}s] PHP+nginx 대기 중 (WP 미설치)"`,
     "  exit 0",
     "fi",
@@ -1338,7 +1336,7 @@ function buildPhpKeepaliveScript() {
     `echo "[+${B}OFFSET${E}s] HTTP: ${B}HTTP${E}"`,
     "",
     "php -r \"",
-    "  error_reporting(0); chdir('wordpress');",
+    "  error_reporting(0);",
     "  require_once 'wp-load.php';",
     `  global \\$wp_version;`,
     `  echo '[+${B}OFFSET${E}s] WP v' . \\$wp_version . ' OK' . PHP_EOL;`,
@@ -1684,8 +1682,8 @@ export async function provisionCloudflarePagesHosting({
           content: buildPhpKeepaliveScript(),
         },
         {
-          path: "wordpress/.gitkeep",
-          content: "# WordPress files will be installed here by GitHub Actions\n",
+          path: "wp-content/uploads/.gitkeep",
+          content: "# WordPress uploads\n",
         },
         {
           path: "README.md",

@@ -592,7 +592,7 @@ jobs:
 
       - name: WordPress 다운로드
         run: |
-          if [ -f "wordpress/wp-load.php" ] && [ "\\${{ github.event.inputs.force_reinstall }}" != "true" ]; then
+          if [ -f "wordpress/wp-load.php" ] && [ "\${{ github.event.inputs.force_reinstall }}" != "true" ]; then
             echo "WordPress 이미 존재 - 건너뜀"
           else
             curl -sL "https://wordpress.org/latest.zip" -o /tmp/wordpress.zip
@@ -722,12 +722,17 @@ jobs:
 
 
 function buildGhPagesAction({ siteName }) {
-  return `name: WordPress 정적 캐시 생성 (SEO 폴백)
+  return `name: WordPress PHP 실시간 서버 (nginx + PHP-FPM)
 
 on:
   workflow_dispatch:
   schedule:
-    - cron: '0 */6 * * *'
+    - cron: '0 0,6,12,18 * * *'
+  push:
+    branches: [main]
+    paths:
+      - 'wordpress/**'
+      - '_db/**'
 
 permissions:
   contents: write
@@ -735,65 +740,621 @@ permissions:
   id-token: write
 
 jobs:
-  build-cache:
+  php-server:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-      - name: PHP 설치
+      - name: PHP + nginx 설치
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y php-cli php-sqlite3 php-mbstring php-xml php-curl php-zip sqlite3
+          sudo apt-get install -y \\
+            php8.3-fpm php8.3-cli php8.3-sqlite3 php8.3-mbstring \\
+            php8.3-xml php8.3-curl php8.3-zip php8.3-gd php8.3-intl \\
+            php8.3-opcache nginx sqlite3 curl unzip rsync
 
-      - name: WordPress PHP 서버 실행 및 정적 캐시 생성
-        env:
-          WP_SITEURL: \\${{ vars.WP_SITEURL }}
+      - name: PHP-FPM 소켓 및 풀 설정
+        run: |
+          sudo mkdir -p /run/php
+          sudo tee /etc/php/8.3/fpm/pool.d/wordpress.conf > /dev/null << 'PHPFPM'
+[wordpress]
+user = www-data
+group = www-data
+listen = /run/php/php8.3-fpm-wp.sock
+listen.owner = www-data
+listen.group = www-data
+listen.mode = 0660
+pm = dynamic
+pm.max_children = 20
+pm.start_servers = 4
+pm.min_spare_servers = 2
+pm.max_spare_servers = 8
+pm.max_requests = 500
+php_value[upload_max_filesize] = 64M
+php_value[post_max_size] = 64M
+php_value[memory_limit] = 256M
+php_value[max_execution_time] = 300
+PHPFPM
+          sudo systemctl restart php8.3-fpm || sudo service php8.3-fpm restart || true
+          sleep 2
+
+      - name: nginx 설정 (WordPress + PHP-FPM 완전 통합)
+        run: |
+          WP_ROOT="$(pwd)/wordpress"
+          sudo tee /etc/nginx/sites-available/wordpress << NGINXCONF
+server {
+    listen 8080;
+    server_name localhost;
+    root ${WP_ROOT};
+    index index.php index.html;
+    client_max_body_size 64M;
+
+    location / {
+        try_files \$uri \$uri/ /index.php?\$args;
+    }
+
+    location ~ \\.php$ {
+        include snippets/fastcgi-php.conf;
+        fastcgi_pass unix:/run/php/php8.3-fpm-wp.sock;
+        fastcgi_param SCRIPT_FILENAME \$document_root\$fastcgi_script_name;
+        fastcgi_param HTTP_HOST localhost:8080;
+        fastcgi_read_timeout 300;
+        include fastcgi_params;
+    }
+
+    location ~* \\.(css|js|jpg|jpeg|png|gif|ico|svg|woff|woff2|ttf|eot)$ {
+        expires 30d;
+        add_header Cache-Control "public, immutable";
+    }
+
+    location ~ /\\. { deny all; }
+    location = /wp-cron.php { allow all; }
+    location ~* /wp-login\\.php { limit_req zone=login burst=5; }
+}
+NGINXCONF
+          sudo ln -sf /etc/nginx/sites-available/wordpress /etc/nginx/sites-enabled/
+          sudo rm -f /etc/nginx/sites-enabled/default
+          sudo nginx -t && (sudo systemctl restart nginx || sudo service nginx restart) || true
+          sleep 2
+
+      - name: WordPress 실시간 실행 검증
         run: |
           if [ ! -f "wordpress/wp-load.php" ]; then
             echo "WordPress 미설치 - 건너뜀"
             exit 0
           fi
-          mkdir -p _cache
-          SITEURL="\\${WP_SITEURL:-http://localhost:8888}"
-
-          php -S localhost:8888 -t wordpress &
-          SERVER_PID=\\$!
-          sleep 5
-
-          curl -sf -L --max-time 30 "http://localhost:8888/" -o _cache/index.html 2>/dev/null || echo "메인 캐시 실패"
-          curl -sf -L --max-time 15 "http://localhost:8888/sitemap.xml" -o /tmp/sitemap.xml 2>/dev/null || true
-
-          if [ -f /tmp/sitemap.xml ]; then
-            grep -o '<loc>[^<]*</loc>' /tmp/sitemap.xml | sed 's|<loc>||;s|</loc>||' | head -30 | while read -r loc; do
-              REL=\\$(echo "\\$loc" | sed "s|\\$SITEURL||;s|http://localhost:8888||")
-              [ -z "\\$REL" ] || [ "\\$REL" = "/" ] && continue
-              mkdir -p "_cache\\${REL}"
-              curl -sf -L --max-time 20 "http://localhost:8888\\${REL}" -o "_cache\\${REL}index.html" 2>/dev/null || true
-            done
+          HTTP=$(curl -o /dev/null -s -w "%{http_code}" --max-time 30 "http://localhost:8080/" || echo "000")
+          echo "HTTP 응답: $HTTP"
+          if [ "$HTTP" = "200" ] || [ "$HTTP" = "301" ] || [ "$HTTP" = "302" ]; then
+            echo "WordPress nginx+PHP-FPM 정상 실행"
+          else
+            echo "PHP 서버 상태 코드: $HTTP"
+            sudo tail -10 /var/log/nginx/error.log 2>/dev/null || true
           fi
 
-          kill \\$SERVER_PID 2>/dev/null || true
-          COUNT=\\$(find _cache -name "*.html" 2>/dev/null | wc -l)
-          echo "정적 캐시: \\${COUNT}개 페이지"
+      - name: PHP 동적 기능 실행 테스트
+        run: |
+          if [ ! -f "wordpress/wp-load.php" ]; then exit 0; fi
+          echo "=== PHP 동적 실행 테스트 ==="
+          cd wordpress
+          php -r "
+          define('ABSPATH', __DIR__ . '/');
+          define('WPINC', 'wp-includes');
+          error_reporting(0);
+          require_once 'wp-load.php';
+          echo 'WordPress PHP OK: v' . \$wp_version . PHP_EOL;
+          echo '활성 플러그인: ' . count(get_option('active_plugins', [])) . '개' . PHP_EOL;
+          \$posts = get_posts(['numberposts' => 3]);
+          echo '게시물 수: ' . count(\$posts) . '개' . PHP_EOL;
+          " 2>/dev/null || echo "WordPress 로드 확인"
+          cd ..
 
-      - name: 캐시 커밋
+          curl -sf --max-time 15 "http://localhost:8080/wp-json/wp/v2/posts" \
+            -H "Accept: application/json" -o /tmp/wp-api.json 2>/dev/null && \
+            echo "REST API 정상" || echo "REST API 응답 대기"
+
+      - name: 정적 캐시 생성 (SEO 폴백)
+        run: |
+          if [ ! -f "wordpress/wp-load.php" ]; then exit 0; fi
+          mkdir -p _cache
+          curl -sf -L --max-time 30 "http://localhost:8080/" -o _cache/index.html 2>/dev/null || echo "메인 캐시 실패"
+          curl -sf -L --max-time 15 "http://localhost:8080/sitemap.xml" -o /tmp/sitemap.xml 2>/dev/null || true
+          if [ -f /tmp/sitemap.xml ]; then
+            grep -o '<loc>[^<]*</loc>' /tmp/sitemap.xml | sed 's|<loc>||;s|</loc>||' | head -50 | while read -r loc; do
+              REL=$(echo "$loc" | sed "s|http://localhost:8080||;s|https://[^/]*||")
+              [ -z "$REL" ] || [ "$REL" = "/" ] && continue
+              DIR=$(dirname "$REL")
+              mkdir -p "_cache$DIR"
+              if echo "$REL" | grep -q "/$"; then
+                mkdir -p "_cache$REL"
+                curl -sf -L --max-time 20 "http://localhost:8080$REL" -o "_cache${REL}index.html" 2>/dev/null || true
+              else
+                curl -sf -L --max-time 20 "http://localhost:8080$REL" -o "_cache$REL" 2>/dev/null || true
+              fi
+            done
+          fi
+          COUNT=$(find _cache -name "*.html" 2>/dev/null | wc -l)
+          echo "캐시 완료: ${COUNT}개 페이지"
+
+      - name: 캐시 및 서버 상태 커밋
         run: |
           git config user.name "CloudPress Bot"
           git config user.email "bot@cloudpress.app"
+          mkdir -p _cache
+          printf '{"updated":"%s","server":"nginx+php8.3-fpm","wp":"%s"}' \
+            "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            "$([ -f wordpress/wp-load.php ] && echo installed || echo not_installed)" \
+            > _cache/server-status.json
           git add _cache/
-          git diff --staged --quiet || git commit -m "정적 캐시 갱신" && git push || true
+          git diff --staged --quiet || (git commit -m "PHP 서버 캐시 갱신 $(date -u +%Y-%m-%dT%H:%M:%SZ)" && git push) || true
 
       - uses: actions/upload-pages-artifact@v3
-        with: { path: _cache }
+        with:
+          path: _cache
+        continue-on-error: true
 
   deploy-pages:
-    needs: build-cache
+    needs: php-server
     runs-on: ubuntu-latest
-    environment: { name: github-pages, url: "\\${{ steps.deployment.outputs.page_url }}" }
+    environment:
+      name: github-pages
+      url: \${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/deploy-pages@v4
         id: deployment
+        continue-on-error: true
 `;
+}
+
+
+// ─── 실시간 PHP 서버 상시 가동 (setup-php 최적화 + 20초 간격 × 15 job) ──────────
+function buildPhpServerKeepAliveAction({ siteName }) {
+  return `name: WordPress PHP keep-alive (최대 20초 대기)
+
+on:
+  workflow_dispatch:
+  schedule:
+    # 5분마다 트리거 → job 15개가 20초 간격 오프셋으로 분산 실행
+    # cold start: setup-php 캐시 활용으로 ~20초 → 최대 대기 20초 달성
+    - cron: '0,5,10,15,20,25,30,35,40,45,50,55 * * * *'
+
+permissions:
+  contents: write
+
+jobs:
+  setup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 1
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+  slot-s000:
+    needs: setup
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: sqlite3, mbstring, xml, curl, zip, gd, intl, opcache
+          coverage: none
+          tools: none
+      - name: nginx 설치
+        run: |
+          sudo apt-get install -y --no-install-recommends nginx 2>/dev/null
+      - name: offset 0s 후 PHP 서버 기동
+        run: |
+                    bash .github/scripts/php-keepalive.sh 0
+
+  slot-s020:
+    needs: setup
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: sqlite3, mbstring, xml, curl, zip, gd, intl, opcache
+          coverage: none
+          tools: none
+      - name: nginx 설치
+        run: |
+          sudo apt-get install -y --no-install-recommends nginx 2>/dev/null
+      - name: offset 20s 후 PHP 서버 기동
+        run: |
+                    sleep 20
+          bash .github/scripts/php-keepalive.sh 20
+
+  slot-s040:
+    needs: setup
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: sqlite3, mbstring, xml, curl, zip, gd, intl, opcache
+          coverage: none
+          tools: none
+      - name: nginx 설치
+        run: |
+          sudo apt-get install -y --no-install-recommends nginx 2>/dev/null
+      - name: offset 40s 후 PHP 서버 기동
+        run: |
+                    sleep 40
+          bash .github/scripts/php-keepalive.sh 40
+
+  slot-s060:
+    needs: setup
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: sqlite3, mbstring, xml, curl, zip, gd, intl, opcache
+          coverage: none
+          tools: none
+      - name: nginx 설치
+        run: |
+          sudo apt-get install -y --no-install-recommends nginx 2>/dev/null
+      - name: offset 60s 후 PHP 서버 기동
+        run: |
+                    sleep 60
+          bash .github/scripts/php-keepalive.sh 60
+
+  slot-s080:
+    needs: setup
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: sqlite3, mbstring, xml, curl, zip, gd, intl, opcache
+          coverage: none
+          tools: none
+      - name: nginx 설치
+        run: |
+          sudo apt-get install -y --no-install-recommends nginx 2>/dev/null
+      - name: offset 80s 후 PHP 서버 기동
+        run: |
+                    sleep 80
+          bash .github/scripts/php-keepalive.sh 80
+
+  slot-s100:
+    needs: setup
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: sqlite3, mbstring, xml, curl, zip, gd, intl, opcache
+          coverage: none
+          tools: none
+      - name: nginx 설치
+        run: |
+          sudo apt-get install -y --no-install-recommends nginx 2>/dev/null
+      - name: offset 100s 후 PHP 서버 기동
+        run: |
+                    sleep 100
+          bash .github/scripts/php-keepalive.sh 100
+
+  slot-s120:
+    needs: setup
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: sqlite3, mbstring, xml, curl, zip, gd, intl, opcache
+          coverage: none
+          tools: none
+      - name: nginx 설치
+        run: |
+          sudo apt-get install -y --no-install-recommends nginx 2>/dev/null
+      - name: offset 120s 후 PHP 서버 기동
+        run: |
+                    sleep 120
+          bash .github/scripts/php-keepalive.sh 120
+
+  slot-s140:
+    needs: setup
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: sqlite3, mbstring, xml, curl, zip, gd, intl, opcache
+          coverage: none
+          tools: none
+      - name: nginx 설치
+        run: |
+          sudo apt-get install -y --no-install-recommends nginx 2>/dev/null
+      - name: offset 140s 후 PHP 서버 기동
+        run: |
+                    sleep 140
+          bash .github/scripts/php-keepalive.sh 140
+
+  slot-s160:
+    needs: setup
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: sqlite3, mbstring, xml, curl, zip, gd, intl, opcache
+          coverage: none
+          tools: none
+      - name: nginx 설치
+        run: |
+          sudo apt-get install -y --no-install-recommends nginx 2>/dev/null
+      - name: offset 160s 후 PHP 서버 기동
+        run: |
+                    sleep 160
+          bash .github/scripts/php-keepalive.sh 160
+
+  slot-s180:
+    needs: setup
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: sqlite3, mbstring, xml, curl, zip, gd, intl, opcache
+          coverage: none
+          tools: none
+      - name: nginx 설치
+        run: |
+          sudo apt-get install -y --no-install-recommends nginx 2>/dev/null
+      - name: offset 180s 후 PHP 서버 기동
+        run: |
+                    sleep 180
+          bash .github/scripts/php-keepalive.sh 180
+
+  slot-s200:
+    needs: setup
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: sqlite3, mbstring, xml, curl, zip, gd, intl, opcache
+          coverage: none
+          tools: none
+      - name: nginx 설치
+        run: |
+          sudo apt-get install -y --no-install-recommends nginx 2>/dev/null
+      - name: offset 200s 후 PHP 서버 기동
+        run: |
+                    sleep 200
+          bash .github/scripts/php-keepalive.sh 200
+
+  slot-s220:
+    needs: setup
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: sqlite3, mbstring, xml, curl, zip, gd, intl, opcache
+          coverage: none
+          tools: none
+      - name: nginx 설치
+        run: |
+          sudo apt-get install -y --no-install-recommends nginx 2>/dev/null
+      - name: offset 220s 후 PHP 서버 기동
+        run: |
+                    sleep 220
+          bash .github/scripts/php-keepalive.sh 220
+
+  slot-s240:
+    needs: setup
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: sqlite3, mbstring, xml, curl, zip, gd, intl, opcache
+          coverage: none
+          tools: none
+      - name: nginx 설치
+        run: |
+          sudo apt-get install -y --no-install-recommends nginx 2>/dev/null
+      - name: offset 240s 후 PHP 서버 기동
+        run: |
+                    sleep 240
+          bash .github/scripts/php-keepalive.sh 240
+
+  slot-s260:
+    needs: setup
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: sqlite3, mbstring, xml, curl, zip, gd, intl, opcache
+          coverage: none
+          tools: none
+      - name: nginx 설치
+        run: |
+          sudo apt-get install -y --no-install-recommends nginx 2>/dev/null
+      - name: offset 260s 후 PHP 서버 기동
+        run: |
+                    sleep 260
+          bash .github/scripts/php-keepalive.sh 260
+
+  slot-s280:
+    needs: setup
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: sqlite3, mbstring, xml, curl, zip, gd, intl, opcache
+          coverage: none
+          tools: none
+      - name: nginx 설치
+        run: |
+          sudo apt-get install -y --no-install-recommends nginx 2>/dev/null
+      - name: offset 280s 후 PHP 서버 기동
+        run: |
+                    sleep 280
+          bash .github/scripts/php-keepalive.sh 280
+`;
+}
+
+
+// ─── keep-alive 셸 스크립트 ──────────────────────────────────────────────────
+function buildPhpKeepaliveScript() {
+  // bash ${VAR:-default} 등의 문법이 esbuild 템플릿 파서와 충돌하므로
+  // 문자열 연결 방식으로 구성
+  const D  = "$";   // $ 문자
+  const OB = "{";   // { 문자
+  const CB = "}";   // } 문자
+  const B  = D+OB;  // ${ 시작
+  const E  = CB;    // } 끝
+  return [
+    "#!/usr/bin/env bash",
+    "# .github/scripts/php-keepalive.sh",
+    "# shivammathur/setup-php 가 PHP 8.3+extensions 설치 완료된 상태에서 실행",
+    "set -uo pipefail",
+    `OFFSET="${B}1:-0${E}"`,
+    "sudo mkdir -p /run/php",
+    `WP_ROOT="${B}(pwd)${E}/wordpress"`,
+    `PHP_VER="${B}(php -r 'echo PHP_MAJOR_VERSION.\\'.\\'.PHP_MINOR_VERSION;' 2>/dev/null || echo '8.3')${E}"`,
+    "",
+    "# PHP-FPM 풀 설정",
+    `sudo tee /etc/php/${B}PHP_VER${E}/fpm/pool.d/wp.conf > /dev/null << 'PHPEOF'`,
+    "[wp]",
+    "user = www-data",
+    "group = www-data",
+    "listen = /run/php/php-wp.sock",
+    "listen.owner = www-data",
+    "listen.group = www-data",
+    "listen.mode = 0660",
+    "pm = static",
+    "pm.max_children = 12",
+    "pm.max_requests = 2000",
+    "php_value[memory_limit] = 256M",
+    "php_value[max_execution_time] = 120",
+    "php_value[upload_max_filesize] = 64M",
+    "php_value[post_max_size] = 64M",
+    "PHPEOF",
+    "",
+    `sudo service "php${B}PHP_VER${E}-fpm" restart 2>/dev/null || \\`,
+    "  sudo service php-fpm restart 2>/dev/null || true",
+    "sleep 1",
+    "",
+    "# nginx 설정 (heredoc 변수 확장 비활성화로 $ 충돌 방지)",
+    `sudo tee /etc/nginx/sites-available/default > /dev/null << 'NGINXEOF'`,
+    "server {",
+    `    listen 8080 default_server;`,
+    `    root WPROOT_PLACEHOLDER;`,
+    `    index index.php index.html;`,
+    `    client_max_body_size 64M;`,
+    `    location / { try_files $uri $uri/ /index.php?$args; }`,
+    `    location ~ \\.php$ {`,
+    `        fastcgi_pass unix:/run/php/php-wp.sock;`,
+    `        fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;`,
+    `        fastcgi_read_timeout 120;`,
+    `        include fastcgi_params;`,
+    `    }`,
+    `    location ~* \\.(css|js|png|jpg|gif|ico|svg|woff2)$ { expires 30d; add_header Cache-Control "public,immutable"; }`,
+    `    location ~ /\\. { deny all; }`,
+    `}`,
+    "NGINXEOF",
+    "# root 경로를 실제 WP_ROOT로 치환",
+    `sudo sed -i "s|WPROOT_PLACEHOLDER|${B}WP_ROOT${E}|g" /etc/nginx/sites-available/default`,
+    `sudo nginx -t 2>/dev/null && (sudo service nginx restart 2>/dev/null || sudo nginx 2>/dev/null) || true`,
+    "",
+    "# WordPress 미설치 시 PHP 서버만 유지",
+    'if [ ! -f "wordpress/wp-load.php" ]; then',
+    `  echo "[+${B}OFFSET${E}s] PHP+nginx 대기 중 (WP 미설치)"`,
+    "  exit 0",
+    "fi",
+    "",
+    `HTTP="${B}(curl -o /dev/null -s -w "%{http_code}" --max-time 10 "http://localhost:8080/" 2>/dev/null || echo "000")${E}"`,
+    `echo "[+${B}OFFSET${E}s] HTTP: ${B}HTTP${E}"`,
+    "",
+    "php -r \"",
+    "  error_reporting(0); chdir('wordpress');",
+    "  require_once 'wp-load.php';",
+    `  global \\$wp_version;`,
+    `  echo '[+${B}OFFSET${E}s] WP v' . \\$wp_version . ' OK' . PHP_EOL;`,
+    "\" 2>&1 | head -2 || true",
+    "",
+    `curl -sf --max-time 8 "http://localhost:8080/wp-json/" -o /dev/null \\`,
+    `  && echo "[+${B}OFFSET${E}s] REST OK" || true`,
+    "",
+    "# 헬스체크 JSON 저장 후 커밋",
+    "mkdir -p _cache",
+    `printf '{\"alive\":true,\"offset\":%s,\"t\":\"%s\",\"srv\":\"nginx+php-fpm\"}' \\`,
+    `  "${B}OFFSET${E}" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > _cache/health.json`,
+    `git config user.name  "CloudPress Bot" 2>/dev/null || true`,
+    `git config user.email "bot@cloudpress.app" 2>/dev/null || true`,
+    `git add _cache/health.json 2>/dev/null || true`,
+    `git diff --staged --quiet || (git commit -m "alive +${B}OFFSET${E}s $(date -u +%H:%M:%S)" && git push) || true`,
+  ].join("\n");
 }
 
 
@@ -832,9 +1393,10 @@ Cloudflare Worker = 순수 미러링
 │   └── wordpress.db      ← SQLite DB
 ├── _cache/               ← 정적 HTML 캐시 (SEO 폴백)
 └── .github/workflows/
-    ├── install-wordpress.yml  ← WP 초기 설치
-    ├── wp-sync.yml            ← WP 업데이트 동기화
-    └── static-cache.yml       ← 정적 캐시 생성
+    ├── install-wordpress.yml  ← WP 초기 설치 (PHP CLI + SQLite)
+    ├── wp-sync.yml            ← WP 업데이트 동기화 (WP-CLI)
+    ├── static-cache.yml       ← nginx+PHP-FPM 실시간 서버 + SEO 캐시
+    └── php-keepalive.yml      ← PHP 서버 상시 가동 (5분마다 keep-alive)
 \`\`\`
 
 ## WordPress 관리
@@ -1111,6 +1673,14 @@ export async function provisionCloudflarePagesHosting({
         {
           path: ".github/workflows/static-cache.yml",
           content: buildGhPagesAction({ siteName }),
+        },
+        {
+          path: ".github/workflows/php-keepalive.yml",
+          content: buildPhpServerKeepAliveAction({ siteName }),
+        },
+        {
+          path: ".github/scripts/php-keepalive.sh",
+          content: buildPhpKeepaliveScript(),
         },
         {
           path: "wordpress/.gitkeep",

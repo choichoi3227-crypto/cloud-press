@@ -672,10 +672,56 @@ export async function onRequestPost(context) {
   const { request, env } = context;
   const payload = await requireAuth(request, env);
   if (!payload) return jsonErr("인증이 필요합니다.", 401);
-  if (payload.role !== "admin") return jsonErr("관리자 권한이 필요합니다.", 403);
 
   const url    = new URL(request.url);
   const action = url.searchParams.get("action");
+  const siteId = url.searchParams.get("site_id") || (await request.clone().json().then(b => b?.site_id).catch(() => null));
+
+  // ── 파일 생성/업로드 (자신의 사이트에 대해 일반 유저도 가능) ─────────────
+  if (!action && siteId) {
+    let body;
+    try { body = await request.json(); } catch { return jsonErr("요청 형식 오류", 400); }
+
+    const { path: filePath, content: fileContent, encoding } = body;
+    if (!filePath) return jsonErr("path가 필요합니다.", 400);
+
+    const site = await env.DB.prepare(
+      "SELECT github_repo_owner, github_repo_name, user_id FROM sites WHERE id = ?"
+    ).bind(siteId).first();
+    if (!site) return jsonErr("사이트를 찾을 수 없습니다.", 404);
+    if (site.user_id !== payload.id && payload.role !== "admin")
+      return jsonErr("권한이 없습니다.", 403);
+    if (!site.github_repo_owner || !site.github_repo_name)
+      return jsonErr("GitHub 저장소가 연결되어 있지 않습니다.", 400);
+
+    const token = await pickGithubToken(env).catch(() => null);
+    if (!token) return jsonErr("사용 가능한 GitHub 토큰이 없습니다.", 400);
+
+    const cleanPath = filePath.replace(/^\//, "");
+    const { data: existing } = await ghReq("GET",
+      `/repos/${site.github_repo_owner}/${site.github_repo_name}/contents/${cleanPath}`, token
+    );
+
+    const contentB64 = (encoding === "base64")
+      ? fileContent
+      : btoa(unescape(encodeURIComponent(fileContent || "")));
+
+    const reqBody = {
+      message: existing?.sha ? `Update ${cleanPath}` : `Create ${cleanPath}`,
+      content: contentB64,
+    };
+    if (existing?.sha) reqBody.sha = existing.sha;
+
+    const { ok, data } = await ghReq("PUT",
+      `/repos/${site.github_repo_owner}/${site.github_repo_name}/contents/${cleanPath}`,
+      token, reqBody
+    );
+    if (ok) return jsonOk({ success: true, message: "파일이 저장되었습니다.", path: filePath });
+    return jsonErr(data?.message || "파일 저장에 실패했습니다.", 500);
+  }
+
+  // 관리자 전용
+  if (payload.role !== "admin") return jsonErr("관리자 권한이 필요합니다.", 403);
 
   // 토큰 추가
   if (!action || action === "add_token") {

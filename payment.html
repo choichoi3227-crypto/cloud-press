@@ -137,8 +137,8 @@
     <script src="/src/auth-frontend.js"></script>
     <script src="/src/sidebar.js"></script>
     <script>
-        const TOKEN = localStorage.getItem('admin_token');
-        const H = { 'Authorization': `Bearer ${TOKEN}`, 'Content-Type': 'application/json' };
+        function getToken() { return localStorage.getItem('admin_token') || ''; }
+        const H = new Proxy({}, { get(_, p) { return ({ 'Authorization': `Bearer ${getToken()}`, 'Content-Type': 'application/json' })[p]; } });
 
         function showAlert(msg, type = 'error') {
             const el = document.getElementById('alertMsg');
@@ -201,6 +201,7 @@
         }
 
         async function loadCards() {
+            await new Promise(r => setTimeout(r, 50)); // DOM 안정화 대기
             try {
                 const TOKEN_CHECK = localStorage.getItem('admin_token');
                 if (!TOKEN_CHECK) {
@@ -415,7 +416,8 @@
                 try { data = JSON.parse(resText); } catch { data = { success: false, error: '서버 응답 오류' }; }
                 if (data.success) {
                     cardAlert('카드가 추가되었습니다!', 'success');
-                    setTimeout(() => { closeAddCard(); loadCards(); }, 1200);
+                    await loadCards(); // 목록 즉시 갱신
+                    setTimeout(() => closeAddCard(), 1200);
                 } else {
                     cardAlert(data.error || '카드 추가에 실패했습니다.');
                 }

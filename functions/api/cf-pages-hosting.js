@@ -787,7 +787,7 @@ PHPFPM
 server {
     listen 8080;
     server_name localhost;
-    root ${WP_ROOT};
+    root \${WP_ROOT};
     index index.php index.html;
     client_max_body_size 64M;
 
@@ -869,14 +869,14 @@ NGINXCONF
               mkdir -p "_cache$DIR"
               if echo "$REL" | grep -q "/$"; then
                 mkdir -p "_cache$REL"
-                curl -sf -L --max-time 20 "http://localhost:8080$REL" -o "_cache${REL}index.html" 2>/dev/null || true
+                curl -sf -L --max-time 20 "http://localhost:8080$REL" -o "_cache\${REL}index.html" 2>/dev/null || true
               else
                 curl -sf -L --max-time 20 "http://localhost:8080$REL" -o "_cache$REL" 2>/dev/null || true
               fi
             done
           fi
           COUNT=$(find _cache -name "*.html" 2>/dev/null | wc -l)
-          echo "캐시 완료: ${COUNT}개 페이지"
+          echo "캐시 완료: \${COUNT}개 페이지"
 
       - name: 캐시 및 서버 상태 커밋
         run: |

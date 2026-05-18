@@ -606,9 +606,16 @@
                 document.getElementById('php-current-badge').textContent = `현재: PHP ${siteData.php_version || '8.2'}`;
             } catch (e) {
                 console.error('[detail] 로드 실패:', e);
-                showAlert('사이트 정보를 불러오지 못했습니다.', 'error');
+                const msg = e?.message || String(e);
+                showAlert(`사이트 정보를 불러오지 못했습니다. (${msg}) — 잠시 후 다시 시도합니다.`, 'error');
+                // 3초 후 자동 재시도 (1회)
+                if (!loadSiteInfo._retried) {
+                    loadSiteInfo._retried = true;
+                    setTimeout(loadSiteInfo, 3000);
+                }
             }
         }
+        loadSiteInfo._retried = false;
 
         // ── 파일 관리자 ──────────────────────────────────────────────────────
         async function loadFiles(path) {

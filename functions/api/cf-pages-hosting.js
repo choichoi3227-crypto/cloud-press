@@ -784,7 +784,30 @@ jobs:
       - name: nginx 설정 (WordPress + PHP-FPM 완전 통합)
         run: |
           WP_ROOT="$(pwd)/wordpress"
-          printf 'server {\n  listen 8080;\n  server_name localhost;\n  root %s;\n  index index.php index.html;\n  client_max_body_size 64M;\n  location / { try_files $uri $uri/ /index.php?$args; }\n  location ~ \\.php$ {\n    include snippets/fastcgi-php.conf;\n    fastcgi_pass unix:/run/php/php8.3-fpm-wp.sock;\n    fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;\n    fastcgi_param HTTP_HOST localhost:8080;\n    fastcgi_read_timeout 300;\n    include fastcgi_params;\n  }\n  location ~* \\.(css|js|jpg|jpeg|png|gif|ico|svg|woff|woff2|ttf|eot)$ {\n    expires 30d;\n    add_header Cache-Control "public, immutable";\n  }\n  location ~ /\\. { deny all; }\n  location = /wp-cron.php { allow all; }\n}\n' "$WP_ROOT" | sudo tee /etc/nginx/sites-available/wordpress > /dev/null
+          {
+            echo 'server {'
+            echo '  listen 8080;'
+            echo '  server_name localhost;'
+            echo "  root $WP_ROOT;"
+            echo '  index index.php index.html;'
+            echo '  client_max_body_size 64M;'
+            echo '  location / { try_files $uri $uri/ /index.php?$args; }'
+            echo '  location ~ \.php$ {'
+            echo '    include snippets/fastcgi-php.conf;'
+            echo '    fastcgi_pass unix:/run/php/php8.3-fpm-wp.sock;'
+            echo '    fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;'
+            echo '    fastcgi_param HTTP_HOST localhost:8080;'
+            echo '    fastcgi_read_timeout 300;'
+            echo '    include fastcgi_params;'
+            echo '  }'
+            echo '  location ~* \.(css|js|jpg|jpeg|png|gif|ico|svg|woff|woff2|ttf|eot)$ {'
+            echo '    expires 30d;'
+            echo "    add_header Cache-Control 'public, immutable';"
+            echo '  }'
+            echo '  location ~ /\. { deny all; }'
+            echo '  location = /wp-cron.php { allow all; }'
+            echo '}'
+          } | sudo tee /etc/nginx/sites-available/wordpress > /dev/null
           sudo ln -sf /etc/nginx/sites-available/wordpress /etc/nginx/sites-enabled/
           sudo rm -f /etc/nginx/sites-enabled/default
           sudo nginx -t && (sudo systemctl restart nginx || sudo service nginx restart) || true

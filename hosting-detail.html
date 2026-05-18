@@ -71,9 +71,6 @@
                 <button class="tab-btn border border-white/10 px-3 py-2 rounded-xl text-sm font-bold whitespace-nowrap" onclick="switchTab('files',this)">
                     <i class="fas fa-folder-open mr-1"></i> 파일 관리자
                 </button>
-                <button class="tab-btn border border-white/10 px-3 py-2 rounded-xl text-sm font-bold whitespace-nowrap" onclick="switchTab('php',this)">
-                    <i class="fas fa-code mr-1"></i> PHP
-                </button>
                 <button class="tab-btn border border-white/10 px-3 py-2 rounded-xl text-sm font-bold whitespace-nowrap" onclick="switchTab('cache',this)">
                     <i class="fas fa-bolt mr-1"></i> 캐싱
                 </button>
@@ -269,28 +266,7 @@
             </div>
 
             <!-- ── PHP 탭 ── -->
-            <div id="tab-php" class="tab-content hidden space-y-4">
-                <div class="section-card">
-                    <div class="flex justify-between items-center mb-2">
-                        <h3 class="font-bold flex items-center gap-2"><i class="fas fa-code text-indigo-400"></i> PHP 버전 관리</h3>
-                        <span id="php-current-badge" class="text-xs bg-indigo-900/40 border border-indigo-500/30 text-indigo-300 px-3 py-1 rounded-lg font-mono"></span>
-                    </div>
-                    <p class="text-sm text-gray-500 mb-5">
-                        <i class="fas fa-shield-check text-green-400 mr-1"></i>
-                        버전을 변경해도 <strong class="text-white">사이트는 다운되지 않습니다.</strong>
-                    </p>
-                    <div id="php-list-loading" class="text-center py-6 text-gray-500 text-sm">
-                        <i class="fas fa-spinner fa-spin mr-2"></i> PHP 버전 목록 로딩 중...
-                    </div>
-                    <div id="php-list" class="hidden space-y-2 mb-5"></div>
-                    <button onclick="applyPhpVersion()" id="php-apply-btn"
-                        class="w-full bg-indigo-700 py-3 rounded-xl font-bold hover:bg-indigo-600 transition flex items-center justify-center gap-2">
-                        <i class="fas fa-check"></i> 선택한 버전 적용
-                    </button>
-                </div>
-            </div>
-
-            <!-- ── 캐싱 탭 ── -->
+                        <!-- ── 캐싱 탭 ── -->
             <div id="tab-cache" class="tab-content hidden space-y-4">
                 <div class="section-card space-y-5">
                     <h3 class="font-bold flex items-center gap-2"><i class="fas fa-bolt text-yellow-400"></i> 캐시 설정</h3>
@@ -649,7 +625,7 @@
                     el.innerHTML = `<div class="text-center py-8 text-yellow-400 text-sm">
                         <i class="fas fa-info-circle text-2xl mb-2 block"></i>
                         <p>${data.error || '파일을 불러올 수 없습니다.'}</p>
-                        <p class="text-gray-600 text-xs mt-1">호스팅 생성 후 GitHub 저장소가 자동으로 연결됩니다.</p>
+                        <p class="text-gray-600 text-xs mt-1">GitHub 저장소가 초기화 중이거나 파일이 없습니다. 잠시 후 다시 시도해주세요.</p>
                     </div>`;
                     return;
                 }
@@ -752,14 +728,65 @@
             editingFilePath = '';
         }
 
-        function uploadFile() { showAlert('파일 업로드 기능은 준비 중입니다.', 'info'); }
-        function createNewFile() {
-            const name = prompt('새 파일 이름을 입력하세요:');
-            if (!name) return;
-            openFile(`${currentFilePath === '/' ? '' : currentFilePath}/${name}`, name);
-            document.getElementById('file-editor').value = '';
+        function uploadFile() {
+            const input = document.createElement('input');
+            input.type = 'file';
+            input.multiple = true;
+            input.onchange = async () => {
+                const files = Array.from(input.files);
+                if (!files.length) return;
+                let successCount = 0, failCount = 0;
+                for (const file of files) {
+                    try {
+                        const base64 = await new Promise((res, rej) => {
+                            const r = new FileReader();
+                            r.onload = () => res(r.result.split(',')[1]);
+                            r.onerror = () => rej(new Error('읽기 실패'));
+                            r.readAsDataURL(file);
+                        });
+                        const uploadPath = (currentFilePath === '/' ? '' : currentFilePath) + '/' + file.name;
+                        const resp = await fetch('/api/github-storage', {
+                            method: 'POST', headers: HEADERS,
+                            body: JSON.stringify({ site_id: siteId, path: uploadPath, content: base64, encoding: 'base64' }),
+                        });
+                        const data = await resp.json();
+                        if (resp.ok) successCount++;
+                        else { failCount++; console.error('업로드 실패:', file.name, data.error); }
+                    } catch (e) { failCount++; console.error(e); }
+                }
+                if (successCount > 0) { showAlert(`${successCount}개 파일 업로드 완료${failCount > 0 ? `, ${failCount}개 실패` : ''}`); loadFiles(currentFilePath); }
+                else showAlert('업로드에 실패했습니다.', 'error');
+            };
+            input.click();
         }
-        function createNewFolder() { showAlert('폴더 생성 기능은 준비 중입니다.', 'info'); }
+        async function createNewFile() {
+            const name = prompt('새 파일 이름을 입력하세요 (예: index.html):');
+            if (!name || !name.trim()) return;
+            const filePath = (currentFilePath === '/' ? '' : currentFilePath) + '/' + name.trim();
+            try {
+                const resp = await fetch('/api/github-storage', {
+                    method: 'POST', headers: HEADERS,
+                    body: JSON.stringify({ site_id: siteId, path: filePath, content: '', encoding: 'utf8' }),
+                });
+                const data = await resp.json();
+                if (resp.ok) { showAlert(`${name} 파일이 생성되었습니다.`); loadFiles(currentFilePath); }
+                else showAlert(data.error || '파일 생성에 실패했습니다.', 'error');
+            } catch { showAlert('오류가 발생했습니다.', 'error'); }
+        }
+        async function createNewFolder() {
+            const name = prompt('새 폴더 이름을 입력하세요:');
+            if (!name || !name.trim()) return;
+            const folderPath = (currentFilePath === '/' ? '' : currentFilePath) + '/' + name.trim() + '/.gitkeep';
+            try {
+                const resp = await fetch('/api/github-storage', {
+                    method: 'POST', headers: HEADERS,
+                    body: JSON.stringify({ site_id: siteId, path: folderPath, content: '', encoding: 'utf8' }),
+                });
+                const data = await resp.json();
+                if (resp.ok) { showAlert(`${name} 폴더가 생성되었습니다.`); loadFiles(currentFilePath); }
+                else showAlert(data.error || '폴더 생성에 실패했습니다.', 'error');
+            } catch { showAlert('오류가 발생했습니다.', 'error'); }
+        }
         async function deleteFile(path) {
             if (!confirm('파일을 삭제하시겠습니까?')) return;
             try {
@@ -1072,9 +1099,9 @@
             const inputCode = code || document.getElementById('custom-country-code').value.trim().toUpperCase();
             if (!inputCode || inputCode.length !== 2) { showAlert('올바른 국가 코드를 입력하세요 (2자리).', 'error'); return; }
             try {
-                const res  = await fetch('/api/sites', {
+                const res  = await fetch(`/api/sites?id=${siteId}`, {
                     method: 'PUT', headers: HEADERS,
-                    body: JSON.stringify({ id: siteId, block_country: inputCode }),
+                    body: JSON.stringify({ block_country: inputCode }),
                 });
                 const data = await res.json();
                 if (res.ok) {
@@ -1088,9 +1115,9 @@
 
         async function unblockCountry(code) {
             try {
-                const res  = await fetch('/api/sites', {
+                const res  = await fetch(`/api/sites?id=${siteId}`, {
                     method: 'PUT', headers: HEADERS,
-                    body: JSON.stringify({ id: siteId, unblock_country: code }),
+                    body: JSON.stringify({ unblock_country: code }),
                 });
                 if (res.ok) {
                     showAlert(`${code} 국가 차단이 해제되었습니다.`);
@@ -1133,9 +1160,9 @@
 
         async function blockIPDirect(ip) {
             try {
-                const res  = await fetch('/api/sites', {
+                const res  = await fetch(`/api/sites?id=${siteId}`, {
                     method: 'PUT', headers: HEADERS,
-                    body: JSON.stringify({ id: siteId, block_ip: ip }),
+                    body: JSON.stringify({ block_ip: ip }),
                 });
                 const data = await res.json();
                 if (res.ok) {
@@ -1165,9 +1192,9 @@
 
         async function unblockIP(ip) {
             try {
-                await fetch('/api/sites', {
+                await fetch(`/api/sites?id=${siteId}`, {
                     method: 'PUT', headers: HEADERS,
-                    body: JSON.stringify({ id: siteId, unblock_ip: ip }),
+                    body: JSON.stringify({ unblock_ip: ip }),
                 });
                 blockedIPs = blockedIPs.filter(i => i !== ip);
                 renderBlockedIPs();

@@ -561,7 +561,7 @@ jobs:
           PHP_PID=$!
           sleep 3
           # 메인 페이지 캐시
-          HTTP=$(curl -o _cache/index.html -s -w "%{http_code}" --max-time 20             -H "Host: localhost" "http://localhost:9090/" 2>/dev/null || echo "000")
+          HTTP=\$(curl -o _cache/index.html -s -w "%{http_code}" --max-time 20             -H "Host: localhost" "http://localhost:9090/" 2>/dev/null || echo "000")
           echo "캐시 HTTP: $HTTP"
           # 추가 주요 페이지 캐시
           for SLUG in wp-login.php wp-json; do
@@ -570,10 +570,10 @@ jobs:
           kill $PHP_PID 2>/dev/null || true
           # index.html 이 정상적인 HTML인지 확인
           if [ -f _cache/index.html ] && grep -q "<html" _cache/index.html 2>/dev/null; then
-            echo "✅ 초기 캐시 생성 성공 ($(wc -c < _cache/index.html) bytes)"
+            echo "✅ 초기 캐시 생성 성공 (\$(wc -c < _cache/index.html) bytes)"
           else
             # 실패시 설치 중 안내 HTML 생성
-            SITE_TITLE="${SITE_NAME:-WordPress 사이트}"
+            SITE_TITLE="\${SITE_NAME:-WordPress 사이트}"
             cat > _cache/index.html << 'INSTALLING_HTML'
 <!DOCTYPE html>
 <html lang="ko">
@@ -624,7 +624,7 @@ INSTALLING_HTML
               git pull --rebase origin main 2>/dev/null || true
               git push origin main && break
               echo "Push 충돌 재시도 ($i/5)..."
-              sleep $((i * 3))
+              sleep \$((i * 3))
             done
           fi
           echo "완료"
@@ -681,7 +681,7 @@ jobs:
             for i in 1 2 3; do
               git pull --rebase origin main 2>/dev/null || true
               git push origin main && break
-              sleep $((i * 3))
+              sleep \$((i * 3))
             done || true
           fi
 `;

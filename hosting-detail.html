@@ -89,6 +89,9 @@
                 <button class="tab-btn border border-white/10 px-3 py-2 rounded-xl text-sm font-bold whitespace-nowrap" onclick="switchTab('danger',this)">
                     <i class="fas fa-exclamation-triangle mr-1 text-red-400"></i> 위험 구역
                 </button>
+                <button class="tab-btn border border-white/10 px-3 py-2 rounded-xl text-sm font-bold whitespace-nowrap" onclick="switchTab('php',this)">
+                    <i class="fas fa-code mr-1 text-indigo-400"></i> PHP 버전
+                </button>
             </div>
 
             <!-- ── 개요 탭 ── -->
@@ -490,6 +493,27 @@
                 </div>
             </div>
 
+            <!-- ── PHP 버전 탭 ── -->
+            <div id="tab-php" class="tab-content hidden space-y-4">
+                <div class="section-card">
+                    <h3 class="font-bold flex items-center gap-2 mb-4">
+                        <i class="fas fa-code text-indigo-400"></i> PHP 버전 변경
+                        <span id="php-current-badge" class="text-xs bg-indigo-900/40 border border-indigo-500/30 text-indigo-300 px-2 py-1 rounded-lg font-mono ml-2">현재: PHP 8.2</span>
+                    </h3>
+                    <div id="php-list-loading" class="text-center py-6 text-gray-400 text-sm">
+                        <i class="fas fa-spinner fa-spin mr-2"></i> PHP 버전 목록 로딩 중...
+                    </div>
+                    <div id="php-list" class="grid grid-cols-2 gap-3 hidden"></div>
+                    <div class="mt-4 flex justify-end">
+                        <button id="php-apply-btn"
+                            onclick="applyPhpVersion()"
+                            class="bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-bold px-5 py-2 rounded-xl transition">
+                            <i class="fas fa-check mr-1"></i> 적용
+                        </button>
+                    </div>
+                </div>
+            </div>
+
         </div>
     </main>
 
@@ -529,36 +553,57 @@
         // ── 알림 ─────────────────────────────────────────────────────────────
         function showAlert(msg, type = 'success') {
             const el = document.getElementById('alertMsg');
+            if (!el) { console.warn('[detail] alertMsg element not found'); return; }
             const styles = {
                 success: 'bg-green-900/40 border border-green-500/40 text-green-400',
                 error:   'bg-red-900/40 border border-red-500/40 text-red-400',
                 info:    'bg-blue-900/40 border border-blue-500/40 text-blue-400',
             };
             el.className = `mb-4 p-3 rounded-xl text-sm text-center ${styles[type] || styles.info}`;
+            el.dataset.type = type;
             el.textContent = msg;
             el.classList.remove('hidden');
-            setTimeout(() => el.classList.add('hidden'), 5000);
+            if (type !== 'error') setTimeout(() => el.classList.add('hidden'), 5000);
         }
 
         function escHtml(str) {
             return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
         }
 
+        // ── DOM 헬퍼 (null-safe) ──────────────────────────────────────────────
+        function safeSet(id, value) {
+            const el = document.getElementById(id);
+            if (el) el.textContent = value;
+            else console.warn('[detail] missing el:', id);
+        }
+        function safeSetHref(id, href, text) {
+            const el = document.getElementById(id);
+            if (!el) { console.warn('[detail] missing el:', id); return; }
+            el.href = href;
+            if (text !== undefined) el.textContent = text;
+        }
+        function safeSetVal(id, value) {
+            const el = document.getElementById(id);
+            if (el) el.value = value;
+        }
+
         // ── 사이트 정보 로드 ─────────────────────────────────────────────────
         async function loadSiteInfo() {
             try {
-                const res  = await fetch(`/api/sites?id=${siteId}`, { headers: HEADERS });
+                const res = await fetch(`/api/sites?id=${siteId}`, { headers: HEADERS });
                 if (res.status === 401) { localStorage.removeItem('admin_token'); window.location.href = '/login'; return; }
+                if (!res.ok) throw new Error(`API ${res.status}`);
                 const data = await res.json();
-                siteData   = data.site || data;
+                if (!data || (!data.site && !data.id)) throw new Error('사이트 데이터 없음');
+                siteData = data.site || data;
 
-                document.title = `${siteData.site_name} | CloudPress`;
-                document.getElementById('site-title').textContent = siteData.site_name;
-                document.getElementById('site-domain-text').textContent = siteData.primary_domain;
-                document.getElementById('site-domain-link').href = `https://${siteData.primary_domain}`;
-                document.getElementById('site-php-badge').textContent = `PHP ${siteData.php_version || '8.2'}`;
+                document.title = `${siteData.site_name || '사이트'} | CloudPress`;
 
-                // 상태 배지
+                safeSet('site-title', siteData.site_name || '-');
+                safeSet('site-domain-text', siteData.primary_domain || '-');
+                safeSetHref('site-domain-link', siteData.primary_domain ? `https://${siteData.primary_domain}` : '#');
+                safeSet('site-php-badge', `PHP ${siteData.php_version || '8.2'}`);
+
                 const statusMap = {
                     active:    { cls: 'bg-green-500/20 border-green-500/40 text-green-400', label: '운영 중' },
                     creating:  { cls: 'bg-blue-500/20 border-blue-500/40 text-blue-400',   label: '생성 중' },
@@ -566,49 +611,40 @@
                 };
                 const st = statusMap[siteData.status] || statusMap.creating;
                 const badge = document.getElementById('site-status-badge');
-                badge.className = `text-xs px-3 py-1 rounded-full border ${st.cls}`;
-                badge.textContent = st.label;
+                if (badge) { badge.className = `text-xs px-3 py-1 rounded-full border ${st.cls}`; badge.textContent = st.label; }
 
-                // 개요 카드
-                document.getElementById('ov-status').textContent  = st.label;
-                document.getElementById('ov-php').textContent     = siteData.php_version || '8.2';
-                document.getElementById('ov-cache').textContent   = siteData.cache_enabled ? 'ON' : 'OFF';
-                document.getElementById('ov-created').textContent = siteData.created_at
-                    ? new Date(siteData.created_at).toLocaleDateString('ko-KR') : '-';
+                safeSet('ov-status',  st.label);
+                safeSet('ov-php',     siteData.php_version || '8.2');
+                safeSet('ov-cache',   siteData.cache_enabled ? 'ON' : 'OFF');
+                safeSet('ov-created', siteData.created_at ? new Date(siteData.created_at).toLocaleDateString('ko-KR') : '-');
 
-                document.getElementById('info-id').textContent     = siteData.id || '-';
-                document.getElementById('info-domain').textContent = siteData.primary_domain || '-';
-                document.getElementById('info-bucket').textContent = siteData.github_repo || 'GitHub 저장소 생성 중...';
-                document.getElementById('info-wpadmin').textContent = `${siteData.primary_domain}/wp-admin`;
+                safeSet('info-id',      siteData.id || '-');
+                safeSet('info-domain',  siteData.primary_domain || '-');
+                safeSet('info-bucket',  (siteData.github_repo_owner && siteData.github_repo_name)
+                    ? `${siteData.github_repo_owner}/${siteData.github_repo_name}`
+                    : (siteData.github_repo || 'GitHub 저장소 생성 중...'));
+                safeSet('info-wpadmin', siteData.primary_domain ? `${siteData.primary_domain}/wp-admin` : '-');
 
-                // DB / 관리자 정보
-                document.getElementById('db-admin-user').textContent  = siteData.wp_admin_user  || '(생성 중...)';
-                document.getElementById('db-admin-email').textContent = siteData.wp_admin_email || '(생성 중...)';
+                safeSet('db-admin-user',  siteData.wp_admin_user  || '(생성 중...)');
+                safeSet('db-admin-email', siteData.wp_admin_email || '(생성 중...)');
                 const rawPass = siteData.wp_admin_pass || '';
-                document.getElementById('db-admin-pass-raw').value = rawPass;
-                document.getElementById('db-admin-pass').textContent  = rawPass ? '••••••••••••' : '(생성 중...)';
-                // DB 파일 링크
+                safeSetVal('db-admin-pass-raw', rawPass);
+                safeSet('db-admin-pass', rawPass ? '••••••••••••' : '(생성 중...)');
+
                 const ghOwner = siteData.github_repo_owner || '';
                 const ghRepo  = siteData.github_repo_name  || '';
-                const dbLink  = (ghOwner && ghRepo)
-                    ? `https://github.com/${ghOwner}/${ghRepo}/blob/main/_db/wordpress.db`
-                    : '#';
-                const dbLinkEl = document.getElementById('db-file-link');
-                dbLinkEl.href = dbLink;
-                dbLinkEl.textContent = (ghOwner && ghRepo) ? `${ghOwner}/${ghRepo}/_db/wordpress.db` : '(생성 중...)';
-                // WP 관리자 링크
-                const wpAdminUrl = siteData.primary_domain ? `https://${siteData.primary_domain}/wp-admin` : '#';
-                const wpAdminEl  = document.getElementById('db-wpadmin-link');
-                wpAdminEl.href = wpAdminUrl;
-                wpAdminEl.textContent = wpAdminUrl !== '#' ? wpAdminUrl : '(생성 중...)';
+                safeSetHref('db-file-link',
+                    (ghOwner && ghRepo) ? `https://github.com/${ghOwner}/${ghRepo}/blob/main/_db/wordpress.db` : '#',
+                    (ghOwner && ghRepo) ? `${ghOwner}/${ghRepo}/_db/wordpress.db` : '(생성 중...)');
 
-                // PHP 배지
-                document.getElementById('php-current-badge').textContent = `현재: PHP ${siteData.php_version || '8.2'}`;
+                const wpAdminUrl = siteData.primary_domain ? `https://${siteData.primary_domain}/wp-admin` : '#';
+                safeSetHref('db-wpadmin-link', wpAdminUrl, wpAdminUrl !== '#' ? wpAdminUrl : '(생성 중...)');
+
+                safeSet('php-current-badge', `현재: PHP ${siteData.php_version || '8.2'}`);
+
             } catch (e) {
-                console.error('[detail] 로드 실패:', e);
-                const msg = e?.message || String(e);
-                showAlert(`사이트 정보를 불러오지 못했습니다. (${msg}) — 잠시 후 다시 시도합니다.`, 'error');
-                // 3초 후 자동 재시도 (1회)
+                console.error('[detail] loadSiteInfo 실패:', e);
+                showAlert(`사이트 정보를 불러오지 못했습니다. (${e?.message || e})`, 'error');
                 if (!loadSiteInfo._retried) {
                     loadSiteInfo._retried = true;
                     setTimeout(loadSiteInfo, 3000);

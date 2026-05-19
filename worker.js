@@ -781,51 +781,69 @@ async function handleWordPressRequest(request, env, ctx) {
     } catch { return null; }
   };
 
-  // ── PHP_RUNNER가 없는 경우: 정적 캐시 → GitHub Pages 순으로 폴백 ─────────
+  // ── PHP_RUNNER가 없는 경우: _cache/ → GitHub Pages → WordPress 직접 처리 ──
   if (!env.PHP_RUNNER) {
+    // 1) _cache/ 정적 HTML 서빙
     const staticRes = await serveStaticCache();
     if (staticRes) return staticRes;
 
+    // 2) GitHub Pages 폴백
     const ghRes = await serveGhPages();
     if (ghRes) return ghRes;
 
-    // 정적 캐시도 없으면 사이트 준비 중 안내
-    return new Response(`<!DOCTYPE html>
+    // 3) wp-config.php 존재 여부로 설치 완료 판단
+    const wpConfigCheck = await mirror.get("wp-config.php");
+    const isInstalled   = !!wpConfigCheck;
+
+    // 미설치 상태 → install.php 직접 서빙 (worker.js 내장 설치 폼)
+    if (!isInstalled) {
+      const siteUrlStr = `${url.protocol}//${url.host}`;
+      if (path === "/wp-admin/install.php" || path === "/wp-admin/install") {
+        if (method === "POST" && url.searchParams.get("step") === "2") {
+          // POST 설치 처리는 아래 공통 로직에서 처리하도록 통과
+        } else {
+          return new Response(buildInstallPage(siteUrlStr), {
+            headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" },
+          });
+        }
+      } else {
+        // 다른 경로는 install.php로 리다이렉트
+        return new Response(null, {
+          status: 302,
+          headers: { "Location": "/wp-admin/install.php", "Cache-Control": "no-store" },
+        });
+      }
+    }
+
+    // 설치 완료 + PHP_RUNNER 없음 → wp-login.php 리다이렉트 or WP 관리자 안내
+    if (isInstalled) {
+      if (path === "/" || path === "") {
+        // 홈: _cache 없으면 wp-login으로
+        return new Response(null, {
+          status: 302,
+          headers: { "Location": "/wp-login.php", "Cache-Control": "no-store" },
+        });
+      }
+      if (path === "/wp-login.php" || path.startsWith("/wp-login")) {
+        // wp-login.php는 PHP 없이 서빙 불가 → 안내 페이지
+        return new Response(`<!DOCTYPE html>
 <html lang="ko"><head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<meta http-equiv="refresh" content="30">
-<title>준비 중 — ${url.hostname}</title>
-<style>
-*{box-sizing:border-box;margin:0;padding:0}
-body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Malgun Gothic,sans-serif;
-  background:#fff;display:flex;flex-direction:column;min-height:100vh}
-header{background:#1d2327;padding:18px 32px}
-header span{color:#fff;font-size:18px;font-weight:700}
-.hero{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;
-  padding:60px 24px;text-align:center}
-.emoji{font-size:64px;margin-bottom:24px}
-h1{font-size:34px;font-weight:800;color:#1d2327;margin-bottom:12px}
-.sub{font-size:16px;color:#646970;max-width:400px;line-height:1.6;margin-bottom:32px}
-.bar{width:220px;height:4px;background:#f0f0f1;border-radius:4px;overflow:hidden;margin-bottom:12px}
-.fill{height:100%;background:#2271b1;animation:p 2s ease-in-out infinite alternate}
-@keyframes p{from{width:20%}to{width:70%}}
-.note{font-size:13px;color:#a7aaad}
-footer{padding:20px;text-align:center;font-size:12px;color:#a7aaad;border-top:1px solid #f0f0f1}
-</style></head>
-<body>
-<header><span>${url.hostname}</span></header>
-<div class="hero">
-  <div class="emoji">⚙️</div>
-  <h1>사이트를 설정하고 있습니다</h1>
-  <p class="sub">WordPress를 설치하고 있습니다. 보통 3~5분 정도 소요됩니다.</p>
-  <div class="bar"><div class="fill"></div></div>
-  <p class="note">30초마다 자동 새로고침됩니다</p>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>WordPress 로그인 — ${url.hostname}</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/WordPress/WordPress@master/wp-admin/css/login.min.css">
+<style>body{background:#f0f0f1}.message{background:#fff;border-left:4px solid #2271b1;padding:12px 16px;margin:16px 0;font-size:14px;}</style>
+</head><body>
+<div id="login">
+  <h1><a href="https://wordpress.org/">WordPress</a></h1>
+  <div class="message">PHP 실행 환경(PHP_RUNNER)이 연결되지 않아 로그인할 수 없습니다.<br>
+  Cloudflare Worker에 <strong>PHP_RUNNER Service Binding</strong>을 설정해 주세요.</div>
+  <p style="text-align:center;margin-top:20px"><a href="/">&larr; 홈으로</a></p>
 </div>
-<footer>Powered by CloudPress · WordPress Hosting</footer>
 </body></html>`,
-      { status: 503, headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" } }
-    );
+          { status: 503, headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" } }
+        );
+      }
+    }
   }
 
   // ── PHP 환경변수 구성 ────────────────────────────────────────────────────

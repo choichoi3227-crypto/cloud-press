@@ -574,36 +574,7 @@ jobs:
           else
             # 실패시 설치 중 안내 HTML 생성
             SITE_TITLE="\${SITE_NAME:-WordPress 사이트}"
-            cat > _cache/index.html << 'INSTALLING_HTML'
-<!DOCTYPE html>
-<html lang="ko">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta http-equiv="refresh" content="10">
-  <title>WordPress 준비 중</title>
-  <style>
-    body{margin:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
-         background:#f8fafc;display:flex;align-items:center;justify-content:center;min-height:100vh}
-    .wrap{text-align:center;padding:2rem;max-width:400px}
-    h1{font-size:1.5rem;font-weight:800;color:#1e293b;margin-bottom:.5rem}
-    p{color:#64748b;font-size:.95rem;margin-bottom:1.5rem}
-    .dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:#6366f1;
-         margin:0 3px;animation:bounce 1.2s infinite}
-    .dot:nth-child(2){animation-delay:.2s}
-    .dot:nth-child(3){animation-delay:.4s}
-    @keyframes bounce{0%,80%,100%{transform:scale(0)}40%{transform:scale(1)}}
-  </style>
-</head>
-<body>
-  <div class="wrap">
-    <h1>WordPress 설치 중</h1>
-    <p>잠시만 기다려주세요. 곧 준비됩니다.</p>
-    <span class="dot"></span><span class="dot"></span><span class="dot"></span>
-  </div>
-</body>
-</html>
-INSTALLING_HTML
+            printf '%s\n' '<!DOCTYPE html>' '<html lang="ko">'  '<head>' '  <meta charset="UTF-8">' '  <meta name="viewport" content="width=device-width,initial-scale=1">' '  <meta http-equiv="refresh" content="10">' '  <title>WordPress 준비 중</title>' '  <style>' '    body{margin:0;font-family:-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif;background:#f8fafc;display:flex;align-items:center;justify-content:center;min-height:100vh}' '    .wrap{text-align:center;padding:2rem;max-width:400px}' '    h1{font-size:1.5rem;font-weight:800;color:#1e293b;margin-bottom:.5rem}' '    p{color:#64748b;font-size:.95rem;margin-bottom:1.5rem}' '    .dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:#6366f1;margin:0 3px;animation:bounce 1.2s infinite}' '    .dot:nth-child(2){animation-delay:.2s}' '    .dot:nth-child(3){animation-delay:.4s}' '    @keyframes bounce{0%,80%,100%{transform:scale(0)}40%{transform:scale(1)}}' '  </style>' '</head>' '<body>' '  <div class="wrap">' '    <h1>WordPress 설치 중</h1>' '    <p>잠시만 기다려주세요. 곧 준비됩니다.</p>' '    <span class="dot"></span><span class="dot"></span><span class="dot"></span>' '  </div>' '</body>' '</html>' > _cache/index.html
             echo "⚠️ PHP 렌더링 실패 - 대기 페이지 생성"
           fi
 

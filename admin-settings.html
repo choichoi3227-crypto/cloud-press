@@ -519,6 +519,31 @@
             </div>
         </div>
 
+        <!-- php-runner.js (KV 업로드) -->
+        <div class="bg-white/5 border border-white/10 rounded-xl p-4 space-y-3">
+            <div class="flex items-center justify-between">
+                <div>
+                    <div class="font-bold text-sm text-white">PHP Runner Worker</div>
+                    <div class="text-xs text-gray-500 mt-0.5">사이트 프로비저닝 시 배포되는 WordPress PHP 실행 Worker 소스</div>
+                </div>
+                <span id="php-runner-status-badge" class="text-xs px-2 py-1 rounded-full border">확인 중...</span>
+            </div>
+            <div class="text-xs text-gray-500 font-bold uppercase tracking-wider mb-1">php-runner.js 업로드</div>
+            <div class="flex items-center gap-3">
+                <input type="file" id="php-runner-input" accept=".js" class="hidden">
+                <label for="php-runner-input"
+                    class="cursor-pointer border border-white/20 px-3 py-2 rounded-xl text-xs hover:bg-white/5 transition flex items-center gap-2">
+                    <i class="fas fa-folder-open"></i> <span id="php-runner-file-label">php-runner.js 선택</span>
+                </label>
+                <button onclick="uploadPhpRunner()"
+                    id="php-runner-upload-btn"
+                    class="bg-blue-700 hover:bg-blue-600 transition px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2">
+                    <i class="fas fa-upload"></i> KV 업로드
+                </button>
+            </div>
+            <div id="php-runner-alert" class="hidden p-3 rounded-xl text-sm"></div>
+        </div>
+
         <!-- wp-rocket (KV 업로드) -->
         <div class="bg-white/5 border border-white/10 rounded-xl p-4 space-y-3">
             <div class="flex items-center justify-between">
@@ -1002,6 +1027,69 @@ async function saveGeminiModel() {
 }
 
 // ── WP Rocket 업로드 ────────────────────────────────────────────────────
+document.getElementById('php-runner-input')?.addEventListener('change', function() {
+    const file = this.files[0];
+    if (file) document.getElementById('php-runner-file-label').textContent = file.name;
+});
+
+async function uploadPhpRunner() {
+    const input   = document.getElementById('php-runner-input');
+    const btn     = document.getElementById('php-runner-upload-btn');
+    const alertEl = document.getElementById('php-runner-alert');
+    const file    = input?.files[0];
+
+    if (!file) { showAlert(alertEl, 'php-runner.js 파일을 선택하세요.', 'error'); return; }
+    if (!file.name.endsWith('.js')) { showAlert(alertEl, '.js 파일만 업로드 가능합니다.', 'error'); return; }
+
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 업로드 중...';
+    showAlert(alertEl, 'KV에 업로드 중...', 'info');
+
+    try {
+        const source = await new Promise((res, rej) => {
+            const r = new FileReader();
+            r.onload  = () => res(r.result);
+            r.onerror = () => rej(new Error('파일 읽기 실패'));
+            r.readAsText(file);
+        });
+
+        const resp = await fetch('/api/admin/platform-assets', {
+            method: 'POST',
+            headers: HEADERS(),
+            body: JSON.stringify({ php_runner_source: source }),
+        });
+        const data = await resp.json();
+        if (!resp.ok) throw new Error(data.error || '업로드 실패');
+        showAlert(alertEl, `✅ php-runner.js KV 업로드 완료 (${(file.size/1024).toFixed(1)}KB)`, 'success');
+        await loadPhpRunnerStatus();
+    } catch (e) {
+        showAlert(alertEl, e.message, 'error');
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="fas fa-upload"></i> KV 업로드';
+    }
+}
+
+async function loadPhpRunnerStatus() {
+    const badge = document.getElementById('php-runner-status-badge');
+    if (!badge) return;
+    try {
+        const res  = await fetch('/api/admin/platform-assets', { headers: HEADERS() });
+        const data = await res.json();
+        if (data.php_runner_exists) {
+            badge.textContent = '✅ 준비됨';
+            badge.className = 'text-xs bg-green-500/20 text-green-400 border border-green-500/30 px-2 py-1 rounded-full';
+        } else {
+            badge.textContent = '⚠️ 미업로드';
+            badge.className = 'text-xs bg-yellow-500/20 text-yellow-400 border border-yellow-500/30 px-2 py-1 rounded-full';
+        }
+    } catch {
+        badge.textContent = '⚠️ 확인 불가';
+        badge.className = 'text-xs bg-gray-500/20 text-gray-400 border border-gray-500/30 px-2 py-1 rounded-full';
+    }
+}
+loadPhpRunnerStatus();
+
 document.getElementById('wprocket-zip-input')?.addEventListener('change', function() {
     const file = this.files[0];
     if (file) {

@@ -236,7 +236,7 @@ async function runWordpress(payload, env, ctx) {
   const filePath = phpFile.startsWith("/") ? phpFile.slice(1) : phpFile;
   if (STATIC_EXT.test(phpFile) && filePath) {
     if (phpFile.startsWith("/wp-content/") && owner && repo) {
-      const r = await ghFetch(owner, repo, branch, filePath, token, false);
+      const r = await ghFetch(owner, repo, branch, "wordpress/" + filePath, token, false);
       if (r) {
         return new Response(await r.arrayBuffer(), {
           headers: { "Content-Type": mimeType(phpFile), "Cache-Control": "public, max-age=3600" },
@@ -244,6 +244,13 @@ async function runWordpress(payload, env, ctx) {
       }
     }
     if (phpFile.startsWith("/wp-includes/") || phpFile.startsWith("/wp-admin/")) {
+      // 사용자 레포 wordpress/ 폴더 우선
+      if (owner && repo) {
+        const r = await ghFetch(owner, repo, branch, "wordpress/" + filePath, token, false);
+        if (r) return new Response(await r.arrayBuffer(), {
+          headers: { "Content-Type": mimeType(phpFile), "Cache-Control": "public, max-age=86400, immutable" },
+        });
+      }
       const coreFile = await fetchCoreFile(filePath, env);
       if (coreFile) {
         return new Response(coreFile.buffer, {
@@ -279,11 +286,11 @@ async function runWordpress(payload, env, ctx) {
   let wpInstalled = false;
   if (owner && repo) {
     try {
-      const cfgRes = await ghFetch(owner, repo, branch, "wp-config.php", token, true);
+      const cfgRes = await ghFetch(owner, repo, branch, "wordpress/wp-config.php", token, true);
       if (cfgRes) {
         wpInstalled = true;
       } else {
-        const verRes = await ghFetch(owner, repo, branch, "wp-includes/version.php", token, true);
+        const verRes = await ghFetch(owner, repo, branch, "wordpress/wp-includes/version.php", token, true);
         wpInstalled = !!verRes;
       }
     } catch {}
@@ -401,7 +408,7 @@ export default {
       const token    = env.GITHUB_TOKEN || "";
 
       if (filePath.startsWith("wp-content/") && ghOwner && ghRepo) {
-        const r = await ghFetch(ghOwner, ghRepo, "main", filePath, token, false);
+        const r = await ghFetch(ghOwner, ghRepo, "main", "wordpress/" + filePath, token, false);
         if (r) return new Response(await r.arrayBuffer(), {
           headers: { "Content-Type": mimeType(filePath), "Cache-Control": "public, max-age=3600" },
         });

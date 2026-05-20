@@ -163,6 +163,13 @@ export async function onRequestGet(context) {
     }
 
     return jsonErr("알 수 없는 경로입니다.", 404);
+  } catch (e) {
+    return jsonErr("서버 오류: " + e.message, 500);
+  }
+}
+
+// ── POST ────────────────────────────────────────────────────────────────────
+export async function onRequestPost(context) {
   const { request, env } = context;
   const admin = await requireAdmin(request, env);
   if (!admin) return jsonErr("관리자 권한이 필요합니다.", 403);
@@ -172,7 +179,6 @@ export async function onRequestGet(context) {
   try { body = await request.json(); } catch {}
 
   try {
-    // ── PHP Runner 소스 KV 업로드 ─────────────────────────────────────────
     if (path === "platform-assets") {
       if (!env.KV) return jsonErr("KV 바인딩이 없습니다.", 500);
       const uploaded = [];

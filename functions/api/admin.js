@@ -153,6 +153,36 @@ export async function onRequestGet(context) {
       });
     }
 
+    if (path === "platform-assets") {
+      let php_runner_exists = false;
+      if (env.KV) {
+        const val = await env.KV.get("platform:php-runner.js").catch(() => null);
+        php_runner_exists = !!val;
+      }
+      return jsonOk({ success: true, php_runner_exists });
+    }
+
+    return jsonErr("알 수 없는 경로입니다.", 404);
+  const { request, env } = context;
+  const admin = await requireAdmin(request, env);
+  if (!admin) return jsonErr("관리자 권한이 필요합니다.", 403);
+
+  const path = extractAdminPath(context);
+  let body = {};
+  try { body = await request.json(); } catch {}
+
+  try {
+    // ── PHP Runner 소스 KV 업로드 ─────────────────────────────────────────
+    if (path === "platform-assets") {
+      if (!env.KV) return jsonErr("KV 바인딩이 없습니다.", 500);
+      const uploaded = [];
+      if (body.php_runner_source) {
+        await env.KV.put("platform:php-runner.js", body.php_runner_source, { expirationTtl: 86400 * 365 });
+        uploaded.push("platform:php-runner.js");
+      }
+      if (!uploaded.length) return jsonErr("업로드할 소스가 없습니다.", 400);
+      return jsonOk({ success: true, message: `KV 업로드 완료: ${uploaded.join(", ")}`, uploaded });
+    }
     return jsonErr("알 수 없는 경로입니다.", 404);
   } catch (e) {
     return jsonErr("서버 오류: " + e.message, 500);
@@ -227,6 +257,19 @@ export async function onRequestPut(context) {
 
       if (!saved.length) return jsonErr("저장할 설정이 없습니다.", 400);
       return jsonOk({ success: true, message: `${saved.length}개 설정이 저장되었습니다.`, saved });
+    }
+
+    // ── PHP Runner 소스 KV 업로드 ─────────────────────────────────────────
+    if (path === "platform-assets") {
+      if (!env.KV) return jsonErr("KV 바인딩이 없습니다.", 500);
+      const uploaded = [];
+      // php-runner.js
+      if (body.php_runner_source) {
+        await env.KV.put("platform:php-runner.js", body.php_runner_source, { expirationTtl: 86400 * 365 });
+        uploaded.push("platform:php-runner.js");
+      }
+      if (!uploaded.length) return jsonErr("업로드할 소스가 없습니다.", 400);
+      return jsonOk({ success: true, message: `KV 업로드 완료: ${uploaded.join(", ")}`, uploaded });
     }
 
     return jsonErr("알 수 없는 경로입니다.", 404);

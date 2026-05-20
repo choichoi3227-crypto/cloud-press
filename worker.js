@@ -1067,6 +1067,7 @@ import {
 } from "./functions/api/account.js";
 import {
   onRequestGet    as adminGet,
+  onRequestPost   as adminPost,
   onRequestPut    as adminPut,
   onRequestDelete as adminDelete,
 } from "./functions/api/admin.js";
@@ -1251,6 +1252,7 @@ async function handleApiRequest(request, env, _workerCtx = null) {
   // ── 관리자 (stats, users, sites, settings, quota-stats)
   if (path.startsWith("/api/admin")) {
     if (method === "GET")    return runWithMiddleware(adminGet);
+    if (method === "POST")   return runWithMiddleware(adminPost);
     if (method === "PUT")    return runWithMiddleware(adminPut);
     if (method === "DELETE") return runWithMiddleware(adminDelete);
   }

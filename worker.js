@@ -666,13 +666,16 @@ async function handleWordPressRequest(request, env, ctx) {
       });
     }
 
-    // wp-content → GitHub 미러 우선
+    // wp-content → GitHub 미러 우선 (wordpress/ 폴더 기준)
     let res = null;
     if (path.startsWith("/wp-content/")) {
-      res = await mirror.get(filePath);
+      res = await mirror.get("wordpress/" + filePath);
     }
 
-    // WordPress 코어 → jsDelivr CDN → WordPress/WordPress GitHub
+    // WordPress 코어 → 사용자 레포 wordpress/ 폴더 우선, 그 다음 CDN
+    if (!res) {
+      res = await mirror.get("wordpress/" + filePath).catch(() => null);
+    }
     if (!res) {
       for (const base of [
         `https://cdn.jsdelivr.net/npm/wordpress-static@latest`,
@@ -790,8 +793,8 @@ async function handleWordPressRequest(request, env, ctx) {
 
   // wp-config.php + db.php를 GitHub에서 직접 가져오기
   const [wpConfigRes, dbPhpRes] = await Promise.all([
-    mirror.get("wp-config.php"),
-    mirror.get("wp-content/db.php"),
+    mirror.get("wordpress/wp-config.php"),
+    mirror.get("wordpress/wp-content/db.php"),
   ]);
   const wpConfig = wpConfigRes ? await wpConfigRes.text() : "";
   const dbPhp    = dbPhpRes    ? await dbPhpRes.text()    : "";
@@ -852,7 +855,7 @@ async function handleWordPressRequest(request, env, ctx) {
 
       // 2) wp-config.php를 GitHub 레포에 저장
       const newWpConfig = buildWpConfig(env, siteUrl);
-      await mirror.put("wp-config.php", newWpConfig, "install: WordPress wp-config.php");
+      await mirror.put("wordpress/wp-config.php", newWpConfig, "install: WordPress wp-config.php");
 
       // 3) 성공 응답
       return new Response(buildInstallSuccessPage(user_login), {
@@ -985,7 +988,7 @@ p{color:#646970;font-size:14px;line-height:1.6;margin:0}</style>
             const y    = now.getFullYear();
             const m    = String(now.getMonth() + 1).padStart(2, "0");
             const name = sourceUrl.split("/").pop() || "upload";
-            await mirror.put(`wp-content/uploads/${y}/${m}/${name}`, buf, `upload: ${name}`);
+            await mirror.put(`wordpress/wp-content/uploads/${y}/${m}/${name}`, buf, `upload: ${name}`);
           }
         }
       } catch (e) { console.error("[mirror-upload]", e.message); }

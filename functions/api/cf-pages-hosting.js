@@ -451,12 +451,12 @@ jobs:
   install:
     runs-on: ubuntu-latest
     env:
-      ADMIN_USER: ${wpAdminUser}
-      ADMIN_PASS: ${wpAdminPass}
-      ADMIN_EMAIL: ${wpAdminEmail}
-      SITE_URL: ${siteUrl}
+      ADMIN_USER: "${wpAdminUser}"
+      ADMIN_PASS: "${wpAdminPass}"
+      ADMIN_EMAIL: "${wpAdminEmail}"
+      SITE_URL: "${siteUrl}"
       SITE_NAME: "${siteName}"
-      DB_PREFIX: ${p}
+      DB_PREFIX: "${p}"
 
     steps:
       - uses: actions/checkout@v4

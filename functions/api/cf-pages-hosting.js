@@ -1504,16 +1504,37 @@ export async function provisionCloudflarePagesHosting({
   await log("▶ [2/4] PHP Runner 소스 로드...");
   let phpRunnerSourceCode = null;
   try {
-    if (env?.ASSETS) {
-      const r = await env.ASSETS.fetch(new Request("https://platform/php-runner.js")).catch(() => null);
-      if (r?.ok) phpRunnerSourceCode = await r.text();
-    }
+    // 1순위: KV 캐시 (가장 빠름)
     if (!phpRunnerSourceCode && env?.KV) {
       phpRunnerSourceCode = await env.KV.get("platform:php-runner.js").catch(() => null);
+      if (phpRunnerSourceCode) await log("  📦 KV 캐시에서 로드");
     }
+    // 2순위: ASSETS (Pages 정적 파일) — 실제 배포 도메인으로 요청
+    if (!phpRunnerSourceCode && env?.ASSETS) {
+      const platformDomain = env.PLATFORM_DOMAIN || "cloud-press.co.kr";
+      const assetUrl = `https://${platformDomain}/php-runner.js`;
+      const r = await env.ASSETS.fetch(new Request(assetUrl)).catch(() => null);
+      if (r?.ok) {
+        phpRunnerSourceCode = await r.text();
+        await log("  📦 ASSETS에서 로드");
+        // KV에 캐싱 (다음 프로비저닝에서 빠르게 로드)
+        if (env?.KV && phpRunnerSourceCode) {
+          await env.KV.put("platform:php-runner.js", phpRunnerSourceCode, { expirationTtl: 86400 * 30 }).catch(() => null);
+        }
+      }
+    }
+    // 3순위: 플랫폼 도메인 직접 fetch
     if (!phpRunnerSourceCode) {
-      const r = await fetch("https://cloud-press.co.kr/php-runner.js", { headers: { "User-Agent": "CloudPress/8.0" } }).catch(() => null);
-      if (r?.ok) phpRunnerSourceCode = await r.text();
+      const platformDomain = env?.PLATFORM_DOMAIN || "cloud-press.co.kr";
+      const r = await fetch(`https://${platformDomain}/php-runner.js`, { headers: { "User-Agent": "CloudPress/8.0" } }).catch(() => null);
+      if (r?.ok) {
+        phpRunnerSourceCode = await r.text();
+        await log("  📦 플랫폼 도메인에서 로드");
+        // KV에 캐싱
+        if (env?.KV && phpRunnerSourceCode) {
+          await env.KV.put("platform:php-runner.js", phpRunnerSourceCode, { expirationTtl: 86400 * 30 }).catch(() => null);
+        }
+      }
     }
     if (phpRunnerSourceCode) await log(`  ✅ PHP Runner 소스 로드 완료 (${phpRunnerSourceCode.length.toLocaleString()} bytes)`);
     else await log("  ⚠️ PHP Runner 소스 없음 — GitHub Actions deploy-worker.yml로 나중에 배포 가능", "warn");

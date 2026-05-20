@@ -569,13 +569,12 @@ jobs:
           done
           kill $PHP_PID 2>/dev/null || true
           # index.html 이 정상적인 HTML인지 확인
-          if [ -f _cache/index.html ] && grep -q "<html" _cache/index.html 2>/dev/null; then
-            echo "✅ 초기 캐시 생성 성공 (\$(wc -c < _cache/index.html) bytes)"
+          if [ -f _cache/index.html ] && grep -q "<html" _cache/index.html 2>/dev/null && ! grep -q "WordPress 설치 중\\\\|WordPress 준비 중\\\\|installing" _cache/index.html 2>/dev/null; then
+            echo "✅ 초기 캐시 생성 성공 (\\$(wc -c < _cache/index.html) bytes)"
           else
-            # 실패시 설치 중 안내 HTML 생성
-            SITE_TITLE="\${SITE_NAME:-WordPress 사이트}"
-            python3 -c "open('_cache/index.html','w').write('<!DOCTYPE html>\\n<html lang=\\"ko\\">\\n<head>\\n<meta charset=\\"UTF-8\\">\\n<meta name=\\"viewport\\" content=\\"width=device-width,initial-scale=1\\">\\n<meta http-equiv=\\"refresh\\" content=\\"10\\">\\n<title>WordPress \uc900\ube44 \uc911</title>\\n<style>body{margin:0;font-family:sans-serif;background:#f8fafc;display:flex;align-items:center;justify-content:center;min-height:100vh}.wrap{text-align:center;padding:2rem;max-width:400px}h1{font-size:1.5rem;font-weight:800;color:#1e293b}.dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:#6366f1;margin:0 3px;animation:bounce 1.2s infinite}@keyframes bounce{0%,80%,100%{transform:scale(0)}40%{transform:scale(1)}}</style>\\n</head>\\n<body><div class=\\"wrap\\"><h1>WordPress \uc124\uce58 \uc911</h1><p>\uc7a0\uc2dc\ub9cc \uae30\ub2e4\ub824\uc8fc\uc138\uc694.</p><span class=\\"dot\\"></span><span class=\\"dot\\"></span><span class=\\"dot\\"></span></div></body>\\n</html>')" > _cache/index.html
-            echo "⚠️ PHP 렌더링 실패 - 대기 페이지 생성"
+            # 실패 또는 하드코딩된 설치 중 페이지 → 삭제하여 워커가 install.php로 라우팅
+            rm -f _cache/index.html
+            echo "⚠️ PHP 렌더링 실패 - _cache/index.html 생성 생략 (워커가 install.php로 안내)"
           fi
 
       - name: 파일 커밋 & 푸시

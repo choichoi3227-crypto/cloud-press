@@ -138,7 +138,7 @@
     <script src="/src/sidebar.js"></script>
     <script>
         function getToken() { return localStorage.getItem('admin_token') || ''; }
-        const H = new Proxy({}, { get(_, p) { return ({ 'Authorization': `Bearer ${getToken()}`, 'Content-Type': 'application/json' })[p]; } });
+        function H() { return { 'Authorization': `Bearer ${getToken()}`, 'Content-Type': 'application/json' }; }
 
         function showAlert(msg, type = 'error') {
             const el = document.getElementById('alertMsg');
@@ -208,7 +208,7 @@
                     document.getElementById('card-list').innerHTML = `<div class="text-center py-12 text-gray-600 text-sm">로그인이 필요합니다. <a href="/login" class="text-blue-400 underline">로그인하기</a></div>`;
                     return;
                 }
-                const res = await fetch('/api/payment/cards', { headers: H });
+                const res = await fetch('/api/payment/cards', { headers: H() });
                 const text = await res.text();
                 let data;
                 try { data = JSON.parse(text); } catch {
@@ -283,7 +283,7 @@
 
         async function loadTossPayments() {
             try {
-                const res = await fetch('/api/payment/toss-key', { headers: H });
+                const res = await fetch('/api/payment/toss-key', { headers: H() });
                 if (!res.ok) throw new Error('API ' + res.status);
                 const data = await res.json();
 
@@ -402,7 +402,7 @@
                 const [expM, expY] = [expiry.slice(0,2), expiry.slice(2)];
 
                 const res = await fetch('/api/payment/cards', {
-                    method: 'POST', headers: H,
+                    method: 'POST', headers: H(),
                     body: JSON.stringify({
                         billing_key: 'direct_' + crypto.randomUUID(),
                         card_name:   brand + ' ' + last4,
@@ -432,7 +432,7 @@
         async function setDefault(id) {
             try {
                 const res = await fetch('/api/payment/cards', {
-                    method: 'PATCH', headers: H,
+                    method: 'PATCH', headers: H(),
                     body: JSON.stringify({ card_id: id, set_default: true })
                 });
                 const data = await res.json();
@@ -444,7 +444,7 @@
         async function removeCard(id) {
             if (!confirm('이 카드를 삭제하시겠습니까?')) return;
             try {
-                const res = await fetch(`/api/payment/cards?id=${id}`, { method: 'DELETE', headers: H });
+                const res = await fetch(`/api/payment/cards?id=${id}`, { method: 'DELETE', headers: H() });
                 const data = await res.json();
                 if (data.success) { showAlert('카드가 삭제되었습니다.', 'success'); loadCards(); }
                 else showAlert(data.error || '삭제 실패');

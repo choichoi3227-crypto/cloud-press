@@ -102,11 +102,53 @@ export default {
     const path = url.pathname;
     const isGet = req.method === "GET";
 
-    // ── 1차: PHP Runner Service Binding (GitHub Actions keepalive PHP 서버) ──
-    // keepalive 워크플로우가 실행 중이면 실시간 WordPress PHP 처리
+    // ── 1차: PHP Runner Service Binding (/run-wordpress POST 엔드포인트 사용) ──
+    // PHP Runner는 Service Binding 전용이므로 반드시 /run-wordpress POST로 호출해야 합니다.
+    // req.clone()을 직접 보내면 PHP Runner가 경로를 인식하지 못해 404를 반환합니다.
     if (env.PHP_RUNNER) {
       try {
-        const phpRes = await env.PHP_RUNNER.fetch(req.clone());
+        let body = "";
+        if (req.method !== "GET" && req.method !== "HEAD") {
+          body = await req.clone().text().catch(() => "");
+        }
+        const payload = {
+          phpFile:    path.endsWith(".php") ? path : "/index.php",
+          phpEnv: {
+            REQUEST_URI:          path + url.search,
+            REQUEST_METHOD:       req.method,
+            HTTP_HOST:            url.host,
+            SERVER_NAME:          url.host,
+            HTTPS:                url.protocol === "https:" ? "on" : "",
+            HTTP_COOKIE:          req.headers.get("Cookie")           || "",
+            HTTP_USER_AGENT:      req.headers.get("User-Agent")       || "",
+            HTTP_ACCEPT:          req.headers.get("Accept")           || "*/*",
+            HTTP_ACCEPT_LANGUAGE: req.headers.get("Accept-Language")  || "ko-KR,ko;q=0.9",
+            HTTP_ACCEPT_ENCODING: req.headers.get("Accept-Encoding")  || "",
+            HTTP_REFERER:         req.headers.get("Referer")          || "",
+            HTTP_AUTHORIZATION:   req.headers.get("Authorization")    || "",
+            CONTENT_TYPE:         req.headers.get("Content-Type")     || "",
+            CONTENT_LENGTH:       String(body.length),
+            QUERY_STRING:         url.search.replace(/^\?/, ""),
+            GITHUB_OWNER:         ghOwner(env),
+            GITHUB_REPO:          ghRepo(env),
+            GITHUB_TOKEN:         ghToken(env),
+          },
+          stdin:      body,
+          skipCache:  false,
+          siteConfig: {
+            githubOwner: ghOwner(env),
+            githubRepo:  ghRepo(env),
+            ghPagesUrl:  ghPages(env),
+          },
+        };
+
+        const phpRes = await env.PHP_RUNNER.fetch(
+          new Request("https://php-runner/run-wordpress", {
+            method:  "POST",
+            headers: { "Content-Type": "application/json" },
+            body:    JSON.stringify(payload),
+          })
+        );
         // 200~499 응답은 그대로 반환 (404 포함 — WP가 직접 404 페이지 생성)
         if (phpRes.status < 500) return phpRes;
       } catch { /* PHP Runner 오프라인 → 다음 단계로 */ }

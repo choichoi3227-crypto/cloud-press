@@ -440,15 +440,11 @@ export default {
       return runWordpress(payload, env, ctx);
     }
 
-    // 직접 브라우저 접근 시 메인 플랫폼으로 리다이렉트
-    // (이 Worker는 Service Binding으로만 내부 호출되어야 함)
-    const platformDomain = env.PLATFORM_DOMAIN || "cloud-press.co.kr";
-    return new Response(null, {
-      status: 302,
-      headers: {
-        "Location": "https://" + platformDomain,
-        "Cache-Control": "no-store",
-      },
+    // 이 Worker는 Service Binding 내부 호출 전용입니다.
+    // 직접 HTTP 접근 시 404를 반환합니다.
+    return new Response(JSON.stringify({ error: "Not found", version: "6.0" }), {
+      status: 404,
+      headers: { "Content-Type": "application/json" },
     });
   },
 };

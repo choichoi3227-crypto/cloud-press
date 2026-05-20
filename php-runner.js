@@ -440,8 +440,15 @@ export default {
       return runWordpress(payload, env, ctx);
     }
 
-    return new Response(JSON.stringify({ error: "잘못된 요청", version: "6.0" }), {
-      status: 400, headers: { "Content-Type": "application/json" },
+    // 직접 브라우저 접근 시 메인 플랫폼으로 리다이렉트
+    // (이 Worker는 Service Binding으로만 내부 호출되어야 함)
+    const platformDomain = env.PLATFORM_DOMAIN || "cloud-press.co.kr";
+    return new Response(null, {
+      status: 302,
+      headers: {
+        "Location": "https://" + platformDomain,
+        "Cache-Control": "no-store",
+      },
     });
   },
 };

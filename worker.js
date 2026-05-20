@@ -1391,6 +1391,13 @@ export default {
       '/admin-inquiries', '/admin-notices', '/admin-settings', '/about', '/contact',
       '/features', '/faq', '/notices', '/chat',
     ];
+    // 루트 / → index.html 명시 매핑 (ASSETS가 / 자동변환 안함)
+    if (url.pathname === '/' && env.ASSETS) {
+      const indexUrl = new URL(request.url);
+      indexUrl.pathname = '/index.html';
+      return env.ASSETS.fetch(new Request(indexUrl.toString(), request));
+    }
+
     // .html/.css/.js/정적파일은 그대로 ASSETS
     const isStaticAsset =
       url.pathname.endsWith('.html') ||
@@ -1398,8 +1405,7 @@ export default {
       url.pathname.endsWith('.js') ||
       url.pathname.startsWith('/src/') ||
       url.pathname.startsWith('/favicon') ||
-      url.pathname.startsWith('/wp-content/') ||
-      url.pathname === '/';
+      url.pathname.startsWith('/wp-content/');
     if (isStaticAsset && env.ASSETS) return env.ASSETS.fetch(request);
 
     // .html 없는 플랫폼 경로 → .html 붙여서 ASSETS로 서빙 (리디렉션 없이)

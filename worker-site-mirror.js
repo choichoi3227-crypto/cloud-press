@@ -167,7 +167,7 @@ export default {
 
     // ── 3차: wp-content 정적 자산 → GitHub raw ──────────────────────────────
     if (isGet && STATIC_EXT.test(path) && path.startsWith("/wp-content/")) {
-      const res = await ghRaw(env, path.slice(1), 86400);
+      const res = await ghRaw(env, "wordpress/" + path.slice(1), 86400);
       if (res) {
         const body = await res.arrayBuffer();
         const cacheKey = `v14:${ghOwner(env)}/${ghRepo(env)}:${path}`;
@@ -198,9 +198,9 @@ export default {
       }
     }
 
-    // ── 5차: 일반 정적 자산 GitHub raw (wp-content 아닌 것) ─────────────────
+    // ── 5차: 일반 정적 자산 GitHub raw (wordpress/ 우선) ────────────────────
     if (isGet && STATIC_EXT.test(path)) {
-      const res = await ghRaw(env, path.slice(1), 3600);
+      const res = await ghRaw(env, "wordpress/" + path.slice(1), 3600);
       if (res) {
         const body = await res.arrayBuffer();
         return new Response(body, {

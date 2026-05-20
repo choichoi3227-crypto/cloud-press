@@ -102,73 +102,13 @@ export default {
     const path = url.pathname;
     const isGet = req.method === "GET";
 
-    // ── 1차: PHP Runner Service Binding → /run-wordpress POST 방식으로 호출 ──
-    // php-runner는 /run-wordpress POST만 처리하므로 payload를 직접 구성
+    // ── 1차: PHP Runner Service Binding (GitHub Actions keepalive PHP 서버) ──
+    // keepalive 워크플로우가 실행 중이면 실시간 WordPress PHP 처리
     if (env.PHP_RUNNER) {
       try {
-        const method = req.method.toUpperCase();
-        let postBody = "";
-        if (["POST", "PUT", "PATCH"].includes(method)) {
-          postBody = await req.clone().text().catch(() => "");
-        }
-        const phpFile = (path === "/" || path === "") ? "/index.php"
-          : path.endsWith(".php") ? path
-          : path.startsWith("/wp-admin") ? (path.endsWith("/") ? path + "index.php" : path)
-          : "/index.php";
-
-        const payload = {
-          phpFile,
-          phpEnv: {
-            REQUEST_URI:    path + url.search,
-            REQUEST_METHOD: method,
-            HTTP_HOST:      url.host,
-            SERVER_NAME:    url.host,
-            SERVER_PORT:    url.port || (url.protocol === "https:" ? "443" : "80"),
-            HTTPS:          url.protocol === "https:" ? "on" : "",
-            QUERY_STRING:   url.search.replace(/^\?/, ""),
-            DOCUMENT_ROOT:  "/wordpress",
-            SCRIPT_FILENAME: `/wordpress${phpFile}`,
-            SCRIPT_NAME:    phpFile,
-            PHP_SELF:       phpFile,
-            GATEWAY_INTERFACE: "CGI/1.1",
-            SERVER_PROTOCOL: "HTTP/1.1",
-            SERVER_SOFTWARE: "CloudPress/14.0",
-            HTTP_COOKIE:          req.headers.get("Cookie")           || "",
-            HTTP_USER_AGENT:      req.headers.get("User-Agent")       || "CloudPress",
-            HTTP_ACCEPT:          req.headers.get("Accept")           || "*/*",
-            HTTP_ACCEPT_LANGUAGE: req.headers.get("Accept-Language")  || "ko-KR,ko;q=0.9",
-            HTTP_ACCEPT_ENCODING: req.headers.get("Accept-Encoding")  || "gzip",
-            HTTP_REFERER:         req.headers.get("Referer")          || "",
-            HTTP_X_FORWARDED_FOR: req.headers.get("CF-Connecting-IP") || "",
-            CONTENT_TYPE:         req.headers.get("Content-Type")     || "",
-            CONTENT_LENGTH:       String(postBody.length),
-            GITHUB_OWNER: ghOwner(env),
-            GITHUB_REPO:  ghRepo(env),
-            GITHUB_TOKEN: ghToken(env),
-          },
-          stdin: postBody,
-          siteConfig: {
-            githubOwner: ghOwner(env),
-            githubRepo:  ghRepo(env),
-            githubToken: ghToken(env),
-            ghPagesUrl:  ghPages(env) !== "%%GH_PAGES_URL%%" ? ghPages(env) : "",
-            siteUrl:     siteUrl(env) !== "%%SITE_URL%%"     ? siteUrl(env) : "",
-          },
-          skipCache: (req.headers.get("Cookie") || "").includes("wordpress_logged_in"),
-        };
-
-        const phpRes = await env.PHP_RUNNER.fetch(
-          new Request("https://php/run-wordpress", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(payload),
-          })
-        );
+        const phpRes = await env.PHP_RUNNER.fetch(req.clone());
         // 200~499 응답은 그대로 반환 (404 포함 — WP가 직접 404 페이지 생성)
-        // 단 400은 잘못된 요청(php-runner 라우팅 실패)이므로 제외
-        if (phpRes.ok || (phpRes.status >= 300 && phpRes.status < 500 && phpRes.status !== 400)) {
-          return phpRes;
-        }
+        if (phpRes.status < 500) return phpRes;
       } catch { /* PHP Runner 오프라인 → 다음 단계로 */ }
     }
 
@@ -185,7 +125,7 @@ export default {
 
     // ── 3차: wp-content 정적 자산 → GitHub raw ──────────────────────────────
     if (isGet && STATIC_EXT.test(path) && path.startsWith("/wp-content/")) {
-      const res = await ghRaw(env, path.replace(/^\//, ""), 86400);
+      const res = await ghRaw(env, path.slice(1), 86400);
       if (res) {
         const body = await res.arrayBuffer();
         const cacheKey = `v14:${ghOwner(env)}/${ghRepo(env)}:${path}`;
@@ -218,7 +158,7 @@ export default {
 
     // ── 5차: 일반 정적 자산 GitHub raw (wp-content 아닌 것) ─────────────────
     if (isGet && STATIC_EXT.test(path)) {
-      const res = await ghRaw(env, path.replace(/^\//, ""), 3600);
+      const res = await ghRaw(env, path.slice(1), 3600);
       if (res) {
         const body = await res.arrayBuffer();
         return new Response(body, {

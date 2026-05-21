@@ -352,7 +352,7 @@ define( 'WP_AUTO_UPDATE_CORE', false );
 define( 'DISALLOW_FILE_EDIT',  false );
 
 if ( ! defined( 'ABSPATH' ) ) {
-  define( 'ABSPATH', __DIR__ . DIRECTORY_SEPARATOR );
+  define( 'ABSPATH', __DIR__ . '/' );
 }
 require_once ABSPATH . 'wp-settings.php';
 `;
@@ -528,28 +528,36 @@ jobs:
       - name: wp-config.php 생성
         run: |
           WP_CFG_URL="\${SITE_URL:-${siteUrl}}"
+          # _db/ 폴더 확인 및 생성 (레포 루트에 위치해야 함)
+          mkdir -p _db
+          chmod 777 _db
           {
             echo '<?php'
-            echo "define('DB_DIR', __DIR__ . '/../_db/');"
+            echo "// CloudPress 자동 생성 wp-config.php (SQLite + UTF-8)"
+            echo "// DB_DIR: wordpress/ 폴더 한 단계 위의 _db/ (레포 루트)"
+            echo "define('DB_DIR',  __DIR__ . '/../_db/');"
             echo "define('DB_FILE', 'wordpress.db');"
             echo "define('DB_ENGINE', 'sqlite');"
-            echo "define('AUTH_KEY', 'put your unique phrase here 1');"
-            echo "define('SECURE_AUTH_KEY', 'put your unique phrase here 2');"
-            echo "define('LOGGED_IN_KEY', 'put your unique phrase here 3');"
-            echo "define('NONCE_KEY', 'put your unique phrase here 4');"
-            echo "define('AUTH_SALT', 'put your unique phrase here 5');"
+            echo "define('AUTH_KEY',         'put your unique phrase here 1');"
+            echo "define('SECURE_AUTH_KEY',  'put your unique phrase here 2');"
+            echo "define('LOGGED_IN_KEY',    'put your unique phrase here 3');"
+            echo "define('NONCE_KEY',        'put your unique phrase here 4');"
+            echo "define('AUTH_SALT',        'put your unique phrase here 5');"
             echo "define('SECURE_AUTH_SALT', 'put your unique phrase here 6');"
-            echo "define('LOGGED_IN_SALT', 'put your unique phrase here 7');"
-            echo "define('NONCE_SALT', 'put your unique phrase here 8');"
+            echo "define('LOGGED_IN_SALT',   'put your unique phrase here 7');"
+            echo "define('NONCE_SALT',       'put your unique phrase here 8');"
             echo "\\$table_prefix = 'wp_';"
             echo "define('WP_HOME',    getenv('SITE_URL') ?: '\\$WP_CFG_URL');"
             echo "define('WP_SITEURL', getenv('SITE_URL') ?: '\\$WP_CFG_URL');"
             echo "define('WP_CONTENT_DIR', __DIR__ . '/wp-content');"
             echo "define('WP_DEBUG', false);"
-            echo "define('ABSPATH', __DIR__ . '/');"
+            echo "if ( ! defined( 'ABSPATH' ) ) { define( 'ABSPATH', __DIR__ . '/' ); }"
             echo "require_once ABSPATH . 'wp-settings.php';"
           } > wordpress/wp-config.php
           echo "wp-config.php 생성 완료"
+          # _db/ 경로 확인
+          echo "_db/ 위치: $(pwd)/_db/"
+          ls -la _db/ || true
 
       - name: WordPress 설치 (WP-CLI)
         run: |
@@ -587,20 +595,42 @@ jobs:
           # PHP 내장 서버로 빠르게 WordPress 렌더링 → _cache/index.html 생성
           sudo apt-get install -y php-cli php-sqlite3 php-mbstring php-xml php-curl php-zip php-gd php-intl -qq 2>/dev/null || true
           mkdir -p _cache
-          # PHP 내장 서버 (백그라운드)
-          php -S localhost:9090 -t ./wordpress > /tmp/php-server.log 2>&1 &
+          # 로케일/인코딩 설정 (한국어 깨짐 방지)
+          export LANG=ko_KR.UTF-8
+          export LC_ALL=ko_KR.UTF-8
+          sudo locale-gen ko_KR.UTF-8 2>/dev/null || true
+          # PHP ini: UTF-8 인코딩 강제
+          PHP_INI_EXTRA=$(mktemp --suffix=.ini)
+          echo "default_charset = UTF-8" > "$PHP_INI_EXTRA"
+          echo "mbstring.internal_encoding = UTF-8" >> "$PHP_INI_EXTRA"
+          echo "mbstring.http_output = pass" >> "$PHP_INI_EXTRA"
+          echo "output_buffering = 4096" >> "$PHP_INI_EXTRA"
+          # PHP 내장 서버 (백그라운드) - UTF-8 ini 포함
+          php -c "$PHP_INI_EXTRA" -S localhost:9090 -t ./wordpress > /tmp/php-server.log 2>&1 &
           PHP_PID=$!
-          sleep 3
-          # 메인 페이지 캐시
-          HTTP=\$(curl -o _cache/index.html -s -w "%{http_code}" --max-time 20             -H "Host: localhost" "http://localhost:9090/" 2>/dev/null || echo "000")
+          sleep 5
+          # 메인 페이지 캐시 (UTF-8 헤더 명시)
+          HTTP=\$(curl -o _cache/index.html -s -w "%{http_code}" --max-time 30 \
+            -H "Host: localhost" \
+            -H "Accept-Charset: utf-8" \
+            -H "Accept: text/html,application/xhtml+xml" \
+            "http://localhost:9090/" 2>/dev/null || echo "000")
           echo "캐시 HTTP: $HTTP"
           # 추가 주요 페이지 캐시
           for SLUG in wp-login.php wp-json; do
-            curl -sf --max-time 10 "http://localhost:9090/$SLUG"               -o "_cache/$SLUG" 2>/dev/null || true
+            curl -sf --max-time 10 "http://localhost:9090/$SLUG" \
+              -H "Accept-Charset: utf-8" \
+              -o "_cache/$SLUG" 2>/dev/null || true
           done
           kill $PHP_PID 2>/dev/null || true
+          rm -f "$PHP_INI_EXTRA"
           # index.html 이 정상적인 HTML인지 확인
-          if [ -f _cache/index.html ] && grep -q "<html" _cache/index.html 2>/dev/null; then
+          if [ -f _cache/index.html ] && grep -qi "<html" _cache/index.html 2>/dev/null; then
+            # charset meta 태그 없으면 주입 (인코딩 깨짐 핵심 수정)
+            if ! grep -qi 'charset' _cache/index.html 2>/dev/null; then
+              sed -i 's|<head\([^>]*\)>|<head\1>\n<meta charset="UTF-8">|i' _cache/index.html || true
+              echo "charset meta 주입 완료"
+            fi
             echo "✅ 초기 캐시 생성 성공 (\$(wc -c < _cache/index.html) bytes)"
           else
             rm -f _cache/index.html
@@ -724,6 +754,13 @@ jobs:
             php8.3-xml php8.3-curl php8.3-zip php8.3-gd php8.3-intl \\
             php8.3-opcache nginx sqlite3 curl unzip rsync
 
+      - name: 로케일 및 인코딩 설정
+        run: |
+          export LANG=ko_KR.UTF-8
+          export LC_ALL=ko_KR.UTF-8
+          sudo locale-gen ko_KR.UTF-8 2>/dev/null || true
+          sudo update-locale LANG=ko_KR.UTF-8 2>/dev/null || true
+
       - name: PHP-FPM 소켓 및 풀 설정
         run: |
           sudo mkdir -p /run/php
@@ -745,6 +782,8 @@ jobs:
             echo 'php_value[post_max_size] = 64M'
             echo 'php_value[memory_limit] = 256M'
             echo 'php_value[max_execution_time] = 300'
+            echo 'php_value[default_charset] = UTF-8'
+            echo 'php_value[mbstring.internal_encoding] = UTF-8'
           } | sudo tee /etc/php/8.3/fpm/pool.d/wordpress.conf > /dev/null
           sudo systemctl restart php8.3-fpm || sudo service php8.3-fpm restart || true
           sleep 2
@@ -759,6 +798,8 @@ jobs:
             echo "  root $WP_ROOT;"
             echo '  index index.php index.html;'
             echo '  client_max_body_size 64M;'
+            echo '  charset utf-8;'
+            echo '  charset_types text/html text/plain text/xml text/css application/javascript;'
             echo '  location / { try_files $uri $uri/ /index.php?$args; }'
             echo '  location ~ \.php$ {'
             echo '    include snippets/fastcgi-php.conf;'
@@ -819,7 +860,14 @@ jobs:
         run: |
           if [ ! -f "wordpress/wp-load.php" ]; then exit 0; fi
           mkdir -p _cache
-          curl -sf -L --max-time 30 "http://localhost:8080/" -o _cache/index.html 2>/dev/null || echo "메인 캐시 실패"
+          curl -sf -L --max-time 30 \
+            -H "Accept-Charset: utf-8" \
+            -H "Accept: text/html,application/xhtml+xml" \
+            "http://localhost:8080/" -o _cache/index.html 2>/dev/null || echo "메인 캐시 실패"
+          # charset meta 없으면 주입
+          if [ -f _cache/index.html ] && ! grep -qi 'charset' _cache/index.html 2>/dev/null; then
+            sed -i 's|<head\([^>]*\)>|<head\1>\n<meta charset="UTF-8">|i' _cache/index.html || true
+          fi
           curl -sf -L --max-time 15 "http://localhost:8080/sitemap.xml" -o /tmp/sitemap.xml 2>/dev/null || true
           if [ -f /tmp/sitemap.xml ]; then
             grep -o '<loc>[^<]*</loc>' /tmp/sitemap.xml | sed 's|<loc>||;s|</loc>||' | head -50 | while read -r loc; do
@@ -829,9 +877,12 @@ jobs:
               mkdir -p "_cache$DIR"
               if echo "$REL" | grep -q "/$"; then
                 mkdir -p "_cache$REL"
-                curl -sf -L --max-time 20 "http://localhost:8080$REL" -o "_cache\${REL}index.html" 2>/dev/null || true
+                curl -sf -L --max-time 20 -H "Accept-Charset: utf-8" "http://localhost:8080$REL" -o "_cache\${REL}index.html" 2>/dev/null || true
+                # charset 없으면 주입
+                [ -f "_cache\${REL}index.html" ] && ! grep -qi 'charset' "_cache\${REL}index.html" 2>/dev/null && \
+                  sed -i 's|<head\([^>]*\)>|<head\1>\n<meta charset="UTF-8">|i' "_cache\${REL}index.html" || true
               else
-                curl -sf -L --max-time 20 "http://localhost:8080$REL" -o "_cache$REL" 2>/dev/null || true
+                curl -sf -L --max-time 20 -H "Accept-Charset: utf-8" "http://localhost:8080$REL" -o "_cache$REL" 2>/dev/null || true
               fi
             done
           fi
@@ -1247,6 +1298,8 @@ function buildPhpKeepaliveScript() {
     "# .github/scripts/php-keepalive.sh",
     "# shivammathur/setup-php 가 PHP 8.3+extensions 설치 완료된 상태에서 실행",
     "set -uo pipefail",
+    "export LANG=ko_KR.UTF-8",
+    "export LC_ALL=ko_KR.UTF-8",
     `OFFSET="${B}1:-0${E}"`,
     "sudo mkdir -p /run/php",
     `WP_ROOT="${D}(pwd)"`,
@@ -1281,6 +1334,7 @@ function buildPhpKeepaliveScript() {
     `    root WPROOT_PLACEHOLDER;`,
     `    index index.php index.html;`,
     `    client_max_body_size 64M;`,
+    `    charset utf-8;`,
     `    location / { try_files $uri $uri/ /index.php?$args; }`,
     `    location ~ \\.php$ {`,
     `        fastcgi_pass unix:/run/php/php-wp.sock;`,

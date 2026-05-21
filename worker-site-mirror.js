@@ -1,23 +1,21 @@
 /**
- * CloudPress — worker-site-mirror.js v15.0
+ * CloudPress — worker-site-mirror.js v15.1
  * ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
  * 사이트별 Cloudflare Worker
  *
  * 처리 순서:
- *   1. PHP Runner Service Binding (GitHub Actions keepalive PHP 서버)
+ *   1. PHP Runner Service Binding
  *   2. KV 캐시 HIT (정적 자산)
- *   3. wp-content / wp-includes / wp-admin 정적 자산 → GitHub raw 미러
- *   4. _cache/ 정적 HTML → GitHub raw (install 직후 생성됨)
- *   5. 일반 정적 자산 GitHub raw (wordpress/ 우선)
+ *   3. wp-content / wp-includes / wp-admin 정적 자산 → GitHub raw
+ *   4. _cache/ 정적 HTML → GitHub raw
+ *   5. 일반 정적 자산 GitHub raw
  *   6. GitHub Pages 폴백
- *   7. PHP Runner 없을 때 WordPress 관리/PHP 경로 → 준비 중 안내 페이지
+ *   7. PHP Runner 없을 때 준비 중 안내 페이지
  *   최종: WordPress 스타일 404
  */
 
-const GH_BRANCH = "main";
+const GH_BRANCH  = "main";
 const STATIC_EXT = /\.(css|js|jpg|jpeg|png|gif|webp|avif|svg|ico|woff2?|ttf|eot|otf|map|txt|xml|pdf|zip|mp4|mp3|ogg|wav|webm)$/i;
-
-// WordPress 핵심 경로 패턴 (PHP Runner로 처리되어야 하는 경로들)
 const WP_PHP_PATHS = /^\/wp-(admin|login\.php|cron\.php|json|comments|signup|activate|trackback|xmlrpc\.php|mail\.php|blog-header\.php|load\.php|settings\.php|app\.php)(\/|$|\?)/;
 const WP_PHP_FILES = /^\/wp-(login|cron|xmlrpc|mail|blog-header|load|settings|app)\.php(\?|$)/;
 
@@ -27,11 +25,10 @@ const SEC = {
   "Referrer-Policy":        "strict-origin-when-cross-origin",
 };
 
-const ghOwner = (e) => e.GH_OWNER  || "%%GH_OWNER%%";
-const ghRepo  = (e) => e.GH_REPO   || "%%GH_REPO%%";
-const ghToken = (e) => e.GITHUB_TOKEN || "";
-const ghPages = (e) => e.GH_PAGES_URL || "%%GH_PAGES_URL%%";
-const siteUrl = (e) => e.SITE_URL  || "%%SITE_URL%%";
+const ghOwner = (e) => e.GH_OWNER       || "%%GH_OWNER%%";
+const ghRepo  = (e) => e.GH_REPO        || "%%GH_REPO%%";
+const ghToken = (e) => e.GITHUB_TOKEN   || "";
+const ghPages = (e) => e.GH_PAGES_URL   || "%%GH_PAGES_URL%%";
 
 const kvGet = async (e, k)    => { try { return await e.CACHE?.get(k, "arrayBuffer"); } catch { return null; } };
 const kvPut = async (e, k, v) => { try { await e.CACHE?.put(k, v, { expirationTtl: 86400 }); } catch {} };
@@ -39,15 +36,16 @@ const kvPut = async (e, k, v) => { try { await e.CACHE?.put(k, v, { expirationTt
 function mime(p) {
   const ext = (p.split(".").pop() || "").toLowerCase();
   return ({
-    css:"text/css;charset=utf-8", js:"application/javascript;charset=utf-8",
+    css:"text/css;charset=utf-8",       js:"application/javascript;charset=utf-8",
     json:"application/json;charset=utf-8", xml:"application/xml;charset=utf-8",
-    svg:"image/svg+xml", png:"image/png", jpg:"image/jpeg", jpeg:"image/jpeg",
-    gif:"image/gif", webp:"image/webp", avif:"image/avif", ico:"image/x-icon",
-    woff:"font/woff", woff2:"font/woff2", ttf:"font/ttf",
-    eot:"application/vnd.ms-fontobject", otf:"font/otf",
+    svg:"image/svg+xml",   png:"image/png",     jpg:"image/jpeg",   jpeg:"image/jpeg",
+    gif:"image/gif",       webp:"image/webp",   avif:"image/avif",  ico:"image/x-icon",
+    woff:"font/woff",      woff2:"font/woff2",  ttf:"font/ttf",
+    eot:"application/vnd.ms-fontobject",        otf:"font/otf",
     pdf:"application/pdf", zip:"application/zip",
-    mp4:"video/mp4", mp3:"audio/mpeg",
-    txt:"text/plain;charset=utf-8", html:"text/html;charset=utf-8",
+    mp4:"video/mp4",       mp3:"audio/mpeg",
+    txt:"text/plain;charset=utf-8",
+    html:"text/html;charset=utf-8",
     php:"text/html;charset=utf-8",
   })[ext] || "application/octet-stream";
 }
@@ -65,6 +63,36 @@ async function ghRaw(env, filePath, ttl = 300) {
     );
     return res.ok ? res : null;
   } catch { return null; }
+}
+
+/**
+ * PHP Runner 응답의 Content-Type에 charset=utf-8을 강제로 주입합니다.
+ * WordPress가 내보내는 HTML에 <meta charset="UTF-8">이 있어도
+ * HTTP 헤더 레벨에서 charset이 없으면 브라우저가 잘못된 인코딩으로 렌더링합니다.
+ */
+function fixCharset(res) {
+  const ct = res.headers.get("Content-Type") || "";
+  // 이미 charset 있거나 HTML이 아니면 그대로 반환
+  if (ct.includes("charset") || (!ct.includes("text/html") && !ct.includes("text/plain"))) {
+    return res;
+  }
+  // charset=utf-8 주입
+  const newHeaders = new Headers(res.headers);
+  newHeaders.set("Content-Type", ct.replace(/;\s*$/, "") + ";charset=utf-8");
+  return new Response(res.body, {
+    status:     res.status,
+    statusText: res.statusText,
+    headers:    newHeaders,
+  });
+}
+
+/**
+ * HTML 문자열에 <meta charset="UTF-8">이 없으면 <head> 바로 뒤에 삽입합니다.
+ */
+function ensureCharsetMeta(html) {
+  if (/charset/i.test(html.slice(0, 2000))) return html;
+  // <head> 태그 뒤에 삽입
+  return html.replace(/<head([^>]*)>/i, '<head$1>\n<meta charset="UTF-8">');
 }
 
 // WordPress 스타일 404 페이지
@@ -102,10 +130,10 @@ function wp404(siteTitle = "WordPress") {
   });
 }
 
-// PHP Runner 없을 때 WordPress 관리 페이지 준비 중 안내
+// PHP Runner 없을 때 준비 중 안내 페이지
 function phpOfflinePage(path, siteTitle = "WordPress") {
   const isAdmin = path.startsWith("/wp-admin");
-  const title = isAdmin ? "WordPress 관리자" : "WordPress";
+  const title   = isAdmin ? "WordPress 관리자" : "WordPress";
   const html = `<!DOCTYPE html>
 <html lang="ko">
 <head>
@@ -157,8 +185,8 @@ function phpOfflinePage(path, siteTitle = "WordPress") {
     status: 503,
     headers: {
       ...SEC,
-      "Content-Type": "text/html;charset=utf-8",
-      "Retry-After": "30",
+      "Content-Type":  "text/html;charset=utf-8",
+      "Retry-After":   "30",
       "Cache-Control": "no-store",
     },
   });
@@ -166,12 +194,11 @@ function phpOfflinePage(path, siteTitle = "WordPress") {
 
 export default {
   async fetch(req, env, ctx) {
-    const url  = new URL(req.url);
-    const path = url.pathname;
+    const url   = new URL(req.url);
+    const path  = url.pathname;
     const isGet = req.method === "GET" || req.method === "HEAD";
 
-    // ── 1차: PHP Runner Service Binding (/run-wordpress POST 엔드포인트 사용) ──
-    // PHP Runner는 Service Binding 전용이므로 반드시 /run-wordpress POST로 호출해야 합니다.
+    // ── 1차: PHP Runner Service Binding ─────────────────────────────────────
     if (env.PHP_RUNNER) {
       try {
         let body = "";
@@ -179,7 +206,7 @@ export default {
           body = await req.clone().text().catch(() => "");
         }
         const payload = {
-          phpFile:    path.endsWith(".php") ? path : "/index.php",
+          phpFile: path.endsWith(".php") ? path : "/index.php",
           phpEnv: {
             REQUEST_URI:          path + url.search,
             REQUEST_METHOD:       req.method,
@@ -216,8 +243,8 @@ export default {
             body:    JSON.stringify(payload),
           })
         );
-        // 200~499 응답은 그대로 반환 (404 포함 — WP가 직접 404 페이지 생성)
-        if (phpRes.status < 500) return phpRes;
+        // charset 보정 후 반환 (500 이상은 다음 단계로)
+        if (phpRes.status < 500) return fixCharset(phpRes);
       } catch { /* PHP Runner 오프라인 → 다음 단계로 */ }
     }
 
@@ -233,7 +260,6 @@ export default {
     }
 
     // ── 3차: WordPress 핵심 디렉터리 정적 자산 → GitHub raw ─────────────────
-    // wp-content/, wp-includes/, wp-admin/ 의 정적 파일은 GitHub raw에서 직접 서빙
     if (isGet && STATIC_EXT.test(path) &&
         (path.startsWith("/wp-content/") || path.startsWith("/wp-includes/") || path.startsWith("/wp-admin/"))) {
       const res = await ghRaw(env, "wordpress" + path, 86400);
@@ -247,33 +273,32 @@ export default {
       }
     }
 
-    // ── 4차: _cache/ 정적 HTML (install/keepalive 워크플로우가 생성) ─────────
-    if (isGet && !STATIC_EXT.test(path)) {
-      // PHP 경로가 아닌 일반 페이지만 캐시에서 서빙
-      // (PHP 경로는 PHP Runner → 준비중 페이지로 처리)
-      if (!WP_PHP_PATHS.test(path) && !WP_PHP_FILES.test(path)) {
-        let cp = "_cache" + path;
-        if (cp.endsWith("/")) cp += "index.html";
-        else if (!cp.includes(".")) cp += "/index.html";
+    // ── 4차: _cache/ 정적 HTML ───────────────────────────────────────────────
+    if (isGet && !STATIC_EXT.test(path) && !WP_PHP_PATHS.test(path) && !WP_PHP_FILES.test(path)) {
+      let cp = "_cache" + path;
+      if (cp.endsWith("/")) cp += "index.html";
+      else if (!cp.includes(".")) cp += "/index.html";
 
-        let res = await ghRaw(env, cp, 60);
-        // /path.html 형태도 시도
-        if (!res) res = await ghRaw(env, "_cache" + path + ".html", 60);
+      let res = await ghRaw(env, cp, 60);
+      if (!res) res = await ghRaw(env, "_cache" + path + ".html", 60);
 
-        if (res) {
-          const body = await res.arrayBuffer();
-          return new Response(body, {
-            headers: { "Content-Type": "text/html;charset=utf-8", "Cache-Control": "public,max-age=60,s-maxage=300", ...SEC },
-          });
-        }
+      if (res) {
+        // ▼▼▼ 인코딩 깨짐 핵심 수정: 텍스트로 읽어서 charset meta 보장 후 반환 ▼▼▼
+        const raw  = await res.text();
+        const html = ensureCharsetMeta(raw);
+        return new Response(html, {
+          headers: {
+            "Content-Type":  "text/html;charset=utf-8",
+            "Cache-Control": "public,max-age=60,s-maxage=300",
+            ...SEC,
+          },
+        });
       }
     }
 
-    // ── 5차: 일반 정적 자산 GitHub raw (wordpress/ 우선) ────────────────────
+    // ── 5차: 일반 정적 자산 GitHub raw ──────────────────────────────────────
     if (isGet && STATIC_EXT.test(path)) {
-      // wordpress/ 디렉터리에서 먼저 시도
       let res = await ghRaw(env, "wordpress" + path, 3600);
-      // 없으면 루트에서 시도
       if (!res) res = await ghRaw(env, path.slice(1), 3600);
       if (res) {
         const body = await res.arrayBuffer();
@@ -288,12 +313,11 @@ export default {
     if (pagesBase && pagesBase !== "%%GH_PAGES_URL%%") {
       try {
         const r = await fetch(pagesBase + path + url.search);
-        if (r.ok) return r;
+        if (r.ok) return fixCharset(r);
       } catch {}
     }
 
-    // ── 7차: PHP 경로 (wp-admin, wp-login 등) → PHP Runner 없을 때 준비 중 안내 ──
-    // PHP Runner가 없거나 오프라인이어서 여기까지 왔다면 친절한 안내 페이지 제공
+    // ── 7차: PHP 경로 → PHP Runner 없을 때 준비 중 안내 ─────────────────────
     if (WP_PHP_PATHS.test(path) || WP_PHP_FILES.test(path) || path.endsWith(".php")) {
       return phpOfflinePage(path, env.SITE_NAME || "WordPress");
     }

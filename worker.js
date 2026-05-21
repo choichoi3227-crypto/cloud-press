@@ -797,7 +797,21 @@ async function handleWordPressRequest(request, env, ctx) {
     mirror.get("wordpress/wp-content/db.php"),
   ]);
   const wpConfig = wpConfigRes ? await wpConfigRes.text() : "";
-  const dbPhp    = dbPhpRes    ? await dbPhpRes.text()    : "";
+  let dbPhp      = dbPhpRes    ? await dbPhpRes.text()    : "";
+
+  // db.php 없으면 SQLite 플러그인 db.copy로 자동 대체
+  if (!dbPhp && mirror.enabled) {
+    const dbCopyRes = await mirror.get("wordpress/wp-content/plugins/sqlite-database-integration/db.copy");
+    if (dbCopyRes) {
+      dbPhp = await dbCopyRes.text();
+      // db.copy 플레이스홀더 치환 (실제 constants.php가 처리하므로 단순 복사면 됨)
+      // {SQLITE_IMPLEMENTATION_FOLDER_PATH}, {SQLITE_PLUGIN}은 런타임에 constants.php가 무시함
+      // 백그라운드로 db.php 저장
+      if (ctx) ctx.waitUntil(
+        mirror.put("wordpress/wp-content/db.php", dbPhp, "auto: generate db.php from db.copy")
+      );
+    }
+  }
 
   // ── WordPress 미설치 감지 → install.php 처리 ────────────────────────────
   const isInstalled = !!wpConfig;
@@ -923,16 +937,20 @@ async function handleWordPressRequest(request, env, ctx) {
 
   // ── PHP Runner 호출 (Service Binding) ────────────────────────────────────
   let phpRes = null;
-  try {
-    phpRes = await env.PHP_RUNNER.fetch(
-      new Request("https://php/run-wordpress", {
-        method:  "POST",
-        headers: { "Content-Type": "application/json" },
-        body:    JSON.stringify(payload),
-      })
-    );
-  } catch (e) {
-    console.error("[PHP_RUNNER] 호출 실패:", e.message);
+  if (!env.PHP_RUNNER) {
+    console.warn("[PHP_RUNNER] 바인딩 없음 → 정적 캐시 폴백");
+  } else {
+    try {
+      phpRes = await env.PHP_RUNNER.fetch(
+        new Request("https://php/run-wordpress", {
+          method:  "POST",
+          headers: { "Content-Type": "application/json" },
+          body:    JSON.stringify(payload),
+        })
+      );
+    } catch (e) {
+      console.error("[PHP_RUNNER] 호출 실패:", e.message);
+    }
   }
 
   // PHP Runner 실패(5xx, 예외) → _cache/ 정적 HTML 폴백
@@ -1382,12 +1400,18 @@ export default {
       }});
     }
 
-    // ── /api/* 는 항상 API 라우터로 (WordPress/ASSETS보다 우선)
+    // ── /api/* 는 항상 API 라우터로
     if (url.pathname.startsWith("/api/")) {
       return handleApiRequest(request, env, ctx);
     }
 
-    // ── 플랫폼 정적 파일 (대시보드 HTML/CSS/JS) — WordPress보다 우선
+    // ── WordPress 사이트 Worker (GITHUB_OWNER/REPO 환경변수 있으면 → 무조건 WordPress)
+    // 사이트별 Worker는 플랫폼 페이지를 서빙하지 않음
+    if (env.GITHUB_OWNER && env.GITHUB_REPO) {
+      return handleWordPressRequest(request, env, ctx);
+    }
+
+    // ── 이하는 CloudPress 플랫폼 메인 Worker (GITHUB_OWNER 없음)
     const platformPages = [
       '/dashboard', '/hosting', '/hosting-create', '/hosting-detail',
       '/domains', '/dns', '/traffic', '/storage', '/editor',
@@ -1396,36 +1420,30 @@ export default {
       '/admin-inquiries', '/admin-notices', '/admin-settings', '/about', '/contact',
       '/features', '/faq', '/notices', '/chat',
     ];
-    // 루트 / → index.html 명시 매핑 (ASSETS가 / 자동변환 안함)
+
+    // 루트 / → index.html
     if (url.pathname === '/' && env.ASSETS) {
       const indexUrl = new URL(request.url);
       indexUrl.pathname = '/index.html';
       return env.ASSETS.fetch(new Request(indexUrl.toString(), request));
     }
 
-    // .html/.css/.js/정적파일은 그대로 ASSETS
+    // 정적 파일 → ASSETS
     const isStaticAsset =
       url.pathname.endsWith('.html') ||
       url.pathname.endsWith('.css') ||
       url.pathname.endsWith('.js') ||
       url.pathname.startsWith('/src/') ||
-      url.pathname.startsWith('/favicon') ||
-      url.pathname.startsWith('/wp-content/');
+      url.pathname.startsWith('/favicon');
     if (isStaticAsset && env.ASSETS) return env.ASSETS.fetch(request);
 
-    // .html 없는 플랫폼 경로 → .html 붙여서 ASSETS로 서빙 (리디렉션 없이)
+    // 플랫폼 경로 → .html ASSETS
     if (platformPages.includes(url.pathname) && env.ASSETS) {
       const htmlUrl = new URL(request.url);
       htmlUrl.pathname = url.pathname + '.html';
       return env.ASSETS.fetch(new Request(htmlUrl.toString(), request));
     }
 
-    // ── WordPress 사이트 서빙 (php-wasm + GitHub 미러링)
-    if (env.GITHUB_OWNER && env.GITHUB_REPO) {
-      return handleWordPressRequest(request, env, ctx);
-    }
-
-    // ── 플랫폼 정적 파일 (폴백)
     if (env.ASSETS) return env.ASSETS.fetch(request);
 
     return new Response("CloudPress WordPress Hosting Platform v4.0", {

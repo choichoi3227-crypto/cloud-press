@@ -327,9 +327,9 @@ define( 'DB_CHARSET',  'utf8mb4' );
 define( 'DB_COLLATE',  '' );
 define( 'table_prefix', '${dbPrefix}' );
 
-// SQLite 플러그인 설정
-define( 'SQLITE_DB_DIR',  __DIR__ . '/../_db/' );
-define( 'SQLITE_DB_FILE', 'wordpress.db' );
+// SQLite 플러그인 설정 (DB_DIR/DB_FILE이 실제 사용되는 상수)
+define( 'DB_DIR',  __DIR__ . '/../_db/' );
+define( 'DB_FILE', 'wordpress.db' );
 
 // ── 인증 키/솔트 ──
 define( 'AUTH_KEY',         '${authKey}' );
@@ -352,7 +352,7 @@ define( 'WP_AUTO_UPDATE_CORE', false );
 define( 'DISALLOW_FILE_EDIT',  false );
 
 if ( ! defined( 'ABSPATH' ) ) {
-  define( 'ABSPATH', __DIR__ . '/' );
+  define( 'ABSPATH', __DIR__ . DIRECTORY_SEPARATOR );
 }
 require_once ABSPATH . 'wp-settings.php';
 `;
@@ -367,7 +367,22 @@ require_once ABSPATH . 'wp-settings.php';
 function buildWorkerSource({ siteId, githubOwner, githubRepo, ghPagesUrl, siteUrl = "" }) {
   // worker-site-mirror.js v14 소스를 인라인으로 조립
   // 플레이스홀더를 실제 값으로 치환
-  const src = "/**\n * CloudPress \u2014 worker-site-mirror.js v14.0\n * \u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\n * \uc0ac\uc774\ud2b8\ubcc4 Cloudflare Worker\n *\n * \ucc98\ub9ac \uc21c\uc11c:\n *   1. PHP Runner Service Binding (GitHub Actions keepalive PHP \uc11c\ubc84)\n *   2. KV \uce90\uc2dc HIT (\uc815\uc801 \uc790\uc0b0)\n *   3. wp-content \uc815\uc801 \uc790\uc0b0 \u2192 GitHub raw \ubbf8\ub7ec\n *   4. _cache/ \uc815\uc801 HTML \u2192 GitHub raw (install \uc9c1\ud6c4 \uc0dd\uc131\ub428)\n *   5. wp-content \uc5c6\ub294 \uc815\uc801 \uc790\uc0b0 \u2192 GitHub raw (\uc9c1\uc811)\n *   6. GitHub Pages \ud3f4\ubc31\n *   404: \uae54\ub054\ud55c WordPress 404\n */\n\nconst GH_BRANCH = \"main\";\nconst STATIC_EXT = /\\.(css|js|jpg|jpeg|png|gif|webp|avif|svg|ico|woff2?|ttf|eot|otf|map|txt|xml|pdf|zip|mp4|mp3|ogg|wav|webm)$/i;\n\nconst SEC = {\n  \"X-Content-Type-Options\": \"nosniff\",\n  \"X-Frame-Options\":        \"SAMEORIGIN\",\n  \"Referrer-Policy\":        \"strict-origin-when-cross-origin\",\n};\n\nconst ghOwner = (e) => e.GH_OWNER  || \"%%GH_OWNER%%\";\nconst ghRepo  = (e) => e.GH_REPO   || \"%%GH_REPO%%\";\nconst ghToken = (e) => e.GITHUB_TOKEN || \"\";\nconst ghPages = (e) => e.GH_PAGES_URL || \"%%GH_PAGES_URL%%\";\nconst siteUrl = (e) => e.SITE_URL  || \"%%SITE_URL%%\";\n\nconst kvGet = async (e, k)    => { try { return await e.CACHE?.get(k, \"arrayBuffer\"); } catch { return null; } };\nconst kvPut = async (e, k, v) => { try { await e.CACHE?.put(k, v, { expirationTtl: 86400 }); } catch {} };\n\nfunction mime(p) {\n  const ext = (p.split(\".\").pop() || \"\").toLowerCase();\n  return ({\n    css:\"text/css;charset=utf-8\", js:\"application/javascript;charset=utf-8\",\n    json:\"application/json;charset=utf-8\", xml:\"application/xml;charset=utf-8\",\n    svg:\"image/svg+xml\", png:\"image/png\", jpg:\"image/jpeg\", jpeg:\"image/jpeg\",\n    gif:\"image/gif\", webp:\"image/webp\", avif:\"image/avif\", ico:\"image/x-icon\",\n    woff:\"font/woff\", woff2:\"font/woff2\", ttf:\"font/ttf\",\n    eot:\"application/vnd.ms-fontobject\", otf:\"font/otf\",\n    pdf:\"application/pdf\", zip:\"application/zip\",\n    mp4:\"video/mp4\", mp3:\"audio/mpeg\",\n    txt:\"text/plain;charset=utf-8\", html:\"text/html;charset=utf-8\",\n  })[ext] || \"application/octet-stream\";\n}\n\nasync function ghRaw(env, filePath, ttl = 300) {\n  const o = ghOwner(env), r = ghRepo(env), t = ghToken(env);\n  if (!o || !r || o === \"%%GH_OWNER%%\" || r === \"%%GH_REPO%%\") return null;\n  try {\n    const res = await fetch(\n      `https://raw.githubusercontent.com/${o}/${r}/${GH_BRANCH}/${filePath}`,\n      {\n        headers: { ...(t ? { Authorization: `Bearer ${t}` } : {}), \"User-Agent\": \"CloudPress/14\" },\n        cf: { cacheEverything: true, cacheTtl: ttl },\n      }\n    );\n    return res.ok ? res : null;\n  } catch { return null; }\n}\n\n// WordPress \uc2a4\ud0c0\uc77c 404 \ud398\uc774\uc9c0\nfunction wp404(siteTitle = \"WordPress\") {\n  const html = `<!DOCTYPE html>\n<html lang=\"ko\">\n<head>\n<meta charset=\"UTF-8\">\n<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">\n<title>\ud398\uc774\uc9c0\ub97c \ucc3e\uc744 \uc218 \uc5c6\uc2b5\ub2c8\ub2e4 \u2014 ${siteTitle}</title>\n<style>\n  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,\"Segoe UI\",sans-serif;\n       background:#fff;color:#1e293b;padding:2rem;display:flex;\n       align-items:center;justify-content:center;min-height:100vh}\n  .wrap{max-width:500px;text-align:center}\n  h1{font-size:6rem;font-weight:900;color:#e2e8f0;margin:0;line-height:1}\n  h2{font-size:1.5rem;font-weight:700;margin:.5rem 0 1rem}\n  p{color:#64748b;margin-bottom:1.5rem}\n  a{color:#6366f1;text-decoration:none;font-weight:600}\n  a:hover{text-decoration:underline}\n</style>\n</head>\n<body>\n  <div class=\"wrap\">\n    <h1>404</h1>\n    <h2>\ud398\uc774\uc9c0\ub97c \ucc3e\uc744 \uc218 \uc5c6\uc2b5\ub2c8\ub2e4</h2>\n    <p>\ucc3e\uc73c\uc2dc\ub294 \ud398\uc774\uc9c0\uac00 \uc5c6\uac70\ub098 \uc774\ub3d9\ub418\uc5c8\uc2b5\ub2c8\ub2e4.</p>\n    <a href=\"/\">\u2190 \ud648\uc73c\ub85c \ub3cc\uc544\uac00\uae30</a>\n  </div>\n</body>\n</html>`;\n  return new Response(html, {\n    status: 404,\n    headers: { ...SEC, \"Content-Type\": \"text/html;charset=utf-8\" },\n  });\n}\n\nexport default {\n  async fetch(req, env, ctx) {\n    const url  = new URL(req.url);\n    const path = url.pathname;\n    const isGet = req.method === \"GET\";\n\n    // \u2500\u2500 1\ucc28: PHP Runner Service Binding (GitHub Actions keepalive PHP \uc11c\ubc84) \u2500\u2500\n    // keepalive \uc6cc\ud06c\ud50c\ub85c\uc6b0\uac00 \uc2e4\ud589 \uc911\uc774\uba74 \uc2e4\uc2dc\uac04 WordPress PHP \ucc98\ub9ac\n    if (env.PHP_RUNNER) {\n      try {\n        let _rb = \"\";\n        if (req.method !== \"GET\" && req.method !== \"HEAD\") _rb = await req.clone().text().catch(() => \"\");\n        const _p = { phpFile: path.endsWith(\".php\") ? path : \"/index.php\",\n          phpEnv: { REQUEST_URI: path+url.search, REQUEST_METHOD: req.method,\n            HTTP_HOST: url.host, SERVER_NAME: url.host,\n            HTTPS: url.protocol===\"https:\" ? \"on\" : \"\",\n            HTTP_COOKIE: req.headers.get(\"Cookie\")||\"\",\n            HTTP_USER_AGENT: req.headers.get(\"User-Agent\")||\"\",\n            HTTP_ACCEPT: req.headers.get(\"Accept\")||\"*/*\",\n            HTTP_ACCEPT_LANGUAGE: req.headers.get(\"Accept-Language\")||\"ko-KR,ko;q=0.9\",\n            HTTP_ACCEPT_ENCODING: req.headers.get(\"Accept-Encoding\")||\"\",\n            HTTP_REFERER: req.headers.get(\"Referer\")||\"\",\n            HTTP_AUTHORIZATION: req.headers.get(\"Authorization\")||\"\",\n            CONTENT_TYPE: req.headers.get(\"Content-Type\")||\"\",\n            CONTENT_LENGTH: String(_rb.length),\n            QUERY_STRING: url.search.replace(/^\\?/,\"\"),\n            GITHUB_OWNER: ghOwner(env), GITHUB_REPO: ghRepo(env), GITHUB_TOKEN: ghToken(env) },\n          stdin: _rb, skipCache: false,\n          siteConfig: { githubOwner: ghOwner(env), githubRepo: ghRepo(env), ghPagesUrl: ghPages(env) } };\n        const phpRes = await env.PHP_RUNNER.fetch(\n          new Request(\"https://php-runner/run-wordpress\",\n            { method: \"POST\", headers: { \"Content-Type\": \"application/json\" }, body: JSON.stringify(_p) }));\n        if (phpRes.status < 500) return phpRes;\n      } catch { /* PHP Runner \uc624\ud504\ub77c\uc778 \u2192 \ub2e4\uc74c \ub2e8\uacc4\ub85c */ }\n    }\n\n    // \u2500\u2500 2\ucc28: KV \uce90\uc2dc HIT (\uc815\uc801 \uc790\uc0b0) \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n    if (isGet && STATIC_EXT.test(path)) {\n      const cacheKey = `v14:${ghOwner(env)}/${ghRepo(env)}:${path}`;\n      const cached = await kvGet(env, cacheKey);\n      if (cached) {\n        return new Response(cached, {\n          headers: { \"Content-Type\": mime(path), \"Cache-Control\": \"public,max-age=604800,immutable\", ...SEC },\n        });\n      }\n    }\n\n    // \u2500\u2500 3\ucc28: wp-content \uc815\uc801 \uc790\uc0b0 \u2192 GitHub raw \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n    if (isGet && STATIC_EXT.test(path) && path.startsWith(\"/wp-content/\")) {\n      const res = await ghRaw(env, \"wordpress\" + path, 86400);\n      if (res) {\n        const body = await res.arrayBuffer();\n        const cacheKey = `v14:${ghOwner(env)}/${ghRepo(env)}:${path}`;\n        ctx.waitUntil(kvPut(env, cacheKey, body));\n        return new Response(body, {\n          headers: { \"Content-Type\": mime(path), \"Cache-Control\": \"public,max-age=604800,immutable\", ...SEC },\n        });\n      }\n    }\n\n    // \u2500\u2500 4\ucc28: _cache/ \uc815\uc801 HTML (install/keepalive \uc6cc\ud06c\ud50c\ub85c\uc6b0\uac00 \uc0dd\uc131) \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n    if (isGet && !STATIC_EXT.test(path)) {\n      // _cache/index.html, _cache/about/index.html \ub4f1\n      let cp = \"_cache\" + path;\n      if (cp.endsWith(\"/\")) cp += \"index.html\";\n      else cp += \"/index.html\";\n\n      let res = await ghRaw(env, cp, 60);\n      // /path.html \ud615\ud0dc\ub3c4 \uc2dc\ub3c4\n      if (!res) res = await ghRaw(env, \"_cache\" + path + \".html\", 60);\n\n      if (res) {\n        const body = await res.arrayBuffer();\n        // HTML \uce90\uc2dc\ub294 \uc9e7\uac8c (keepalive\uac00 \uac31\uc2e0\ud558\ubbc0\ub85c)\n        return new Response(body, {\n          headers: { \"Content-Type\": \"text/html;charset=utf-8\", \"Cache-Control\": \"public,max-age=60,s-maxage=300\", ...SEC },\n        });\n      }\n    }\n\n    // \u2500\u2500 5\ucc28: \uc77c\ubc18 \uc815\uc801 \uc790\uc0b0 GitHub raw (wp-content \uc544\ub2cc \uac83) \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n    if (isGet && STATIC_EXT.test(path)) {\n      const res = await ghRaw(env, \"wordpress\" + path, 3600);\n      if (res) {\n        const body = await res.arrayBuffer();\n        return new Response(body, {\n          headers: { \"Content-Type\": mime(path), \"Cache-Control\": \"public,max-age=3600\", ...SEC },\n        });\n      }\n    }\n\n    // \u2500\u2500 6\ucc28: GitHub Pages \ud3f4\ubc31 \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n    const pagesBase = ghPages(env);\n    if (pagesBase && pagesBase !== \"%%GH_PAGES_URL%%\") {\n      try {\n        const r = await fetch(pagesBase + path + url.search);\n        if (r.ok) return r;\n      } catch {}\n    }\n\n    // \u2500\u2500 7\ucc28: wp-admin / wp-json \ub4f1 POST \uc694\uccad\uc740 PHP Runner \uc5c6\uc774 503 \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n    if (path.startsWith(\"/wp-admin\") || path.startsWith(\"/wp-json\") || path.startsWith(\"/wp-login\")) {\n      return new Response(\n        JSON.stringify({ error: \"WordPress PHP \uc11c\ubc84\uac00 \ud604\uc7ac \uc624\ud504\ub77c\uc778\uc785\ub2c8\ub2e4. \uc7a0\uc2dc \ud6c4 \ub2e4\uc2dc \uc2dc\ub3c4\ud574\uc8fc\uc138\uc694.\", code: \"php_offline\" }),\n        { status: 503, headers: { ...SEC, \"Content-Type\": \"application/json\", \"Retry-After\": \"30\" } }\n      );\n    }\n\n    // \u2500\u2500 \ucd5c\uc885: WordPress \uc2a4\ud0c0\uc77c 404 \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n    return wp404(env.SITE_NAME || \"WordPress\");\n  },\n};\n";
+  // worker-site-mirror.js 파일 내용을 직접 사용
+  let src;
+  try {
+    const { readFileSync } = await import("fs");
+    const { fileURLToPath } = await import("url");
+    const { dirname, join } = await import("path");
+    const __dirname = dirname(fileURLToPath(import.meta.url));
+    src = readFileSync(join(__dirname, "../../worker-site-mirror.js"), "utf8");
+  } catch {
+    // Pages Functions 환경에서는 동적 import 불가 → 인라인 fallback
+    src = null;
+  }
+  if (!src) {
+    // fallback: 최소 동작 worker (GH raw _cache/ 서빙)
+    src = `export default{async fetch(req,env,ctx){const url=new URL(req.url);const path=url.pathname;const o=env.GH_OWNER||"${githubOwner}";const r=env.GH_REPO||"${githubRepo}";const t=env.GITHUB_TOKEN||"";if(!o||!r)return new Response("설정 오류",{status:503});const base=\`https://raw.githubusercontent.com/\${o}/\${r}/main\`;const cp=path==="/"?"_cache/index.html":("_cache"+path+(path.endsWith("/")?"":"/")+("index.html"));const res=await fetch(\`\${base}/\${cp}\`,{headers:{...(t?{Authorization:\`Bearer \${t}\`}:{})}}).catch(()=>null);if(res?.ok)return new Response(await res.arrayBuffer(),{headers:{"Content-Type":"text/html;charset=utf-8","Cache-Control":"no-store"}});return new Response("준비 중...",{status:200,headers:{"Content-Type":"text/html","Cache-Control":"no-store","Refresh":"30"}})}};`;
+  }
   return src
     .replace(/%%GH_OWNER%%/g, (githubOwner || "").replace(/\\/g, "\\\\"))
     .replace(/%%GH_REPO%%/g,  (githubRepo  || "").replace(/\\/g, "\\\\"))
@@ -492,11 +507,22 @@ jobs:
         run: |
           mkdir -p wordpress/wp-content/plugins _db
           touch _db/.gitkeep
+          chmod 777 _db
           if [ ! -d "wordpress/wp-content/plugins/sqlite-database-integration" ]; then
             curl -sL "https://downloads.wordpress.org/plugin/sqlite-database-integration.latest-stable.zip" -o /tmp/sqlite.zip
             unzip -q /tmp/sqlite.zip -d wordpress/wp-content/plugins/
           fi
-          cp -f wordpress/wp-content/plugins/sqlite-database-integration/db.copy wordpress/wp-content/db.php
+          # db.copy → db.php 생성 + 플레이스홀더 치환
+          DB_COPY="wordpress/wp-content/plugins/sqlite-database-integration/db.copy"
+          PLUGIN_PATH="$(pwd)/wordpress/wp-content/plugins/sqlite-database-integration"
+          if [ -f "$DB_COPY" ]; then
+            cp -f "$DB_COPY" wordpress/wp-content/db.php
+            sed -i "s|{SQLITE_IMPLEMENTATION_FOLDER_PATH}|${PLUGIN_PATH}|g" wordpress/wp-content/db.php
+            sed -i "s|{SQLITE_PLUGIN}|sqlite-database-integration/load.php|g" wordpress/wp-content/db.php
+            echo "db.php 생성 완료"
+          else
+            echo "경고: db.copy 없음"
+          fi
           echo "SQLite 플러그인 준비 완료"
 
       - name: wp-config.php 생성
@@ -772,12 +798,12 @@ jobs:
 
       - name: PHP 동적 기능 실행 테스트
         run: |
-          if [ ! -f "wp-load.php" ]; then exit 0; fi
+          if [ ! -f "wordpress/wp-load.php" ]; then exit 0; fi
           echo "=== PHP 동적 실행 테스트 ==="
-          php -r "
+          cd wordpress && php -r "
+          error_reporting(0);
           define('ABSPATH', __DIR__ . '/');
           define('WPINC', 'wp-includes');
-          error_reporting(0);
           require_once 'wp-load.php';
           echo 'WordPress PHP OK: v' . \$wp_version . PHP_EOL;
           echo '활성 플러그인: ' . count(get_option('active_plugins', [])) . '개' . PHP_EOL;
@@ -785,7 +811,6 @@ jobs:
           echo '게시물 수: ' . count(\$posts) . '개' . PHP_EOL;
           " 2>/dev/null || echo "WordPress 로드 확인"
           cd ..
-
           curl -sf --max-time 15 "http://localhost:8080/wp-json/wp/v2/posts" \
             -H "Accept: application/json" -o /tmp/wp-api.json 2>/dev/null && \
             echo "REST API 정상" || echo "REST API 응답 대기"

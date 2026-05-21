@@ -364,7 +364,7 @@ require_once ABSPATH . 'wp-settings.php';
 // ⚠️  이 함수는 배열+join으로 Worker 소스를 생성합니다.
 //     템플릿 리터럴을 중첩하면 \\ 이스케이프가 손실되어
 //     정규식(/^\\//)이 /^//로 깨지고 CF Worker 배포 SyntaxError가 발생합니다.
-function buildWorkerSource({ siteId, githubOwner, githubRepo, ghPagesUrl, siteUrl = "" }) {
+async function buildWorkerSource({ siteId, githubOwner, githubRepo, ghPagesUrl, siteUrl = "" }) {
   // worker-site-mirror.js v14 소스를 인라인으로 조립
   // 플레이스홀더를 실제 값으로 치환
   // worker-site-mirror.js 파일 내용을 직접 사용
@@ -1595,7 +1595,7 @@ export async function provisionCloudflarePagesHosting({
   const siteUrl    = initialDomain ? `https://${initialDomain}` : realWorkerUrl;
   const ghPagesUrl = owner ? `https://${owner}.github.io/${repoName}` : "";
 
-  const workerSource = buildWorkerSource({ siteId, githubOwner: owner || "", githubRepo: repoName, ghPagesUrl, siteUrl });
+  const workerSource = await buildWorkerSource({ siteId, githubOwner: owner || "", githubRepo: repoName, ghPagesUrl, siteUrl });
 
   let workerDomain = null;
   if (cfToken && cfAccountId) {
@@ -1653,6 +1653,25 @@ export async function provisionCloudflarePagesHosting({
         { path: "wordpress/wp-content/uploads/.gitkeep", content: "" },
         { path: "wordpress/wp-content/themes/.gitkeep",  content: "" },
         { path: "wordpress/wp-content/plugins/.gitkeep", content: "" },
+        // .gitignore — wordpress.db는 추적하지 않음
+        {
+          path: ".gitignore",
+          content: [
+            "# WordPress SQLite DB (GitHub Actions 워크플로우가 자동 생성)",
+            "_db/wordpress.db",
+            "_db/*.db",
+            "_db/*.db-shm",
+            "_db/*.db-wal",
+            "",
+            "# 임시 파일",
+            "*.log",
+            "/tmp/",
+            "",
+            "# Node.js",
+            "node_modules/",
+            ".wrangler/",
+          ].join("\n") + "\n",
+        },
         // aibp-pro 플러그인 파일
         ...(aibpPhp  ? [{ path: "_plugins/aibp-pro/aibp-pro.php",            content: aibpPhp  }] : []),
         ...(aibpJs   ? [{ path: "_plugins/aibp-pro/assets/script-pro.js",    content: aibpJs   }] : []),
@@ -1676,10 +1695,6 @@ export async function provisionCloudflarePagesHosting({
         {
           path: ".github/scripts/php-keepalive.sh",
           content: buildPhpKeepaliveScript(),
-        },
-        {
-          path: "wp-content/uploads/.gitkeep",
-          content: "# WordPress uploads\n",
         },
         {
           path: "README.md",

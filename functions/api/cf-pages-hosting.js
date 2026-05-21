@@ -514,10 +514,10 @@ jobs:
           fi
           # db.copy → db.php 생성 + 플레이스홀더 치환
           DB_COPY="wordpress/wp-content/plugins/sqlite-database-integration/db.copy"
-          PLUGIN_PATH="$(pwd)/wordpress/wp-content/plugins/sqlite-database-integration"
+          PLUGIN_PATH="\$(pwd)/wordpress/wp-content/plugins/sqlite-database-integration"
           if [ -f "$DB_COPY" ]; then
             cp -f "$DB_COPY" wordpress/wp-content/db.php
-            sed -i "s|{SQLITE_IMPLEMENTATION_FOLDER_PATH}|${PLUGIN_PATH}|g" wordpress/wp-content/db.php
+            sed -i "s|{SQLITE_IMPLEMENTATION_FOLDER_PATH}|\${PLUGIN_PATH}|g" wordpress/wp-content/db.php
             sed -i "s|{SQLITE_PLUGIN}|sqlite-database-integration/load.php|g" wordpress/wp-content/db.php
             echo "db.php 생성 완료"
           else
@@ -751,7 +751,7 @@ jobs:
 
       - name: nginx 설정 (WordPress + PHP-FPM 완전 통합)
         run: |
-          WP_ROOT="$(pwd)/wordpress"
+          WP_ROOT="\$(pwd)/wordpress"
           {
             echo 'server {'
             echo '  listen 8080;'
@@ -787,7 +787,7 @@ jobs:
             echo "WordPress 미설치 - 건너뜀"
             exit 0
           fi
-          HTTP=$(curl -o /dev/null -s -w "%{http_code}" --max-time 30 "http://localhost:8080/" || echo "000")
+          HTTP=\$(curl -o /dev/null -s -w "%{http_code}" --max-time 30 "http://localhost:8080/" || echo "000")
           echo "HTTP 응답: $HTTP"
           if [ "$HTTP" = "200" ] || [ "$HTTP" = "301" ] || [ "$HTTP" = "302" ]; then
             echo "WordPress nginx+PHP-FPM 정상 실행"
@@ -823,9 +823,9 @@ jobs:
           curl -sf -L --max-time 15 "http://localhost:8080/sitemap.xml" -o /tmp/sitemap.xml 2>/dev/null || true
           if [ -f /tmp/sitemap.xml ]; then
             grep -o '<loc>[^<]*</loc>' /tmp/sitemap.xml | sed 's|<loc>||;s|</loc>||' | head -50 | while read -r loc; do
-              REL=$(echo "$loc" | sed "s|http://localhost:8080||;s|https://[^/]*||")
+              REL=\$(echo "$loc" | sed "s|http://localhost:8080||;s|https://[^/]*||")
               [ -z "$REL" ] || [ "$REL" = "/" ] && continue
-              DIR=$(dirname "$REL")
+              DIR=\$(dirname "$REL")
               mkdir -p "_cache$DIR"
               if echo "$REL" | grep -q "/$"; then
                 mkdir -p "_cache$REL"
@@ -835,7 +835,7 @@ jobs:
               fi
             done
           fi
-          COUNT=$(find _cache -name "*.html" 2>/dev/null | wc -l)
+          COUNT=\$(find _cache -name "*.html" 2>/dev/null | wc -l)
           echo "캐시 완료: \${COUNT}개 페이지"
 
       - name: 캐시 및 서버 상태 커밋
@@ -844,12 +844,12 @@ jobs:
           git config user.email "bot@cloudpress.app"
           mkdir -p _cache
           printf '{"updated":"%s","server":"nginx+php8.3-fpm","wp":"%s"}' \
-            "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-            "$([ -f wordpress/wp-load.php ] && echo installed || echo not_installed)" \
+            "\$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            "\$([ -f wordpress/wp-load.php ] && echo installed || echo not_installed)" \
             > _cache/server-status.json
           git add _cache/
           if ! git diff --staged --quiet; then
-            git commit -m "PHP 서버 캐시 갱신 $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            git commit -m "PHP 서버 캐시 갱신 \$(date -u +%Y-%m-%dT%H:%M:%SZ)"
             for i in 1 2 3; do
               git pull --rebase origin main 2>/dev/null || true
               git push origin main && break

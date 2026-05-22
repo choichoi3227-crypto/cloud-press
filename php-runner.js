@@ -278,107 +278,14 @@ async function runWordpress(payload, env, ctx) {
     } catch {}
   }
 
-  // 6. 설치 완료 여부 확인 (wp-config.php 또는 wp-includes/version.php 기준)
-  const repoUrl    = owner && repo ? "https://github.com/" + owner + "/" + repo : "";
-  const actionsUrl = repoUrl ? repoUrl + "/actions/workflows/install-wordpress.yml" : "";
-
-  // wp-config.php 존재 시 설치 완료로 판단 (Actions 완료 후 항상 존재)
-  let wpInstalled = false;
-  if (owner && repo) {
-    try {
-      const cfgRes = await ghFetch(owner, repo, branch, "wordpress/wp-config.php", token, true);
-      if (cfgRes) {
-        wpInstalled = true;
-      } else {
-        const verRes = await ghFetch(owner, repo, branch, "wordpress/wp-includes/version.php", token, true);
-        wpInstalled = !!verRes;
-      }
-    } catch {}
-  }
-
-  // 설치 완료인데 여기까지 온 경우: 캐시 아직 없음 → 사이트 준비 중 안내
-  if (wpInstalled) {
-    const siteHost = (payload.phpEnv?.HTTP_HOST) || "이 사이트";
-    return new Response(
-      `<!DOCTYPE html><html lang="ko"><head>
-<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<meta http-equiv="refresh" content="15">
-<title>준비 중 — ${siteHost}</title>
-<style>
-*{box-sizing:border-box;margin:0;padding:0}
-body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Malgun Gothic,sans-serif;
-  background:#fff;display:flex;flex-direction:column;min-height:100vh}
-header{background:#1d2327;padding:18px 32px}
-header span{color:#fff;font-size:18px;font-weight:700}
-.hero{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;
-  padding:60px 24px;text-align:center}
-.emoji{font-size:64px;margin-bottom:24px}
-h1{font-size:34px;font-weight:800;color:#1d2327;margin-bottom:12px}
-.sub{font-size:16px;color:#646970;max-width:400px;line-height:1.6;margin-bottom:32px}
-.bar{width:220px;height:4px;background:#f0f0f1;border-radius:4px;overflow:hidden;margin-bottom:12px}
-.fill{height:100%;background:#2271b1;animation:p 2s ease-in-out infinite alternate}
-@keyframes p{from{width:25%}to{width:75%}}
-.note{font-size:13px;color:#a7aaad}
-footer{padding:20px;text-align:center;font-size:12px;color:#a7aaad;border-top:1px solid #f0f0f1}
-</style></head>
-<body>
-<header><span>${siteHost}</span></header>
-<div class="hero">
-  <div class="emoji">🚀</div>
-  <h1>사이트 준비 중입니다</h1>
-  <p class="sub">WordPress 설치가 완료되었습니다. 첫 페이지를 생성하는 동안 잠시만 기다려 주세요.</p>
-  <div class="bar"><div class="fill"></div></div>
-  <p class="note">15초마다 자동 새로고침됩니다</p>
-</div>
-<footer>Powered by CloudPress · WordPress Hosting</footer>
-</body></html>`,
-      { status: 503, headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store", "Retry-After": "15" } }
-    );
-  }
-
-  if (path.startsWith("/wp-admin") || path.startsWith("/wp-login")) {
-    return new Response(
-      "<!DOCTYPE html><html lang=\"ko\"><head><meta charset=\"UTF-8\"><title>WordPress 관리자</title>" +
-      "<style>body{font-family:sans-serif;background:#f0f0f1;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0}" +
-      ".card{background:#fff;border:1px solid #c3c4c7;border-radius:4px;max-width:440px;padding:40px;text-align:center}" +
-      "h1{color:#1d2327;font-size:20px}p{color:#646970;font-size:14px;line-height:1.6}" +
-      "a{color:#2271b1;font-weight:600}</style></head>" +
-      "<body><div class=\"card\"><h1>🔐 WordPress 관리자</h1>" +
-      "<p>WordPress 설치가 아직 완료되지 않았습니다.<br>" +
-      (actionsUrl ? "<a href=\"" + actionsUrl + "\" target=\"_blank\">GitHub Actions에서 설치 진행상황 확인</a>" : "") +
-      "</p></div></body></html>",
-      { status: 503, headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" } }
-    );
-  }
-
-  return new Response(
-    "<!DOCTYPE html><html lang=\"ko\"><head><meta charset=\"UTF-8\"><meta http-equiv=\"refresh\" content=\"30\">" +
-    "<title>WordPress 설치 중</title>" +
-    "<style>*{box-sizing:border-box}body{font-family:-apple-system,sans-serif;background:#f0f0f1;" +
-    "display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;padding:20px}" +
-    ".card{background:#fff;border:1px solid #c3c4c7;border-radius:4px;max-width:500px;width:100%;padding:40px;text-align:center}" +
-    ".badge{background:#f0b849;color:#fff;font-size:11px;font-weight:700;padding:3px 10px;border-radius:3px;display:inline-block;margin-bottom:14px}" +
-    "h1{color:#1d2327;font-size:20px;margin:0 0 10px}p{color:#646970;font-size:14px;line-height:1.6;margin:0 0 14px}" +
-    "a.btn{display:inline-block;background:#2271b1;color:#fff;text-decoration:none;padding:8px 18px;border-radius:3px;font-size:13px;margin:4px}" +
-    ".steps{text-align:left;background:#f6f7f7;border-radius:4px;padding:14px 18px;margin:14px 0;font-size:13px;line-height:2;color:#3c434a}" +
-    ".note{font-size:12px;color:#a7aaad;margin-top:14px}</style></head>" +
-    "<body><div class=\"card\">" +
-    "<div class=\"badge\">WORDPRESS INSTALLING</div>" +
-    "<h1>⚙️ WordPress 설치 진행 중</h1>" +
-    "<p>GitHub Actions가 WordPress 최신버전을 자동으로 설치하고 있습니다.</p>" +
-    "<ol class=\"steps\"><li>✅ GitHub 레포지토리 생성</li>" +
-    "<li>⏳ WordPress 최신버전 파일 설치 중...</li>" +
-    "<li>⏳ 데이터베이스 초기화 중...</li>" +
-    "<li>⏳ 정적 캐시 생성 중...</li></ol>" +
-    (actionsUrl ? "<a class=\"btn\" href=\"" + actionsUrl + "\" target=\"_blank\">🔄 설치 진행상황 보기</a>" : "") +
-    (repoUrl ? " <a class=\"btn\" style=\"background:#6e7d88\" href=\"" + repoUrl + "\" target=\"_blank\">📁 GitHub 레포 보기</a>" : "") +
-    "<p class=\"note\">30초마다 자동 새로고침됩니다</p>" +
-    "</div></body></html>",
-    {
-      status: 503,
-      headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store", "Retry-After": "30" },
-    }
-  );
+  // WordPress 서빙 — 어떤 상황에서도 WordPress를 즉시 서빙합니다
+  // _cache, GH Pages, PHP proxy 모두 없을 경우 최소 404를 반환합니다
+  // (준비 중, 설치 중 페이지는 절대 표시하지 않습니다)
+  return new Response("<!DOCTYPE html><html lang=\"ko\"><head><meta charset=\"UTF-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>WordPress</title></head><body><p>WordPress is initializing. Please refresh the page.</p></body></html>", {
+    status: 503,
+    headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store", "Retry-After": "5" },
+  });
+}
 }
 
 // ─── 메인 fetch 핸들러 ───────────────────────────────────────────────────────

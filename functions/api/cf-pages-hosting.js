@@ -381,7 +381,7 @@ async function buildWorkerSource({ siteId, githubOwner, githubRepo, ghPagesUrl, 
   }
   if (!src) {
     // fallback: 최소 동작 worker (GH raw _cache/ 서빙)
-    src = `export default{async fetch(req,env,ctx){const url=new URL(req.url);const path=url.pathname;const o=env.GH_OWNER||"${githubOwner}";const r=env.GH_REPO||"${githubRepo}";const t=env.GITHUB_TOKEN||"";if(!o||!r)return new Response("설정 오류",{status:503});const base=\`https://raw.githubusercontent.com/\${o}/\${r}/main\`;const cp=path==="/"?"_cache/index.html":("_cache"+path+(path.endsWith("/")?"":"/")+("index.html"));const res=await fetch(\`\${base}/\${cp}\`,{headers:{...(t?{Authorization:\`Bearer \${t}\`}:{})}}).catch(()=>null);if(res?.ok)return new Response(await res.arrayBuffer(),{headers:{"Content-Type":"text/html;charset=utf-8","Cache-Control":"no-store"}});return new Response("준비 중...",{status:200,headers:{"Content-Type":"text/html","Cache-Control":"no-store","Refresh":"30"}})}};`;
+    src = `export default{async fetch(req,env,ctx){const url=new URL(req.url);const path=url.pathname;const o=env.GH_OWNER||"${githubOwner}";const r=env.GH_REPO||"${githubRepo}";const t=env.GITHUB_TOKEN||"";if(!o||!r)return new Response("설정 오류",{status:503});const base=\`https://raw.githubusercontent.com/\${o}/\${r}/main\`;const cp=path==="/"?"_cache/index.html":("_cache"+path+(path.endsWith("/")?"":"/")+("index.html"));const res=await fetch(\`\${base}/\${cp}\`,{headers:{...(t?{Authorization:\`Bearer \${t}\`}:{})}}).catch(()=>null);if(res?.ok)return new Response(await res.arrayBuffer(),{headers:{"Content-Type":"text/html;charset=utf-8","Cache-Control":"no-store"}});return new Response("준비 중...",{status:200,headers:{"Content-Type":"text/html;charset=utf-8","Cache-Control":"no-store","Refresh":"30"}})}};`;
   }
   return src
     .replace(/%%GH_OWNER%%/g, (githubOwner || "").replace(/\\/g, "\\\\"))
@@ -605,12 +605,18 @@ jobs:
           echo "mbstring.internal_encoding = UTF-8" >> "$PHP_INI_EXTRA"
           echo "mbstring.http_output = pass" >> "$PHP_INI_EXTRA"
           echo "output_buffering = 4096" >> "$PHP_INI_EXTRA"
+          # wp-config.php 에 localhost URL 임시 주입 (WP 리다이렉트 방지)
+          WP_CFG=wordpress/wp-config.php
+          cp -f "$WP_CFG" "$WP_CFG.bak" 2>/dev/null || true
+          # getenv() 방식이므로 define 값 직접 치환
+          sed -i "s|define('WP_HOME'.*|define('WP_HOME',    'http://localhost:9090');|" "$WP_CFG" 2>/dev/null || true
+          sed -i "s|define('WP_SITEURL'.*|define('WP_SITEURL', 'http://localhost:9090');|" "$WP_CFG" 2>/dev/null || true
           # PHP 내장 서버 (백그라운드) - UTF-8 ini 포함
           php -c "$PHP_INI_EXTRA" -S localhost:9090 -t ./wordpress > /tmp/php-server.log 2>&1 &
           PHP_PID=$!
           sleep 5
           # 메인 페이지 캐시 (UTF-8 헤더 명시)
-          HTTP=\$(curl -o _cache/index.html -s -w "%{http_code}" --max-time 30 \
+          HTTP=\$(curl -L -o _cache/index.html -s -w "%{http_code}" --max-time 30 \
             -H "Host: localhost" \
             -H "Accept-Charset: utf-8" \
             -H "Accept: text/html,application/xhtml+xml" \
@@ -623,6 +629,8 @@ jobs:
               -o "_cache/$SLUG" 2>/dev/null || true
           done
           kill $PHP_PID 2>/dev/null || true
+          # wp-config.php 원복 (실제 SITE_URL 복원)
+          cp -f "$WP_CFG.bak" "$WP_CFG" 2>/dev/null || true
           rm -f "$PHP_INI_EXTRA"
           # index.html 이 정상적인 HTML인지 확인
           if [ -f _cache/index.html ] && grep -qi "<html" _cache/index.html 2>/dev/null; then

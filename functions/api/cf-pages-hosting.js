@@ -381,7 +381,7 @@ async function buildWorkerSource({ siteId, githubOwner, githubRepo, ghPagesUrl, 
   }
   if (!src) {
     // fallback: 최소 동작 worker (GH raw _cache/ 서빙)
-    src = `export default{async fetch(req,env,ctx){const url=new URL(req.url);const path=url.pathname;const o=env.GH_OWNER||"";const r=env.GH_REPO||"";const t=env.GITHUB_TOKEN||"";if(!o||!r)return new Response("설정 오류",{status:503});const base=\`https://raw.githubusercontent.com/\${o}/\${r}/main\`;const cp=path==="/"?"_cache/index.html":("_cache"+path+(path.endsWith("/")?"":"/")+("index.html"));const res=await fetch(\`\${base}/\${cp}\`,{headers:{...(t?{Authorization:\`Bearer \${t}\`}:{})}}).catch(()=>null);if(res?.ok)return new Response(await res.arrayBuffer(),{headers:{"Content-Type":"text/html;charset=utf-8","Cache-Control":"no-store"}});return new Response("",{status:404});}`;
+    src = `export default{async fetch(req,env,ctx){const url=new URL(req.url);const path=url.pathname;const o=env.GH_OWNER||"${githubOwner}";const r=env.GH_REPO||"${githubRepo}";const t=env.GITHUB_TOKEN||"";if(!o||!r)return new Response("설정 오류",{status:503});const base=\`https://raw.githubusercontent.com/\${o}/\${r}/main\`;const cp=path==="/"?"_cache/index.html":("_cache"+path+(path.endsWith("/")?"":"/")+("index.html"));const res=await fetch(\`\${base}/\${cp}\`,{headers:{...(t?{Authorization:\`Bearer \${t}\`}:{})}}).catch(()=>null);if(res?.ok)return new Response(await res.arrayBuffer(),{headers:{"Content-Type":"text/html;charset=utf-8","Cache-Control":"no-store"}});return new Response("",{status:404})}};`;
   }
   return src
     .replace(/%%GH_OWNER%%/g, (githubOwner || "").replace(/\\/g, "\\\\"))

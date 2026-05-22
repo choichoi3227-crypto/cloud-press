@@ -626,7 +626,6 @@ jobs:
           rm -f "$PHP_INI_EXTRA"
           # index.html 이 정상적인 HTML인지 확인
           if [ -f _cache/index.html ] && grep -qi "<html" _cache/index.html 2>/dev/null; then
-            fi
             echo "✅ 초기 캐시 생성 성공 (\$(wc -c < _cache/index.html) bytes)"
           else
             rm -f _cache/index.html

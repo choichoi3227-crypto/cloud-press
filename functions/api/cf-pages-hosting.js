@@ -596,23 +596,23 @@ jobs:
           mkdir -p _cache
           export LANG=ko_KR.UTF-8 LC_ALL=ko_KR.UTF-8
           sudo locale-gen ko_KR.UTF-8 2>/dev/null || true
-          # PHP ini 설정 파일
+          # PHP ini config
           PHP_INI=$(mktemp --suffix=.ini)
           printf 'default_charset=UTF-8\nmbstring.internal_encoding=UTF-8\n' > "$PHP_INI"
           # wp-config.php 백업
           cp -f wordpress/wp-config.php wordpress/wp-config.php.bak
-          # WP-CLI로 DB 내 siteurl/home 을 localhost로 임시 변경
+          # Set siteurl/home to localhost via WP-CLI to prevent redirects
           wp option update siteurl 'http://localhost:9090' --allow-root --path=./wordpress 2>/dev/null || true
           wp option update home    'http://localhost:9090' --allow-root --path=./wordpress 2>/dev/null || true
-          # PHP 내장 서버 시작
+          # Start PHP built-in server
           php -c "$PHP_INI" -S localhost:9090 -t ./wordpress > /tmp/php.log 2>&1 &
           PHP_PID=$!
-          # 서버 준비 대기 (최대 15초)
+          # Wait for server (up to 15s)
           for i in $(seq 1 15); do
             curl -sf --max-time 1 http://localhost:9090/ > /dev/null 2>&1 && break
             sleep 1
           done
-          # 메인 페이지 캐시 — 최종 URL 이 install/setup 이면 거부
+          # Cache homepage - reject if redirected to install/setup page
           HTTP=\$(curl -L -s -w "%{http_code}:%{url_effective}" -o /tmp/wp_home.html \
             --max-time 30 -H "Accept-Charset: utf-8" \
             "http://localhost:9090/" 2>/dev/null || echo "000:")
@@ -629,14 +629,14 @@ jobs:
             echo "⚠️ 캐시 실패 (HTTP $CODE) — 생략"
           fi
           rm -f /tmp/wp_home.html
-          # wp-login.php, wp-json 캐시
+          # Cache wp-login.php and wp-json
           for SLUG in wp-login.php wp-json; do
             curl -sf -L --max-time 10 -H "Accept-Charset: utf-8" \
               "http://localhost:9090/$SLUG" -o "_cache/$SLUG" 2>/dev/null || true
           done
           kill $PHP_PID 2>/dev/null || true
           rm -f "$PHP_INI"
-          # DB siteurl/home 원복
+          # Restore siteurl/home to real SITE_URL
           wp option update siteurl "$SITE_URL" --allow-root --path=./wordpress 2>/dev/null || true
           wp option update home    "$SITE_URL" --allow-root --path=./wordpress 2>/dev/null || true
           cp -f wordpress/wp-config.php.bak wordpress/wp-config.php 2>/dev/null || true

@@ -1,5 +1,5 @@
 /**
- * CloudPress — worker-site-mirror.js v15.1
+ * CloudPress — worker-site-mirror.js v15.2
  * ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
  * 사이트별 Cloudflare Worker
  *
@@ -10,8 +10,7 @@
  *   4. _cache/ 정적 HTML → GitHub raw
  *   5. 일반 정적 자산 GitHub raw
  *   6. GitHub Pages 폴백
- *   7. PHP Runner 없을 때 준비 중 안내 페이지
- *   최종: WordPress 스타일 404
+ *   최종: WordPress 스타일 404 (준비 중/설치 중 페이지 없음)
  */
 
 const GH_BRANCH  = "main";
@@ -130,67 +129,6 @@ function wp404(siteTitle = "WordPress") {
   });
 }
 
-// PHP Runner 없을 때 준비 중 안내 페이지
-function phpOfflinePage(path, siteTitle = "WordPress") {
-  const isAdmin = path.startsWith("/wp-admin");
-  const title   = isAdmin ? "WordPress 관리자" : "WordPress";
-  const html = `<!DOCTYPE html>
-<html lang="ko">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<meta http-equiv="refresh" content="30">
-<title>${title} — 시작 중...</title>
-<style>
-  *{box-sizing:border-box}
-  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
-       background:#f0f0f1;color:#3c434a;display:flex;align-items:center;
-       justify-content:center;min-height:100vh;padding:1rem}
-  .card{background:#fff;border-radius:4px;box-shadow:0 1px 3px rgba(0,0,0,.13);
-        padding:2rem;max-width:420px;width:100%;text-align:center}
-  .logo{width:64px;height:64px;margin:0 auto 1.5rem;background:#2271b1;
-        border-radius:50%;display:flex;align-items:center;justify-content:center}
-  .logo svg{fill:#fff;width:36px;height:36px}
-  h1{font-size:1.25rem;font-weight:600;margin:0 0 .75rem;color:#1d2327}
-  p{font-size:.9rem;color:#646970;margin:0 0 1.5rem;line-height:1.6}
-  .spinner{width:32px;height:32px;border:3px solid #e2e8f0;
-           border-top-color:#2271b1;border-radius:50%;
-           animation:spin 1s linear infinite;margin:0 auto 1rem}
-  @keyframes spin{to{transform:rotate(360deg)}}
-  .note{font-size:.8rem;color:#8c8f94;background:#f6f7f7;
-        border-radius:3px;padding:.5rem .75rem;margin-top:1.25rem}
-  a{color:#2271b1;text-decoration:none}a:hover{text-decoration:underline}
-</style>
-</head>
-<body>
-  <div class="card">
-    <div class="logo">
-      <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-        <path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10 10-4.5 10-10S17.5 2 12 2zM3.8 12c0-1.2.3-2.4.7-3.4L8 19.4C5.5 18 3.8 15.2 3.8 12zm8.2 8.2c-.8 0-1.6-.1-2.4-.3l2.5-7.4 2.6 7.1c0 .1.1.2.1.3-.9.2-1.8.3-2.8.3zm1.1-11.6l2.2 6.4.6-2 1.6-4.4c.3-.7.4-1.3.4-1.8 0-.2 0-.4-.1-.5.6.1 1.2.1 1.7.1h.2c-.8 2.5-1.7 5.4-2.6 8.2l-1.4-4.2-.9-2.5-.9-2.4c.3-.3.6-.5 1-.5.1 0 .2 0 .3.1zm-3.3.2c-.1.5-.3 1.1-.6 1.8L7.6 16c-.5-1.2-.8-2.5-.8-3.9 0-2.1.8-4 2-5.4.4 1 .9 2 1 2.1z"/>
-      </svg>
-    </div>
-    <div class="spinner"></div>
-    <h1>WordPress PHP 서버 시작 중</h1>
-    <p>PHP 서버가 준비되는 동안 잠시 기다려 주세요.<br>
-       30초 후 자동으로 새로고침됩니다.</p>
-    <div class="note">
-      <strong>참고:</strong> 첫 방문 또는 비활성 상태에서 PHP 서버가
-      시작하는 데 1~2분이 걸릴 수 있습니다.<br><br>
-      <a href="/">← 홈으로 돌아가기</a>
-    </div>
-  </div>
-</body>
-</html>`;
-  return new Response(html, {
-    status: 503,
-    headers: {
-      ...SEC,
-      "Content-Type":  "text/html;charset=utf-8",
-      "Retry-After":   "30",
-      "Cache-Control": "no-store",
-    },
-  });
-}
 
 export default {
   async fetch(req, env, ctx) {
@@ -315,11 +253,6 @@ export default {
         const r = await fetch(pagesBase + path + url.search);
         if (r.ok) return fixCharset(r);
       } catch {}
-    }
-
-    // ── 7차: PHP 경로 → PHP Runner 없을 때 준비 중 안내 ─────────────────────
-    if (WP_PHP_PATHS.test(path) || WP_PHP_FILES.test(path) || path.endsWith(".php")) {
-      return phpOfflinePage(path, env.SITE_NAME || "WordPress");
     }
 
     // ── 최종: WordPress 스타일 404 ───────────────────────────────────────────

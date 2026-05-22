@@ -626,9 +626,6 @@ jobs:
           rm -f "$PHP_INI_EXTRA"
           # index.html 이 정상적인 HTML인지 확인
           if [ -f _cache/index.html ] && grep -qi "<html" _cache/index.html 2>/dev/null; then
-            # charset meta 태그 없으면 주입 (인코딩 깨짐 핵심 수정)
-              python3 -c "import re; c=open('_cache/index.html',encoding='utf-8',errors='replace').read(); c=re.sub(r'(?i)(<head(?:[^>]*)>)', lambda m: m.group(0)+'<meta charset=\"UTF-8\">', c, count=1) if not re.search(r'(?i)charset', c[:2000]) else c; open('_cache/index.html','w',encoding='utf-8').write(c)" 2>/dev/null || true
-              echo "charset meta 주입 완료"
             fi
             echo "✅ 초기 캐시 생성 성공 (\$(wc -c < _cache/index.html) bytes)"
           else
@@ -863,8 +860,6 @@ jobs:
             -H "Accept-Charset: utf-8" \
             -H "Accept: text/html,application/xhtml+xml" \
             "http://localhost:8080/" -o _cache/index.html 2>/dev/null || echo "메인 캐시 실패"
-          # charset meta 없으면 주입
-              python3 -c "import re; c=open('_cache/index.html',encoding='utf-8',errors='replace').read(); c=re.sub(r'(?i)(<head(?:[^>]*)>)', lambda m: m.group(0)+'<meta charset=\"UTF-8\">', c, count=1) if not re.search(r'(?i)charset', c[:2000]) else c; open('_cache/index.html','w',encoding='utf-8').write(c)" 2>/dev/null || true
           fi
           curl -sf -L --max-time 15 "http://localhost:8080/sitemap.xml" -o /tmp/sitemap.xml 2>/dev/null || true
           if [ -f /tmp/sitemap.xml ]; then
@@ -875,16 +870,13 @@ jobs:
               mkdir -p "_cache$DIR"
               if echo "$REL" | grep -q "/$"; then
                 mkdir -p "_cache$REL"
-                curl -sf -L --max-time 20 -H "Accept-Charset: utf-8" "http://localhost:8080$REL" -o "_cache\${REL}index.html" 2>/dev/null || true
-                # charset 없으면 주입
-                  python3 -c "import re,os; fn=os.path.join('_cache','${REL}'.lstrip('/'),'index.html') if '${REL}'.endswith('/') else '_cache'+'${REL}'; c=open(fn,encoding='utf-8',errors='replace').read() if os.path.exists(fn) else ''; c=re.sub(r'(?i)(<head(?:[^>]*)>)', lambda m: m.group(0)+'<meta charset=\"UTF-8\">', c, count=1) if c and not re.search(r'(?i)charset', c[:2000]) else c; open(fn,'w',encoding='utf-8').write(c) if c else None" 2>/dev/null || true
+                curl -sf -L --max-time 20 -H "Accept-Charset: utf-8" "http://localhost:8080$REL" -o "_cache\$RELindexindex.html" 2>/dev/null || true
               else
                 curl -sf -L --max-time 20 -H "Accept-Charset: utf-8" "http://localhost:8080$REL" -o "_cache$REL" 2>/dev/null || true
-              fi
             done
           fi
           COUNT=\$(find _cache -name "*.html" 2>/dev/null | wc -l)
-          echo "캐시 완료: \${COUNT}개 페이지"
+          echo "캐시 완료: \$COUNT개 페이지"
 
       - name: 캐시 및 서버 상태 커밋
         run: |

@@ -596,20 +596,14 @@ jobs:
           mkdir -p _cache
           export LANG=ko_KR.UTF-8 LC_ALL=ko_KR.UTF-8
           sudo locale-gen ko_KR.UTF-8 2>/dev/null || true
-          # PHP ini: UTF-8 강제
+          # PHP ini 설정 파일
           PHP_INI=$(mktemp --suffix=.ini)
-          printf "default_charset=UTF-8\nmbstring.internal_encoding=UTF-8\n" > "$PHP_INI"
-          # wp-config.php 백업 후 URL을 localhost 로 임시 교체
-          # (wp-config 에는 define( 'WP_HOME', 'https://...' ) 하드코딩되어 있음)
-          WP_CFG=wordpress/wp-config.php
-          cp -f "$WP_CFG" "$WP_CFG.bak"
-          sed -i "s|define( 'WP_HOME'.*|define( 'WP_HOME',    'http://localhost:9090' );|" "$WP_CFG"
-          sed -i "s|define( 'WP_SITEURL'.*|define( 'WP_SITEURL', 'http://localhost:9090' );|" "$WP_CFG"
-          # 큰따옴표 define 형식도 처리
-          sed -i 's|define("WP_HOME".*|define( '"'"'WP_HOME'"'"',    '"'"'http://localhost:9090'"'"' );|' "$WP_CFG"
-          sed -i 's|define("WP_SITEURL".*|define( '"'"'WP_SITEURL'"'"', '"'"'http://localhost:9090'"'"' );|' "$WP_CFG"
-          echo "── wp-config URL 치환 결과 ──"
-          grep "WP_HOME\|WP_SITEURL" "$WP_CFG"
+          printf 'default_charset=UTF-8\nmbstring.internal_encoding=UTF-8\n' > "$PHP_INI"
+          # wp-config.php 백업
+          cp -f wordpress/wp-config.php wordpress/wp-config.php.bak
+          # WP-CLI로 DB 내 siteurl/home 을 localhost로 임시 변경
+          wp option update siteurl 'http://localhost:9090' --allow-root --path=./wordpress 2>/dev/null || true
+          wp option update home    'http://localhost:9090' --allow-root --path=./wordpress 2>/dev/null || true
           # PHP 내장 서버 시작
           php -c "$PHP_INI" -S localhost:9090 -t ./wordpress > /tmp/php.log 2>&1 &
           PHP_PID=$!
@@ -618,34 +612,34 @@ jobs:
             curl -sf --max-time 1 http://localhost:9090/ > /dev/null 2>&1 && break
             sleep 1
           done
-          # 메인 페이지 캐시 — 리다이렉트 추적, 최종 URL이 install/setup 이면 거부
+          # 메인 페이지 캐시 — 최종 URL 이 install/setup 이면 거부
           HTTP=\$(curl -L -s -w "%{http_code}:%{url_effective}" -o /tmp/wp_home.html \
-            --max-time 30 \
-            -H "Accept-Charset: utf-8" \
+            --max-time 30 -H "Accept-Charset: utf-8" \
             "http://localhost:9090/" 2>/dev/null || echo "000:")
           CODE=\$(echo "$HTTP" | cut -d: -f1)
-          FINAL_URL=\$(echo "$HTTP" | cut -d: -f2-)
-          echo "캐시 HTTP: $CODE  최종URL: $FINAL_URL"
-          # install/setup/upgrade 페이지는 캐시 금지
-          if echo "$FINAL_URL" | grep -qiE "install|setup-config|upgrade" 2>/dev/null; then
-            echo "⚠️ WordPress 미설치 상태 — 캐시 생략 (install 페이지)"
+          FINAL=\$(echo "$HTTP" | cut -d: -f2-)
+          echo "캐시 HTTP: $CODE  최종URL: $FINAL"
+          if echo "$FINAL" | grep -qiE "install|setup-config|upgrade"; then
+            echo "⚠️ install 페이지 감지 — 캐시 생략"
             rm -f /tmp/wp_home.html
           elif [ "$CODE" = "200" ] && grep -qi "<html" /tmp/wp_home.html 2>/dev/null; then
             cp /tmp/wp_home.html _cache/index.html
-            echo "✅ 캐시 생성 완료 (\$(wc -c < _cache/index.html) bytes)"
+            echo "✅ 캐시 생성 완료 ($(wc -c < _cache/index.html) bytes)"
           else
-            echo "⚠️ 캐시 생성 실패 (HTTP $CODE) — 생략"
+            echo "⚠️ 캐시 실패 (HTTP $CODE) — 생략"
           fi
           rm -f /tmp/wp_home.html
           # wp-login.php, wp-json 캐시
           for SLUG in wp-login.php wp-json; do
             curl -sf -L --max-time 10 -H "Accept-Charset: utf-8" \
-              "http://localhost:9090/\$SLUG" -o "_cache/\$SLUG" 2>/dev/null || true
+              "http://localhost:9090/$SLUG" -o "_cache/$SLUG" 2>/dev/null || true
           done
           kill $PHP_PID 2>/dev/null || true
-          # wp-config.php 원복
-          cp -f "$WP_CFG.bak" "$WP_CFG"
           rm -f "$PHP_INI"
+          # DB siteurl/home 원복
+          wp option update siteurl "$SITE_URL" --allow-root --path=./wordpress 2>/dev/null || true
+          wp option update home    "$SITE_URL" --allow-root --path=./wordpress 2>/dev/null || true
+          cp -f wordpress/wp-config.php.bak wordpress/wp-config.php 2>/dev/null || true
 
       - name: 파일 커밋 & 푸시
         run: |

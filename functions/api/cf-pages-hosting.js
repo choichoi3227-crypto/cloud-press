@@ -646,15 +646,33 @@ jobs:
           git config user.name "CloudPress Bot"
           git config user.email "bot@cloudpress.app"
           git config http.postBuffer 524288000
-          echo "_db/wordpress.db" >> .gitignore || true
-          git rm --cached _db/wordpress.db 2>/dev/null || true
+          # _db 폴더 생성 (wordpress.db 포함)
+          mkdir -p _db
+          chmod 777 _db
+          # _cache 폴더 생성
+          mkdir -p _cache
+          # _plugins 폴더 생성
+          mkdir -p _plugins
+          touch _plugins/.gitkeep
+          # gitignore에서 _db/wordpress.db 제거 (db 파일을 레포에 포함시키기 위해)
+          # wordpress.db를 레포에 포함해야 Worker가 GitHub raw로 읽을 수 있음
+          sed -i '/^_db\/wordpress\.db$/d' .gitignore 2>/dev/null || true
+          sed -i '/^_db\/\*\.db$/d' .gitignore 2>/dev/null || true
+          # wordpress.db 존재 확인
+          if [ -f "_db/wordpress.db" ]; then
+            echo "✅ wordpress.db 확인: $(wc -c < _db/wordpress.db) bytes"
+          else
+            echo "⚠️ wordpress.db 없음 - 빈 파일 생성"
+            touch _db/wordpress.db
+          fi
           git add wordpress/ 2>/dev/null || true
-          git add _db/.gitkeep .gitignore 2>/dev/null || true
+          git add _db/ .gitignore 2>/dev/null || true
           git add _cache/ 2>/dev/null || true
+          git add _plugins/ 2>/dev/null || true
           if git diff --staged --quiet; then
             echo "변경사항 없음 - 건너뜀"
           else
-            git commit -m "WordPress 설치 완료"
+            git commit -m "WordPress 설치 완료 (_db/_cache/_plugins 포함)"
             # race condition 방지: pull --rebase 후 최대 5회 재시도
             for i in 1 2 3 4 5; do
               git pull --rebase origin main 2>/dev/null || true
@@ -910,12 +928,19 @@ jobs:
         run: |
           git config user.name "CloudPress Bot"
           git config user.email "bot@cloudpress.app"
-          mkdir -p _cache
-          printf '{"updated":"%s","server":"nginx+php8.3-fpm","wp":"%s"}' \
+          # _db, _cache, _plugins 폴더 보장
+          mkdir -p _db _cache _plugins
+          touch _plugins/.gitkeep
+          # gitignore에서 wordpress.db 제거 (Worker가 GitHub raw로 읽기 위해 레포에 포함 필요)
+          sed -i '/^_db\/wordpress\.db$/d' .gitignore 2>/dev/null || true
+          printf '{"updated":"%s","server":"nginx+php8.3-fpm","wp":"installed"}' \
             "\$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-            "\$([ -f wordpress/wp-load.php ] && echo installed || echo not_installed)" \
             > _cache/server-status.json
-          git add _cache/
+          # wordpress.db 레포에 포함
+          if [ -f "_db/wordpress.db" ]; then
+            echo "wordpress.db: $(wc -c < _db/wordpress.db) bytes"
+          fi
+          git add _db/ _cache/ _plugins/ .gitignore 2>/dev/null || true
           if ! git diff --staged --quiet; then
             git commit -m "PHP 서버 캐시 갱신 \$(date -u +%Y-%m-%dT%H:%M:%SZ)"
             for i in 1 2 3; do

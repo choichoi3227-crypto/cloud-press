@@ -140,6 +140,73 @@ function phpassCreate(password) {
   return prefix + output;
 }
 
+// ─── _db/wordpress.db 시드 (JSON — Actions에서 SQLite로 병합 가능) ───────────
+function buildWordpressDb({ siteUrl, siteName, adminUser, adminEmail, passHash, now, siteId }) {
+  return JSON.stringify({
+    _version: "2.0",
+    _engine:  "cloudpress-json-db",
+    _site_id: siteId,
+    options: [
+      { option_name: "siteurl",             option_value: siteUrl,        autoload: "yes" },
+      { option_name: "blogname",            option_value: siteName,       autoload: "yes" },
+      { option_name: "blogdescription",     option_value: "",             autoload: "yes" },
+      { option_name: "admin_email",         option_value: adminEmail,     autoload: "yes" },
+      { option_name: "home",                option_value: siteUrl,        autoload: "yes" },
+      { option_name: "template",            option_value: "twentytwentyfour", autoload: "yes" },
+      { option_name: "stylesheet",          option_value: "twentytwentyfour", autoload: "yes" },
+      { option_name: "blogcharset",         option_value: "UTF-8",        autoload: "yes" },
+      { option_name: "WPLANG",              option_value: "ko_KR",        autoload: "yes" },
+      { option_name: "timezone_string",     option_value: "Asia/Seoul",   autoload: "yes" },
+      { option_name: "permalink_structure", option_value: "/%postname%/", autoload: "yes" },
+      { option_name: "posts_per_page",      option_value: "10",           autoload: "yes" },
+      { option_name: "active_plugins",      option_value: 'a:1:{s:43:"sqlite-database-integration/load.php";b:1;}', autoload: "yes" },
+      { option_name: "db_version",          option_value: "57155",        autoload: "yes" },
+      { option_name: "initial_db_version",  option_value: "57155",        autoload: "yes" },
+      { option_name: "cloudpress_site_id",  option_value: siteId,         autoload: "yes" },
+    ],
+    users: [{
+      ID: 1, user_login: adminUser, user_pass: passHash, user_email: adminEmail,
+      user_url: siteUrl, user_registered: now, display_name: adminUser, user_status: 0,
+    }],
+    usermeta: [
+      { user_id: 1, meta_key: "wp_capabilities", meta_value: 'a:1:{s:13:"administrator";b:1;}' },
+      { user_id: 1, meta_key: "wp_user_level",   meta_value: "10" },
+      { user_id: 1, meta_key: "nickname",        meta_value: adminUser },
+    ],
+    posts: [{
+      ID: 1, post_author: 1, post_date: now, post_date_gmt: now,
+      post_content: "CloudPress WordPress 호스팅에 오신 것을 환영합니다!",
+      post_title: "환영합니다", post_status: "publish", post_name: "welcome",
+      post_type: "post", comment_status: "open", ping_status: "open", post_modified: now,
+    }],
+    _created_at: now,
+    _updated_at: now,
+  }, null, 2);
+}
+
+// ─── wordpress/wp-content/db.php (SQLite drop-in) ─────────────────────────────
+function buildSqliteDbPhp() {
+  return `<?php
+/**
+ * CloudPress — WordPress SQLite db.php drop-in (자동 생성)
+ * sqlite-database-integration 플러그인과 _db/wordpress.db 를 사용합니다.
+ */
+if ( ! defined( 'DB_DIR' ) ) {
+    define( 'DB_DIR', dirname( __DIR__, 2 ) . '/_db/' );
+}
+if ( ! defined( 'DB_FILE' ) ) {
+    define( 'DB_FILE', 'wordpress.db' );
+}
+if ( ! defined( 'DB_ENGINE' ) ) {
+    define( 'DB_ENGINE', 'sqlite' );
+}
+$_cp_sqlite = __DIR__ . '/plugins/sqlite-database-integration/load.php';
+if ( is_readable( $_cp_sqlite ) ) {
+    require_once $_cp_sqlite;
+}
+`;
+}
+
 // ─── GitHub API 헬퍼 ─────────────────────────────────────────────────────────
 async function ghReq(method, path, token, body) {
   const res = await fetch(`https://api.github.com${path}`, {
@@ -478,10 +545,34 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: PHP 설치
+      - name: PHP 환경 설정 (공식 setup-php)
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: sqlite3, mbstring, xml, curl, zip, gd, intl, opcache
+          ini-values: memory_limit=512M, max_execution_time=300, default_charset=UTF-8
+          coverage: none
+          tools: composer
+
+      - name: 시스템 도구 설치
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y php-cli php-sqlite3 php-mbstring php-xml php-curl php-zip php-gd php-intl sqlite3 curl unzip rsync
+          sudo apt-get install -y sqlite3 curl unzip rsync
+
+      - name: wordpress.db · db.php 검증
+        run: |
+          mkdir -p _db wordpress/wp-content
+          chmod 777 _db
+          if [ -f "_db/wordpress.db" ]; then
+            echo "✅ _db/wordpress.db: $(wc -c < _db/wordpress.db) bytes"
+          else
+            echo "⚠️ _db/wordpress.db 없음"
+          fi
+          if [ -f "wordpress/wp-content/db.php" ]; then
+            echo "✅ wordpress/wp-content/db.php 존재"
+          else
+            echo "⚠️ db.php 없음 — 플러그인 설치 단계에서 생성됩니다"
+          fi
 
       - name: WP-CLI 설치
         run: |
@@ -512,14 +603,16 @@ jobs:
             curl -sL "https://downloads.wordpress.org/plugin/sqlite-database-integration.latest-stable.zip" -o /tmp/sqlite.zip
             unzip -q /tmp/sqlite.zip -d wordpress/wp-content/plugins/
           fi
-          # db.copy → db.php 생성 + 플레이스홀더 치환
+          # db.php: 레포에 이미 있으면 유지, 없으면 db.copy에서 생성
           DB_COPY="wordpress/wp-content/plugins/sqlite-database-integration/db.copy"
           PLUGIN_PATH="\$(pwd)/wordpress/wp-content/plugins/sqlite-database-integration"
-          if [ -f "$DB_COPY" ]; then
+          if [ -f "wordpress/wp-content/db.php" ]; then
+            echo "✅ 기존 db.php 유지 (프로비저닝 업로드본)"
+          elif [ -f "$DB_COPY" ]; then
             cp -f "$DB_COPY" wordpress/wp-content/db.php
             sed -i "s|{SQLITE_IMPLEMENTATION_FOLDER_PATH}|\${PLUGIN_PATH}|g" wordpress/wp-content/db.php
             sed -i "s|{SQLITE_PLUGIN}|sqlite-database-integration/load.php|g" wordpress/wp-content/db.php
-            echo "db.php 생성 완료"
+            echo "db.php 생성 완료 (db.copy)"
           else
             echo "경고: db.copy 없음"
           fi
@@ -666,7 +759,8 @@ jobs:
             touch _db/wordpress.db
           fi
           git add wordpress/ 2>/dev/null || true
-          git add _db/ .gitignore 2>/dev/null || true
+          git add _db/wordpress.db _db/.gitkeep .gitignore 2>/dev/null || true
+          git add wordpress/wp-content/db.php 2>/dev/null || true
           git add _cache/ 2>/dev/null || true
           git add _plugins/ 2>/dev/null || true
           if git diff --staged --quiet; then
@@ -707,10 +801,12 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: PHP 설치
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y php-cli php-sqlite3 php-mbstring php-xml php-curl php-zip sqlite3
+      - name: PHP 환경 설정 (공식 setup-php)
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: sqlite3, mbstring, xml, curl, zip
+          coverage: none
 
       - name: WP-CLI 설치
         run: |
@@ -768,7 +864,15 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: PHP + nginx 설치
+      - name: PHP 환경 설정 (공식 setup-php)
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: sqlite3, mbstring, xml, curl, zip, gd, intl, opcache
+          ini-values: memory_limit=512M, max_execution_time=300, default_charset=UTF-8
+          coverage: none
+
+      - name: PHP-FPM + nginx 설치
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y \\
@@ -1428,35 +1532,112 @@ function buildPhpKeepaliveScript() {
 }
 
 
+// ─── GitHub Actions: DB 동기화 + PHP 검증 (setup-php) ───────────────────────
+function buildPhpDbSyncWorkflow() {
+  return `name: WordPress DB · PHP 동기화
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '_db/**'
+      - 'wordpress/wp-content/db.php'
+      - 'wp-transform.ts'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: PHP 환경 설정 (공식 setup-php)
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: mbstring, json, curl, pdo, pdo_sqlite, sqlite3
+          ini-values: memory_limit=256M
+          coverage: none
+
+      - name: wordpress.db · db.php 검증
+        run: |
+          echo "📋 DB/db.php 상태"
+          if [ -f "_db/wordpress.db" ]; then
+            SIZE=$(wc -c < _db/wordpress.db)
+            echo "✅ _db/wordpress.db (${SIZE} bytes)"
+            php -r "
+            \\$raw = file_get_contents('_db/wordpress.db');
+            \\$data = json_decode(\\$raw, true);
+            if (\\$data && isset(\\$data['options'])) {
+              echo '  형식: CloudPress JSON 시드\\n';
+              echo '  옵션: ' . count(\\$data['options']) . '\\n';
+            } elseif (\\$raw !== '' && \\$raw[0] !== '{') {
+              echo '  형식: SQLite 바이너리\\n';
+              \\$pdo = new PDO('sqlite:_db/wordpress.db');
+              echo '  테이블: ' . count(\\$pdo->query(\"SELECT name FROM sqlite_master WHERE type='table'\")->fetchAll()) . '\\n';
+            }
+            "
+          else
+            echo "⚠️ _db/wordpress.db 없음"
+          fi
+          if [ -f "wordpress/wp-content/db.php" ]; then
+            echo "✅ wordpress/wp-content/db.php"
+          else
+            echo "❌ db.php 없음"
+            exit 1
+          fi
+
+      - name: JSON 시드 → SQLite 병합 (선택)
+        run: |
+          if [ ! -f "_db/wordpress.db" ]; then exit 0; fi
+          php -r "
+          \\$raw = @file_get_contents('_db/wordpress.db');
+          \\$data = json_decode(\\$raw ?: '', true);
+          if (!\\$data || empty(\\$data['options'])) { echo 'JSON 시드 아님 — 건너뜀\\n'; exit(0); }
+          \\$pdo = new PDO('sqlite:_db/wordpress.sqlite');
+          \\$pdo->exec('PRAGMA journal_mode=WAL');
+          \\$pdo->exec('CREATE TABLE IF NOT EXISTS wp_options (option_id INTEGER PRIMARY KEY AUTOINCREMENT, option_name TEXT UNIQUE, option_value TEXT, autoload TEXT DEFAULT yes)');
+          \\$st = \\$pdo->prepare('INSERT OR REPLACE INTO wp_options (option_name, option_value, autoload) VALUES (?,?,?)');
+          foreach (\\$data['options'] ?? [] as \\$o) { \\$st->execute([\\$o['option_name'], \\$o['option_value'], \\$o['autoload'] ?? 'yes']); }
+          echo '✅ wordpress.sqlite 병합 완료\\n';
+          "
+`;
+}
+
 // ─── wp-transform.ts 생성 ────────────────────────────────────────────────────
-// PHP 실시간 실행 브릿지 - 사용자 접속 시 PHP를 실행하고 결과를 그대로 응답
+// PHP 실시간 실행 브릿지 — WordPress 경로 매핑 · _cache 폴백 · db.php 연동
 function buildWpTransform({ siteName, siteUrl, siteId, owner, repoName }) {
   const ghRawBase = `https://raw.githubusercontent.com/${owner}/${repoName}/main`;
   return `/**
  * wp-transform.ts — CloudPress WordPress PHP 실시간 실행 브릿지
- *
- * ⚠️  이 파일 하나가 모든 PHP 실행을 담당합니다.
- *     사용자가 접속하면 PHP 파일을 실시간으로 실행하고,
- *     해당 PHP 실행 결과를 그대로 응답합니다.
- *
- *     /wordpress/ 폴더의 PHP·JS·CSS 파일들은 100% 원본 그대로 유지됩니다.
- *     GitHub 레포에는 Astro 정적 페이지 파일이 없습니다.
- *
- * 동작 방식:
- *   1. 사용자 접속 → 요청 경로 파싱
- *   2. 해당 경로의 WordPress PHP 파일을 실시간 실행 (PHP_RUNNER Service Binding)
- *   3. PHP 실행 결과(HTML/JSON 등)를 그대로 응답
- *   4. 정적 자산(css/js/images)은 GitHub raw에서 직접 서빙
+ * 이 파일이 PHP 요청을 PHP_RUNNER에 위임하고 HTML/JSON을 그대로 응답합니다.
  */
 
 const GH_OWNER    = '${owner}';
 const GH_REPO     = '${repoName}';
-const GH_BRANCH   = 'main';
 const SITE_URL    = '${siteUrl}';
 const SITE_ID     = '${siteId}';
 const GH_RAW_BASE = '${ghRawBase}';
 
 const STATIC_EXT = /\\.(css|js|jpg|jpeg|png|gif|webp|avif|svg|ico|woff2?|ttf|eot|otf|map|txt|xml|pdf|zip|mp4|mp3|ogg|wav|webm)$/i;
+const WP_PHP_PATHS = /^\\/wp-(admin|login\\.php|cron\\.php|json|comments|signup|activate|trackback|xmlrpc\\.php|mail\\.php|blog-header\\.php|load\\.php|settings\\.php)(\\/|$|\\?)/;
+const WP_PHP_FILES = /^\\/wp-(login|cron|xmlrpc|mail|blog-header|load|settings)\\.php(\\?|$)/;
+
+const WP_PHP_ROUTES: Record<string, string> = {
+  '/':            '/index.php',
+  '/wp-login':    '/wp-login.php',
+  '/wp-admin':    '/wp-admin/index.php',
+  '/wp-admin/':   '/wp-admin/index.php',
+  '/wp-json':     '/index.php',
+  '/feed':        '/index.php',
+  '/sitemap.xml': '/index.php',
+  '/robots.txt':  '/robots.txt',
+};
 
 const SEC: Record<string, string> = {
   'X-Content-Type-Options': 'nosniff',
@@ -1468,11 +1649,8 @@ function mime(p: string): string {
   const ext = (p.split('.').pop() || '').toLowerCase();
   const map: Record<string, string> = {
     css:'text/css;charset=utf-8', js:'application/javascript;charset=utf-8',
-    json:'application/json;charset=utf-8', xml:'application/xml;charset=utf-8',
-    svg:'image/svg+xml', png:'image/png', jpg:'image/jpeg', jpeg:'image/jpeg',
-    gif:'image/gif', webp:'image/webp', avif:'image/avif', ico:'image/x-icon',
-    woff:'font/woff', woff2:'font/woff2', ttf:'font/ttf',
-    html:'text/html;charset=utf-8', php:'text/html;charset=utf-8',
+    json:'application/json;charset=utf-8', html:'text/html;charset=utf-8', php:'text/html;charset=utf-8',
+    svg:'image/svg+xml', png:'image/png', jpg:'image/jpeg', gif:'image/gif', webp:'image/webp', ico:'image/x-icon',
   };
   return map[ext] || 'application/octet-stream';
 }
@@ -1485,29 +1663,49 @@ function fixCharset(res: Response): Response {
   return new Response(res.body, { status: res.status, statusText: res.statusText, headers: h });
 }
 
-async function ghRaw(filePath: string, ttl = 300): Promise<Response | null> {
+function ensureCharsetMeta(html: string): string {
+  if (/charset/i.test(html.slice(0, 2000))) return html;
+  return html.replace(/<head([^>]*)>/i, '<head$1>\\n<meta charset="UTF-8">');
+}
+
+function resolvePhpFile(path: string): string {
+  const clean = path.replace(/\\/$/, '') || '/';
+  if (WP_PHP_ROUTES[clean]) return WP_PHP_ROUTES[clean];
+  if (path.endsWith('.php')) return path;
+  if (path.startsWith('/wp-admin')) {
+    return path.endsWith('/') ? path + 'index.php' : path + '/index.php';
+  }
+  if (!path.includes('.') || path.endsWith('/')) return '/index.php';
+  return '/index.php';
+}
+
+async function ghRaw(filePath: string, token = '', ttl = 300): Promise<Response | null> {
   try {
-    const res = await fetch(
-      \`\${GH_RAW_BASE}/\${filePath}\`,
-      { headers: { 'User-Agent': 'CloudPress/1' }, cf: { cacheEverything: true, cacheTtl: ttl } as any }
-    );
+    const res = await fetch(\`\${GH_RAW_BASE}/\${filePath}\`, {
+      headers: {
+        'User-Agent': 'CloudPress-wp-transform/2',
+        ...(token ? { Authorization: \`Bearer \${token}\` } : {}),
+      },
+      cf: { cacheEverything: true, cacheTtl: ttl } as RequestInit['cf'],
+    });
     return res.ok ? res : null;
   } catch { return null; }
 }
 
+async function ghText(filePath: string, token = ''): Promise<string> {
+  const res = await ghRaw(filePath, token, 120);
+  return res ? await res.text() : '';
+}
+
 function wp404(): Response {
-  return new Response(\`<!DOCTYPE html>
-<html lang="ko"><head><meta charset="UTF-8"><title>404</title></head>
-<body><h1>404 — 페이지를 찾을 수 없습니다</h1><a href="/">← 홈으로</a></body></html>\`,
-    { status: 404, headers: { ...SEC, 'Content-Type': 'text/html;charset=utf-8' } }
-  );
+  return new Response('<!DOCTYPE html><html lang="ko"><head><meta charset="UTF-8"><title>404</title></head><body><h1>404</h1><a href="/">홈</a></body></html>',
+    { status: 404, headers: { ...SEC, 'Content-Type': 'text/html;charset=utf-8' } });
 }
 
 interface Env {
   PHP_RUNNER?: { fetch(req: Request): Promise<Response> };
-  CACHE?:      { get(k: string, t?: string): Promise<ArrayBuffer | null>; put(k: string, v: ArrayBuffer, opts?: object): Promise<void> };
+  CACHE?:      { get(k: string, t?: string): Promise<ArrayBuffer | string | null>; put(k: string, v: ArrayBuffer, opts?: object): Promise<void> };
   GITHUB_TOKEN?: string;
-  SITE_NAME?:    string;
 }
 
 export default {
@@ -1515,73 +1713,74 @@ export default {
     const url   = new URL(req.url);
     const path  = url.pathname;
     const isGet = req.method === 'GET' || req.method === 'HEAD';
+    const token = env.GITHUB_TOKEN || '';
+    const siteUrl = \`\${url.protocol}//\${url.host}\`;
 
-    // 1. PHP_RUNNER Service Binding으로 PHP 실시간 실행 → 결과 그대로 응답
-    if (env.PHP_RUNNER) {
+    const needsPhp = !STATIC_EXT.test(path) && (WP_PHP_PATHS.test(path) || WP_PHP_FILES.test(path) || path === '/' || !path.includes('.') || path.endsWith('.php'));
+
+    if (needsPhp && env.PHP_RUNNER) {
       try {
         let body = '';
-        if (req.method !== 'GET' && req.method !== 'HEAD') {
-          body = await req.clone().text().catch(() => '');
-        }
-        let phpFile = path.endsWith('.php') ? path : '/index.php';
-        if (path.startsWith('/wp-admin') && !path.endsWith('.php')) {
-          phpFile = path.endsWith('/') ? path + 'index.php' : path + '/index.php';
-        }
+        if (!isGet) body = await req.clone().text().catch(() => '');
+        const phpFile = resolvePhpFile(path);
+        const [wpConfig, dbPhp] = await Promise.all([
+          ghText('wordpress/wp-config.php', token),
+          ghText('wordpress/wp-content/db.php', token),
+        ]);
         const payload = {
           phpFile,
           phpEnv: {
-            REQUEST_URI:     path + url.search,
-            REQUEST_METHOD:  req.method,
-            HTTP_HOST:       url.host,
-            SERVER_NAME:     url.host,
-            HTTPS:           url.protocol === 'https:' ? 'on' : '',
-            HTTP_COOKIE:     req.headers.get('Cookie')       || '',
-            HTTP_USER_AGENT: req.headers.get('User-Agent')   || '',
-            CONTENT_TYPE:    req.headers.get('Content-Type') || '',
-            CONTENT_LENGTH:  String(body.length),
-            QUERY_STRING:    url.search.replace(/^\\?/, ''),
-            GITHUB_OWNER:    GH_OWNER,
-            GITHUB_REPO:     GH_REPO,
-            GITHUB_TOKEN:    env.GITHUB_TOKEN || '',
+            WP_HOME: siteUrl, WP_SITEURL: siteUrl,
+            REQUEST_URI: path + url.search, REQUEST_METHOD: req.method,
+            HTTP_HOST: url.host, SERVER_NAME: url.host,
+            HTTPS: url.protocol === 'https:' ? 'on' : '',
+            DOCUMENT_ROOT: '/wordpress', SCRIPT_FILENAME: \`/wordpress\${phpFile}\`,
+            SCRIPT_NAME: phpFile, PHP_SELF: phpFile,
+            HTTP_COOKIE: req.headers.get('Cookie') || '',
+            HTTP_USER_AGENT: req.headers.get('User-Agent') || 'CloudPress',
+            CONTENT_TYPE: req.headers.get('Content-Type') || '',
+            CONTENT_LENGTH: String(body.length),
+            QUERY_STRING: url.search.replace(/^\\?/, ''),
+            GITHUB_OWNER: GH_OWNER, GITHUB_REPO: GH_REPO, GITHUB_TOKEN: token,
           },
           stdin: body,
+          files: {
+            '/wordpress/wp-config.php': wpConfig,
+            '/wordpress/wp-content/db.php': dbPhp,
+          },
           siteConfig: { githubOwner: GH_OWNER, githubRepo: GH_REPO, ghPagesUrl: SITE_URL },
         };
-        const phpRes = await env.PHP_RUNNER.fetch(
-          new Request('https://php-runner/run-wordpress', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload),
-          })
-        );
+        const phpRes = await env.PHP_RUNNER.fetch(new Request('https://php-runner/run-wordpress', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        }));
         if (phpRes.status < 500) return fixCharset(phpRes);
-      } catch {}
+      } catch { /* PHP Runner 실패 → 캐시 폴백 */ }
     }
 
-    // 2. 정적 자산: KV 캐시 → GitHub raw 서빙
-    if (isGet && STATIC_EXT.test(path)) {
-      if (env.CACHE) {
-        const cacheKey = \`wp:\${GH_OWNER}/\${GH_REPO}:\${path}\`;
-        try {
-          const cached = await env.CACHE.get(cacheKey, 'arrayBuffer');
-          if (cached) return new Response(cached, { headers: { 'Content-Type': mime(path), 'Cache-Control': 'public,max-age=604800,immutable', ...SEC } });
-        } catch {}
+    if (isGet && !STATIC_EXT.test(path) && !WP_PHP_PATHS.test(path)) {
+      let cp = '_cache' + path;
+      if (cp.endsWith('/')) cp += 'index.html';
+      else if (!cp.includes('.')) cp += '/index.html';
+      let cached = await ghRaw(cp, token, 60);
+      if (!cached) cached = await ghRaw('_cache' + path + '.html', token, 60);
+      if (cached) {
+        const html = ensureCharsetMeta(await cached.text());
+        return new Response(html, { headers: { 'Content-Type': 'text/html;charset=utf-8', 'Cache-Control': 'public,max-age=60', ...SEC } });
       }
-      const assetPath = path.startsWith('/wp-content/') || path.startsWith('/wp-includes/') || path.startsWith('/wp-admin/')
-        ? 'wordpress' + path
-        : path.slice(1);
-      const res = await ghRaw(assetPath, 86400);
+    }
+
+    if (isGet && STATIC_EXT.test(path)) {
+      const assetPath = (path.startsWith('/wp-content/') || path.startsWith('/wp-includes/') || path.startsWith('/wp-admin/'))
+        ? 'wordpress' + path : path.slice(1);
+      const res = await ghRaw(assetPath, token, 86400);
       if (res) {
         const buf = await res.arrayBuffer();
-        if (env.CACHE) {
-          const cacheKey = \`wp:\${GH_OWNER}/\${GH_REPO}:\${path}\`;
-          ctx.waitUntil(env.CACHE.put(cacheKey, buf, { expirationTtl: 86400 }));
-        }
+        if (env.CACHE) ctx.waitUntil(env.CACHE.put(\`wp:\${GH_OWNER}/\${GH_REPO}:\${path}\`, buf, { expirationTtl: 86400 }));
         return new Response(buf, { headers: { 'Content-Type': mime(path), 'Cache-Control': 'public,max-age=604800,immutable', ...SEC } });
       }
     }
 
-    // 3. Cloudflare Pages 폴백 (사이트 URL로 프록시)
     if (isGet && SITE_URL) {
       try {
         const r = await fetch(SITE_URL + path + url.search);
@@ -1593,26 +1792,7 @@ export default {
   },
 };
 
-export const WP_PHP_ROUTES: Record<string, string> = {
-  '/':            '/index.php',
-  '/wp-login':    '/wp-login.php',
-  '/wp-admin':    '/wp-admin/index.php',
-  '/wp-admin/':   '/wp-admin/index.php',
-  '/wp-json':     '/index.php',
-  '/feed':        '/index.php',
-  '/sitemap.xml': '/index.php',
-  '/robots.txt':  '/robots.txt',
-};
-
-export function buildCacheHeaders(path: string): Record<string, string> {
-  if (STATIC_EXT.test(path)) {
-    return { 'Cache-Control': 'public, max-age=604800, immutable', 'Vary': 'Accept-Encoding' };
-  }
-  if (path.endsWith('.php') || path === '/' || !path.includes('.')) {
-    return { 'Cache-Control': 'public, s-maxage=60, max-age=0, must-revalidate', 'Vary': 'Accept-Encoding, Cookie' };
-  }
-  return { 'Cache-Control': 'public, max-age=300' };
-}
+export { WP_PHP_ROUTES, resolvePhpFile };
 `;
 }
 
@@ -1652,10 +1832,11 @@ Cloudflare Worker = 순수 미러링
 │   └── wordpress.db      ← SQLite DB
 ├── _cache/               ← 정적 HTML 캐시 (SEO 폴백)
 └── .github/workflows/
-    ├── install-wordpress.yml  ← WP 초기 설치 (PHP CLI + SQLite)
+    ├── install-wordpress.yml  ← WP 초기 설치 (setup-php + SQLite)
+    ├── php-db-sync.yml        ← wordpress.db · db.php 검증/동기화
     ├── wp-sync.yml            ← WP 업데이트 동기화 (WP-CLI)
     ├── static-cache.yml       ← nginx+PHP-FPM 실시간 서버 + SEO 캐시
-    └── php-keepalive.yml      ← PHP 서버 상시 가동 (5분마다 keep-alive)
+    └── php-keepalive.yml      ← PHP 서버 상시 가동 (setup-php)
 \`\`\`
 
 ## WordPress 관리
@@ -1927,24 +2108,32 @@ export async function provisionCloudflarePagesHosting({
         else await log("  ⚠️ wp-rocket zip 없음 — 관리자 패널 > 플러그인 관리에서 업로드하세요", "warn");
       } catch (e) { await log(`  ⚠️ 플러그인 로드 오류: ${e.message}`, "warn"); }
 
+      const nowIso = new Date().toISOString().replace("T", " ").slice(0, 19);
+      const passHash = phpassCreate(wpAdminPass);
+      const wordpressDbContent = buildWordpressDb({
+        siteUrl, siteName, adminUser: wpAdminUser, adminEmail: wpAdminEmail,
+        passHash, now: nowIso, siteId,
+      });
+      const dbPhpContent = buildSqliteDbPhp();
+
       const filesToPush = [
         { path: "wordpress/wp-config.php", content: buildWpConfig({ siteId, siteUrl, dbPrefix, authKey, secureAuthKey, loggedInKey, nonceKey, authSalt, secureAuthSalt, loggedInSalt, nonceSalt }) },
+        { path: "wordpress/wp-content/db.php", content: dbPhpContent },
+        { path: "_db/wordpress.db", content: wordpressDbContent },
         { path: "worker.js", content: workerSource },
         { path: "wrangler.toml", content: buildWranglerToml({ workerName, kvCacheId, kvCacheName, siteId, ghOwner: owner, ghRepo: repoName, ghPagesUrl, workerUrl: realWorkerUrl, phpRunnerDeployed }) },
         { path: "wrangler-php.toml", content: buildPhpRunnerWranglerToml({ workerName, kvCacheId, siteId, ghOwner: owner, ghRepo: repoName }) },
         ...(phpRunnerSourceCode ? [{ path: "php-runner.js", content: phpRunnerSourceCode }] : []),
-        { path: "_db/.gitkeep", content: "# wordpress.db SQLite DB가 이 폴더에 생성됩니다.\n" },
+        { path: "_db/.gitkeep", content: "# wordpress.db (시드 JSON 또는 SQLite) — Worker/GitHub Actions가 읽습니다.\n" },
         { path: "_cache/.gitkeep", content: "# WordPress 정적 HTML 캐시가 이 폴더에 생성됩니다.\n" },
         { path: "wordpress/wp-content/uploads/.gitkeep", content: "" },
         { path: "wordpress/wp-content/themes/.gitkeep",  content: "" },
         { path: "wordpress/wp-content/plugins/.gitkeep", content: "" },
-        // .gitignore — wordpress.db는 추적하지 않음
+        // .gitignore — wordpress.db는 레포에 포함 (Worker raw URL 접근용)
         {
           path: ".gitignore",
           content: [
-            "# WordPress SQLite DB (GitHub Actions 워크플로우가 자동 생성)",
-            "_db/wordpress.db",
-            "_db/*.db",
+            "# SQLite WAL/SHM만 제외 (본 DB 파일은 추적)",
             "_db/*.db-shm",
             "_db/*.db-wal",
             "",
@@ -1961,6 +2150,10 @@ export async function provisionCloudflarePagesHosting({
         ...(aibpPhp  ? [{ path: "_plugins/aibp-pro/aibp-pro.php",            content: aibpPhp  }] : []),
         ...(aibpJs   ? [{ path: "_plugins/aibp-pro/assets/script-pro.js",    content: aibpJs   }] : []),
         ...(aibpCss  ? [{ path: "_plugins/aibp-pro/assets/style-pro.css",    content: aibpCss  }] : []),
+        {
+          path: ".github/workflows/php-db-sync.yml",
+          content: buildPhpDbSyncWorkflow(),
+        },
         {
           path: ".github/workflows/install-wordpress.yml",
           content: buildWpInstallAction({ wpAdminUser, wpAdminPass, wpAdminEmail, siteUrl, siteName, dbPrefix }),
@@ -1996,6 +2189,7 @@ export async function provisionCloudflarePagesHosting({
       if (pushed) {
         githubRepoUrl = `https://github.com/${owner}/${repoName}`;
         await log(`✅ GitHub 레포 push 완료: ${githubRepoUrl}`);
+        await log(`  📦 _db/wordpress.db + wordpress/wp-content/db.php 업로드 완료`);
 
         // wp-rocket zip 별도 업로드 (바이너리 파일, Content API 사용)
         if (wpRocketZipB64) {

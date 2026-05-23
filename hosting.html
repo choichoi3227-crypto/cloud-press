@@ -16,7 +16,7 @@
     select, select, select option { background: #111827; color: #e5e7eb; } select { color-scheme: dark; } select { color-scheme: dark; }
         </style>
 </head>
-<body class="bg-[#050505] text-white md:flex md:h-screen">
+<body class="cp-console bg-[#050505] text-white md:flex md:h-screen">
     <script>
         if (!localStorage.getItem('admin_token')) window.location.href = '/login';
     </script>
@@ -66,6 +66,7 @@
 
     <script src="/src/auth-frontend.js"></script>
     <script src="/src/sidebar.js"></script>
+    <script src="/src/marketing-shell.js"></script>
     <script>
         const TOKEN   = localStorage.getItem('admin_token');
         const HEADERS = { 'Authorization': `Bearer ${TOKEN}`, 'Content-Type': 'application/json' };

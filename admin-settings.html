@@ -218,6 +218,33 @@
         </div>
     </div>
 
+    <!-- ── CloudPressDB / CP3 서버 풀 (GitHub 레포 + DNS 플래너) ── -->
+    <div class="p-6 bg-[#111] rounded-2xl border border-violet-500/20 space-y-5">
+        <h2 class="font-bold flex items-center gap-2">
+            <i class="fas fa-network-wired text-violet-400"></i>
+            CloudPressDB · CP3 서버 풀 (Route53 스타일 DNS 플래너)
+        </h2>
+        <p class="text-sm text-gray-400">
+            GitHub 레포를 DB/스토리지 노드로 등록합니다. 헬스체크 후 가중치 비율에 따라 사용자 호스팅이 자동 할당됩니다.
+        </p>
+        <div class="flex gap-2 flex-wrap">
+            <button type="button" onclick="setPoolType('cpdb')" id="pool-tab-cpdb" class="px-4 py-2 rounded-lg text-sm font-bold bg-violet-600">CloudPressDB</button>
+            <button type="button" onclick="setPoolType('cp3')" id="pool-tab-cp3" class="px-4 py-2 rounded-lg text-sm font-bold bg-white/5 text-gray-400">CP3</button>
+            <button type="button" onclick="runPoolHealthCheck()" class="px-4 py-2 rounded-lg text-sm border border-white/10 hover:bg-white/5">
+                <i class="fas fa-heartbeat mr-1"></i> 헬스체크 + DNS 플랜 재생성
+            </button>
+        </div>
+        <div class="grid md:grid-cols-2 gap-4">
+            <input id="pool-name" placeholder="서버 이름" class="bg-black/40 border border-white/10 rounded-xl px-4 py-2 text-sm">
+            <input id="pool-repo" placeholder="GitHub 레포명 (owner/repo 또는 repo만)" class="bg-black/40 border border-white/10 rounded-xl px-4 py-2 text-sm">
+            <input id="pool-token" type="password" placeholder="GitHub 토큰 (레포 push 권한)" class="bg-black/40 border border-white/10 rounded-xl px-4 py-2 text-sm md:col-span-2">
+            <input id="pool-weight" type="number" placeholder="가중치 (예: 30)" value="100" class="bg-black/40 border border-white/10 rounded-xl px-4 py-2 text-sm">
+            <button type="button" onclick="addPoolServer()" class="bg-violet-600 hover:bg-violet-500 py-2 rounded-xl font-bold text-sm">서버 등록</button>
+        </div>
+        <div id="pool-servers-list" class="text-sm text-gray-500">로딩 중...</div>
+        <pre id="pool-dns-plan" class="text-xs bg-black/40 p-4 rounded-xl overflow-x-auto text-violet-200/80 max-h-48"></pre>
+    </div>
+
     <!-- ── Cloudflare 환경변수 가이드 ── -->
     <div class="p-6 bg-[#111] rounded-2xl border border-white/5 space-y-4">
         <h2 class="font-bold flex items-center gap-2"><i class="fas fa-key text-yellow-400"></i> 필수 환경변수 (Wrangler Secrets)</h2>
@@ -1154,6 +1181,69 @@ async function loadPluginStatus() {
     } catch {}
 }
 loadPluginStatus();
+
+let _poolType = 'cpdb';
+function setPoolType(t) {
+  _poolType = t;
+  document.getElementById('pool-tab-cpdb').className = 'px-4 py-2 rounded-lg text-sm font-bold ' + (t === 'cpdb' ? 'bg-violet-600' : 'bg-white/5 text-gray-400');
+  document.getElementById('pool-tab-cp3').className = 'px-4 py-2 rounded-lg text-sm font-bold ' + (t === 'cp3' ? 'bg-green-600' : 'bg-white/5 text-gray-400');
+  loadPoolServers();
+}
+async function loadPoolServers() {
+  const el = document.getElementById('pool-servers-list');
+  const planEl = document.getElementById('pool-dns-plan');
+  try {
+    const res = await fetch('/api/products/admin/servers?type=' + _poolType, { headers: HEADERS() });
+    const data = await res.json();
+    if (!res.ok) { el.textContent = data.error || '로드 실패'; return; }
+    const servers = data.servers || [];
+    el.innerHTML = servers.length ? servers.map(s => `
+      <div class="flex justify-between items-center p-3 bg-black/30 rounded-xl mb-2">
+        <div>
+          <span class="font-bold text-white">${s.name}</span>
+          <span class="text-gray-500 ml-2">${s.github_owner}/${s.github_repo}</span>
+          <span class="text-xs ml-2 px-2 py-0.5 rounded ${s.health_status === 'healthy' ? 'bg-green-900/30 text-green-400' : 'bg-red-900/30 text-red-400'}">${s.health_status}</span>
+          <span class="text-gray-600 text-xs ml-2">weight ${s.weight}</span>
+        </div>
+        <button onclick="deletePoolServer('${s.id}')" class="text-red-400 text-xs hover:underline">삭제</button>
+      </div>`).join('') : '<p class="text-gray-600 py-4">등록된 서버 없음</p>';
+    planEl.textContent = data.dns_plan ? JSON.stringify(data.dns_plan, null, 2) : 'DNS 플랜 없음 — 헬스체크 실행';
+  } catch (e) { el.textContent = e.message; }
+}
+async function addPoolServer() {
+  const repoRaw = document.getElementById('pool-repo').value.trim();
+  let owner = '', repo = repoRaw;
+  if (repoRaw.includes('/')) { [owner, repo] = repoRaw.split('/'); }
+  const res = await fetch('/api/products/admin/servers', {
+    method: 'POST', headers: HEADERS(),
+    body: JSON.stringify({
+      product_type: _poolType,
+      name: document.getElementById('pool-name').value.trim() || repo,
+      github_owner: owner,
+      github_repo: repo,
+      github_token: document.getElementById('pool-token').value.trim(),
+      weight: Number(document.getElementById('pool-weight').value) || 100,
+    }),
+  });
+  const data = await res.json();
+  alert(data.message || data.error || '완료');
+  loadPoolServers();
+}
+async function runPoolHealthCheck() {
+  const res = await fetch('/api/products/admin/health-check', {
+    method: 'POST', headers: HEADERS(),
+    body: JSON.stringify({ product_type: _poolType }),
+  });
+  const data = await res.json();
+  alert(data.success ? 'DNS 플랜이 갱신되었습니다.' : (data.error || '실패'));
+  loadPoolServers();
+}
+async function deletePoolServer(id) {
+  if (!confirm('삭제하시겠습니까?')) return;
+  await fetch('/api/products/admin/servers?id=' + id, { method: 'DELETE', headers: HEADERS() });
+  loadPoolServers();
+}
+loadPoolServers();
 </script>
 </body>
 </html>

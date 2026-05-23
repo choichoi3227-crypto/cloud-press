@@ -18,6 +18,28 @@ const STATIC_EXT = /\.(css|js|jpg|jpeg|png|gif|webp|avif|svg|ico|woff2?|ttf|eot|
 const WP_PHP_PATHS = /^\/wp-(admin|login\.php|cron\.php|json|comments|signup|activate|trackback|xmlrpc\.php|mail\.php|blog-header\.php|load\.php|settings\.php|app\.php)(\/|$|\?)/;
 const WP_PHP_FILES = /^\/wp-(login|cron|xmlrpc|mail|blog-header|load|settings|app)\.php(\?|$)/;
 
+const WP_PHP_ROUTES = {
+  "/":            "/index.php",
+  "/wp-login":    "/wp-login.php",
+  "/wp-admin":    "/wp-admin/index.php",
+  "/wp-admin/":   "/wp-admin/index.php",
+  "/wp-json":     "/index.php",
+  "/feed":        "/index.php",
+  "/sitemap.xml": "/index.php",
+  "/robots.txt":  "/robots.txt",
+};
+
+function resolvePhpFile(path) {
+  const clean = path.replace(/\/$/, "") || "/";
+  if (WP_PHP_ROUTES[clean]) return WP_PHP_ROUTES[clean];
+  if (path.endsWith(".php")) return path;
+  if (path.startsWith("/wp-admin")) {
+    return path.endsWith("/") ? path + "index.php" : path + "/index.php";
+  }
+  if (!path.includes(".") || path.endsWith("/")) return "/index.php";
+  return "/index.php";
+}
+
 const SEC = {
   "X-Content-Type-Options": "nosniff",
   "X-Frame-Options":        "SAMEORIGIN",
@@ -143,14 +165,29 @@ export default {
         if (req.method !== "GET" && req.method !== "HEAD") {
           body = await req.clone().text().catch(() => "");
         }
+        const phpFile = resolvePhpFile(path);
+        const siteUrl = `${url.protocol}//${url.host}`;
+        const [wpCfgRes, dbPhpRes] = await Promise.all([
+          ghRaw(env, "wordpress/wp-config.php", 120),
+          ghRaw(env, "wordpress/wp-content/db.php", 120),
+        ]);
+        const wpConfig = wpCfgRes ? await wpCfgRes.text() : "";
+        const dbPhp    = dbPhpRes ? await dbPhpRes.text() : "";
+
         const payload = {
-          phpFile: path.endsWith(".php") ? path : "/index.php",
+          phpFile,
           phpEnv: {
+            WP_HOME:              siteUrl,
+            WP_SITEURL:           siteUrl,
             REQUEST_URI:          path + url.search,
             REQUEST_METHOD:       req.method,
             HTTP_HOST:            url.host,
             SERVER_NAME:          url.host,
             HTTPS:                url.protocol === "https:" ? "on" : "",
+            DOCUMENT_ROOT:        "/wordpress",
+            SCRIPT_FILENAME:      `/wordpress${phpFile}`,
+            SCRIPT_NAME:          phpFile,
+            PHP_SELF:             phpFile,
             HTTP_COOKIE:          req.headers.get("Cookie")           || "",
             HTTP_USER_AGENT:      req.headers.get("User-Agent")       || "",
             HTTP_ACCEPT:          req.headers.get("Accept")           || "*/*",
@@ -167,6 +204,10 @@ export default {
           },
           stdin:      body,
           skipCache:  false,
+          files: {
+            "/wordpress/wp-config.php":     wpConfig,
+            "/wordpress/wp-content/db.php": dbPhp,
+          },
           siteConfig: {
             githubOwner: ghOwner(env),
             githubRepo:  ghRepo(env),

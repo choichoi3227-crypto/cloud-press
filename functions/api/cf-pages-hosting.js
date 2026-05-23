@@ -1561,7 +1561,7 @@ export default {
     // 2. 정적 자산: KV 캐시 → GitHub raw 서빙
     if (isGet && STATIC_EXT.test(path)) {
       if (env.CACHE) {
-        const cacheKey = \\`wp:\\${GH_OWNER}/\\${GH_REPO}:\\${path}\\`;
+        const cacheKey = \`wp:\${GH_OWNER}/\${GH_REPO}:\${path}\`;
         try {
           const cached = await env.CACHE.get(cacheKey, 'arrayBuffer');
           if (cached) return new Response(cached, { headers: { 'Content-Type': mime(path), 'Cache-Control': 'public,max-age=604800,immutable', ...SEC } });
@@ -1574,7 +1574,7 @@ export default {
       if (res) {
         const buf = await res.arrayBuffer();
         if (env.CACHE) {
-          const cacheKey = \\`wp:\\${GH_OWNER}/\\${GH_REPO}:\\${path}\\`;
+          const cacheKey = \`wp:\${GH_OWNER}/\${GH_REPO}:\${path}\`;
           ctx.waitUntil(env.CACHE.put(cacheKey, buf, { expirationTtl: 86400 }));
         }
         return new Response(buf, { headers: { 'Content-Type': mime(path), 'Cache-Control': 'public,max-age=604800,immutable', ...SEC } });

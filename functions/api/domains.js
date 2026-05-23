@@ -5,6 +5,8 @@
 // DELETE /api/domains?id=                         → 도메인 삭제
 
 import { jsonOk, jsonErr, requireAuth } from "../_shared.js";
+import { configureGithubPagesCustomDomainWithToken, setupGithubPagesDns } from "./github-pages-hosting.js";
+import { pickGithubToken } from "./github-storage.js";
 
 // ── Cloudflare API 헬퍼 ───────────────────────────────────────────────────────
 async function cfReq(method, path, apiKey, email, body) {
@@ -338,7 +340,7 @@ export async function onRequestPost(context) {
     return jsonErr("cloudpress.app 서브도메인은 사용할 수 없습니다.", 400);
 
   const site = await env.DB.prepare(
-    "SELECT id, user_id, cf_worker_name FROM sites WHERE id = ?"
+    "SELECT id, user_id, cf_worker_name, hosting_type, github_repo_owner, github_repo_name FROM sites WHERE id = ?"
   ).bind(site_id).first();
   if (!site) return jsonErr("사이트를 찾을 수 없습니다.", 404);
   if (site.user_id !== payload.id && payload.role !== "admin")
@@ -436,6 +438,30 @@ export async function onRequestPost(context) {
     }
   }
 
+  // ── GitHub Pages 호스팅: WordPress siteurl/home 자동 갱신 (도메인 추가 시) ──
+  // hosting_type이 'github_pages' 이거나 github_repo_name이 있으면 자동 갱신
+  let wpUrlUpdated = false;
+  if (
+    (site.hosting_type === "github_pages" || site.github_repo_name) &&
+    site.github_repo_owner && site.github_repo_name
+  ) {
+    try {
+      const ghToken = await pickGithubToken(env);
+      if (ghToken) {
+        await configureGithubPagesCustomDomainWithToken({
+          token:     ghToken,
+          owner:     site.github_repo_owner,
+          repoName:  site.github_repo_name,
+          domain:    domainClean,
+          siteId:    site_id,
+        });
+        wpUrlUpdated = true;
+      }
+    } catch (e) {
+      console.warn("[domains/post] WordPress URL 자동 갱신 실패:", e.message);
+    }
+  }
+
   // ── 응답 메시지 생성 ─────────────────────────────────────────────────────
   let message, instructions;
 
@@ -443,13 +469,16 @@ export async function onRequestPost(context) {
     message = `도메인이 등록되었습니다. (Cloudflare Zone 생성 실패: ${zoneError})`;
     instructions = ["Cloudflare 대시보드에서 직접 Zone을 추가하거나 다시 시도해주세요."];
   } else if (alreadyOnCf || initialStatus === "active") {
-    message = `✅ 도메인이 자동으로 활성화되었습니다! 이미 해당 Cloudflare 계정에서 도메인을 사용 중입니다.${workerRouteSet ? " Worker 커스텀 도메인도 설정되었습니다." : ""}`;
+    const wpMsg = wpUrlUpdated ? " WordPress siteurl/home도 자동 갱신되었습니다." : "";
+    message = `✅ 도메인이 자동으로 활성화되었습니다! 이미 해당 Cloudflare 계정에서 도메인을 사용 중입니다.${workerRouteSet ? " Worker 커스텀 도메인도 설정되었습니다." : ""}${wpMsg}`;
     instructions = [
       "이미 이 도메인의 DNS가 Cloudflare를 통해 관리되고 있습니다.",
       workerRouteSet ? "Worker 커스텀 도메인이 자동으로 설정되었습니다." : "Cloudflare 대시보드 > Workers > 커스텀 도메인에서 수동으로 설정해주세요.",
-    ];
+      wpUrlUpdated ? "WordPress siteurl/home이 해당 도메인으로 자동 설정되었습니다." : "",
+    ].filter(Boolean);
   } else if (nameservers.length > 0) {
-    message = `도메인이 등록되었습니다. 아래 Cloudflare 네임서버로 변경해주세요.`;
+    const wpMsg = wpUrlUpdated ? "\n※ WordPress siteurl/home도 해당 도메인으로 미리 설정되었습니다. DNS 전파 완료 후 자동 적용됩니다." : "";
+    message = `도메인이 등록되었습니다. 아래 Cloudflare 네임서버로 변경해주세요.${wpMsg}`;
     instructions = [
       `1. 도메인 등록기(가비아, 후이즈, Namecheap 등)에서 네임서버 설정 변경`,
       `2. 기존 네임서버를 아래 Cloudflare 네임서버로 교체:`,
@@ -471,6 +500,7 @@ export async function onRequestPost(context) {
     zone_status:    alreadyOnCf ? "active" : zoneStatus,
     already_on_cf:  alreadyOnCf,
     worker_custom_domain: workerRouteSet,
+    wp_url_updated: wpUrlUpdated,
     verify_method:  alreadyOnCf ? "auto" : "nameserver",
     instructions,
   });

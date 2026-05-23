@@ -174,7 +174,7 @@
                     <div class="card-visual ${card.brand?.toLowerCase() || ''} p-5 relative">
                         <div class="flex justify-between items-start">
                             <div class="text-xs font-bold text-white/60 uppercase tracking-widest">${card.brand || 'CARD'}</div>
-                            ${card.is_default ? '<span class="text-xs bg-white/20 px-2 py-1 rounded-full text-white">기본</span>' : ''}
+                            ${(card.is_default === 1 || card.is_default === true) ? '<span class="text-xs bg-white/20 px-2 py-1 rounded-full text-white">기본</span>' : ''}
                         </div>
                         <div class="mt-6 text-xl font-mono text-white tracking-widest">
                             •••• •••• •••• ${card.last4 || '****'}
@@ -190,7 +190,7 @@
                     <div class="p-4 flex justify-between items-center">
                         <div class="text-sm text-gray-500">${card.card_name || ''}</div>
                         <div class="flex gap-2">
-                            ${!card.is_default ? `<button onclick="setDefault('${card.id}')" class="text-xs border border-white/10 px-3 py-1.5 rounded-lg hover:bg-white/5 transition text-gray-500 hover:text-white">기본 설정</button>` : ''}
+                            ${!(card.is_default === 1 || card.is_default === true) ? `<button onclick="setDefault('${card.id}')" class="text-xs border border-white/10 px-3 py-1.5 rounded-lg hover:bg-white/5 transition text-gray-500 hover:text-white">기본 설정</button>` : ''}
                             <button onclick="removeCard('${card.id}')" class="text-xs text-gray-600 hover:text-red-400 transition px-2 py-1.5">
                                 <i class="fas fa-trash"></i>
                             </button>
@@ -220,7 +220,8 @@
                     document.getElementById('card-list').innerHTML = `<div class="text-center py-12 text-gray-600 text-sm">${data.error || '카드 정보를 불러올 수 없습니다'}</div>`;
                     return;
                 }
-                renderCards(data.cards || []);
+                const list = data.cards || data.data?.cards || [];
+                renderCards(list);
             } catch (err) {
                 console.error('카드 로드 오류:', err);
                 document.getElementById('card-list').innerHTML = `<div class="text-center py-12 text-gray-600 text-sm">카드 정보를 불러올 수 없습니다</div>`;
@@ -416,8 +417,10 @@
                 try { data = JSON.parse(resText); } catch { data = { success: false, error: '서버 응답 오류' }; }
                 if (data.success) {
                     cardAlert('카드가 추가되었습니다!', 'success');
-                    await loadCards(); // 목록 즉시 갱신
-                    setTimeout(() => closeAddCard(), 1200);
+                    closeAddCard();
+                    showAlert('카드가 추가되었습니다.', 'success');
+                    await loadCards();
+                    setTimeout(loadCards, 400);
                 } else {
                     cardAlert(data.error || '카드 추가에 실패했습니다.');
                 }

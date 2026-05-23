@@ -8,19 +8,8 @@
     <link rel="stylesheet" href="/style.css">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" rel="stylesheet">
 </head>
-<body class="bg-[#050505] text-white">
-<header class="p-5 border-b border-white/10 sticky top-0 bg-[#050505]/90 backdrop-blur-lg z-50">
-    <div class="max-w-7xl mx-auto flex justify-between items-center">
-        <a href="/" class="text-2xl font-black text-blue-500">CLOUD<span class="text-white">PRESS</span></a>
-        <nav class="hidden md:flex gap-8 items-center text-sm text-gray-400">
-            <a href="/features" class="hover:text-white">기능</a>
-            <a href="/pricing" class="hover:text-white">요금제</a>
-            <a href="/about" class="hover:text-white">소개</a>
-            <a href="/login" class="hover:text-white">로그인</a>
-            <a href="/signup" class="bg-violet-600 px-5 py-2 rounded-full font-bold text-white">시작하기</a>
-        </nav>
-    </div>
-</header>
+<body class="bg-[#050505] text-white" data-cp-marketing="replace-header">
+<header></header>
 <main class="max-w-6xl mx-auto px-6 py-16">
     <div class="text-center mb-16">
         <span class="text-xs font-bold text-violet-400 bg-violet-400/10 px-3 py-1 rounded-full">유료 · DynamoDB 유사</span>
@@ -43,7 +32,7 @@
     </div>
     <div id="pricing-grid" class="grid md:grid-cols-2 gap-6 max-w-3xl mx-auto"></div>
 </main>
-<script src="/src/public-nav.js"></script>
+<script src="/src/marketing-shell.js"></script>
 <script src="/src/product-page-shell.js"></script>
 <script>
 renderProductPricing([

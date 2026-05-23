@@ -1428,6 +1428,195 @@ function buildPhpKeepaliveScript() {
 }
 
 
+// ─── wp-transform.ts 생성 ────────────────────────────────────────────────────
+// PHP 실시간 실행 브릿지 - 사용자 접속 시 PHP를 실행하고 결과를 그대로 응답
+function buildWpTransform({ siteName, siteUrl, siteId, owner, repoName }) {
+  const ghRawBase = `https://raw.githubusercontent.com/${owner}/${repoName}/main`;
+  return `/**
+ * wp-transform.ts — CloudPress WordPress PHP 실시간 실행 브릿지
+ *
+ * ⚠️  이 파일 하나가 모든 PHP 실행을 담당합니다.
+ *     사용자가 접속하면 PHP 파일을 실시간으로 실행하고,
+ *     해당 PHP 실행 결과를 그대로 응답합니다.
+ *
+ *     /wordpress/ 폴더의 PHP·JS·CSS 파일들은 100% 원본 그대로 유지됩니다.
+ *     GitHub 레포에는 Astro 정적 페이지 파일이 없습니다.
+ *
+ * 동작 방식:
+ *   1. 사용자 접속 → 요청 경로 파싱
+ *   2. 해당 경로의 WordPress PHP 파일을 실시간 실행 (PHP_RUNNER Service Binding)
+ *   3. PHP 실행 결과(HTML/JSON 등)를 그대로 응답
+ *   4. 정적 자산(css/js/images)은 GitHub raw에서 직접 서빙
+ */
+
+const GH_OWNER    = '${owner}';
+const GH_REPO     = '${repoName}';
+const GH_BRANCH   = 'main';
+const SITE_URL    = '${siteUrl}';
+const SITE_ID     = '${siteId}';
+const GH_RAW_BASE = '${ghRawBase}';
+
+const STATIC_EXT = /\\.(css|js|jpg|jpeg|png|gif|webp|avif|svg|ico|woff2?|ttf|eot|otf|map|txt|xml|pdf|zip|mp4|mp3|ogg|wav|webm)$/i;
+
+const SEC: Record<string, string> = {
+  'X-Content-Type-Options': 'nosniff',
+  'X-Frame-Options':        'SAMEORIGIN',
+  'Referrer-Policy':        'strict-origin-when-cross-origin',
+};
+
+function mime(p: string): string {
+  const ext = (p.split('.').pop() || '').toLowerCase();
+  const map: Record<string, string> = {
+    css:'text/css;charset=utf-8', js:'application/javascript;charset=utf-8',
+    json:'application/json;charset=utf-8', xml:'application/xml;charset=utf-8',
+    svg:'image/svg+xml', png:'image/png', jpg:'image/jpeg', jpeg:'image/jpeg',
+    gif:'image/gif', webp:'image/webp', avif:'image/avif', ico:'image/x-icon',
+    woff:'font/woff', woff2:'font/woff2', ttf:'font/ttf',
+    html:'text/html;charset=utf-8', php:'text/html;charset=utf-8',
+  };
+  return map[ext] || 'application/octet-stream';
+}
+
+function fixCharset(res: Response): Response {
+  const ct = res.headers.get('Content-Type') || '';
+  if (ct.includes('charset') || (!ct.includes('text/html') && !ct.includes('text/plain'))) return res;
+  const h = new Headers(res.headers);
+  h.set('Content-Type', ct.replace(/;\\s*$/, '') + ';charset=utf-8');
+  return new Response(res.body, { status: res.status, statusText: res.statusText, headers: h });
+}
+
+async function ghRaw(filePath: string, ttl = 300): Promise<Response | null> {
+  try {
+    const res = await fetch(
+      \\`\\${GH_RAW_BASE}/\\${filePath}\\`,
+      { headers: { 'User-Agent': 'CloudPress/1' }, cf: { cacheEverything: true, cacheTtl: ttl } as any }
+    );
+    return res.ok ? res : null;
+  } catch { return null; }
+}
+
+function wp404(): Response {
+  return new Response(\\`<!DOCTYPE html>
+<html lang="ko"><head><meta charset="UTF-8"><title>404</title></head>
+<body><h1>404 — 페이지를 찾을 수 없습니다</h1><a href="/">← 홈으로</a></body></html>\\`,
+    { status: 404, headers: { ...SEC, 'Content-Type': 'text/html;charset=utf-8' } }
+  );
+}
+
+interface Env {
+  PHP_RUNNER?: { fetch(req: Request): Promise<Response> };
+  CACHE?:      { get(k: string, t?: string): Promise<ArrayBuffer | null>; put(k: string, v: ArrayBuffer, opts?: object): Promise<void> };
+  GITHUB_TOKEN?: string;
+  SITE_NAME?:    string;
+}
+
+export default {
+  async fetch(req: Request, env: Env, ctx: { waitUntil(p: Promise<unknown>): void }): Promise<Response> {
+    const url   = new URL(req.url);
+    const path  = url.pathname;
+    const isGet = req.method === 'GET' || req.method === 'HEAD';
+
+    // 1. PHP_RUNNER Service Binding으로 PHP 실시간 실행 → 결과 그대로 응답
+    if (env.PHP_RUNNER) {
+      try {
+        let body = '';
+        if (req.method !== 'GET' && req.method !== 'HEAD') {
+          body = await req.clone().text().catch(() => '');
+        }
+        let phpFile = path.endsWith('.php') ? path : '/index.php';
+        if (path.startsWith('/wp-admin') && !path.endsWith('.php')) {
+          phpFile = path.endsWith('/') ? path + 'index.php' : path + '/index.php';
+        }
+        const payload = {
+          phpFile,
+          phpEnv: {
+            REQUEST_URI:     path + url.search,
+            REQUEST_METHOD:  req.method,
+            HTTP_HOST:       url.host,
+            SERVER_NAME:     url.host,
+            HTTPS:           url.protocol === 'https:' ? 'on' : '',
+            HTTP_COOKIE:     req.headers.get('Cookie')       || '',
+            HTTP_USER_AGENT: req.headers.get('User-Agent')   || '',
+            CONTENT_TYPE:    req.headers.get('Content-Type') || '',
+            CONTENT_LENGTH:  String(body.length),
+            QUERY_STRING:    url.search.replace(/^\\?/, ''),
+            GITHUB_OWNER:    GH_OWNER,
+            GITHUB_REPO:     GH_REPO,
+            GITHUB_TOKEN:    env.GITHUB_TOKEN || '',
+          },
+          stdin: body,
+          siteConfig: { githubOwner: GH_OWNER, githubRepo: GH_REPO, ghPagesUrl: SITE_URL },
+        };
+        const phpRes = await env.PHP_RUNNER.fetch(
+          new Request('https://php-runner/run-wordpress', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+          })
+        );
+        if (phpRes.status < 500) return fixCharset(phpRes);
+      } catch {}
+    }
+
+    // 2. 정적 자산: KV 캐시 → GitHub raw 서빙
+    if (isGet && STATIC_EXT.test(path)) {
+      if (env.CACHE) {
+        const cacheKey = \\`wp:\\${GH_OWNER}/\\${GH_REPO}:\\${path}\\`;
+        try {
+          const cached = await env.CACHE.get(cacheKey, 'arrayBuffer');
+          if (cached) return new Response(cached, { headers: { 'Content-Type': mime(path), 'Cache-Control': 'public,max-age=604800,immutable', ...SEC } });
+        } catch {}
+      }
+      const assetPath = path.startsWith('/wp-content/') || path.startsWith('/wp-includes/') || path.startsWith('/wp-admin/')
+        ? 'wordpress' + path
+        : path.slice(1);
+      const res = await ghRaw(assetPath, 86400);
+      if (res) {
+        const buf = await res.arrayBuffer();
+        if (env.CACHE) {
+          const cacheKey = \\`wp:\\${GH_OWNER}/\\${GH_REPO}:\\${path}\\`;
+          ctx.waitUntil(env.CACHE.put(cacheKey, buf, { expirationTtl: 86400 }));
+        }
+        return new Response(buf, { headers: { 'Content-Type': mime(path), 'Cache-Control': 'public,max-age=604800,immutable', ...SEC } });
+      }
+    }
+
+    // 3. Cloudflare Pages 폴백 (사이트 URL로 프록시)
+    if (isGet && SITE_URL) {
+      try {
+        const r = await fetch(SITE_URL + path + url.search);
+        if (r.ok) return fixCharset(r);
+      } catch {}
+    }
+
+    return wp404();
+  },
+};
+
+export const WP_PHP_ROUTES: Record<string, string> = {
+  '/':            '/index.php',
+  '/wp-login':    '/wp-login.php',
+  '/wp-admin':    '/wp-admin/index.php',
+  '/wp-admin/':   '/wp-admin/index.php',
+  '/wp-json':     '/index.php',
+  '/feed':        '/index.php',
+  '/sitemap.xml': '/index.php',
+  '/robots.txt':  '/robots.txt',
+};
+
+export function buildCacheHeaders(path: string): Record<string, string> {
+  if (STATIC_EXT.test(path)) {
+    return { 'Cache-Control': 'public, max-age=604800, immutable', 'Vary': 'Accept-Encoding' };
+  }
+  if (path.endsWith('.php') || path === '/' || !path.includes('.')) {
+    return { 'Cache-Control': 'public, s-maxage=60, max-age=0, must-revalidate', 'Vary': 'Accept-Encoding, Cookie' };
+  }
+  return { 'Cache-Control': 'public, max-age=300' };
+}
+`;
+}
+
+
 // ─── README ──────────────────────────────────────────────────────────────────
 function buildReadme({ siteName, siteId, owner, repoName, workerName, siteUrl, wpAdminUser }) {
   return `# ${siteName}
@@ -1795,6 +1984,11 @@ export async function provisionCloudflarePagesHosting({
         {
           path: "README.md",
           content: buildReadme({ siteName, siteId, owner, repoName, workerName, siteUrl, wpAdminUser }),
+        },
+        // ── wp-transform.ts: PHP 실시간 실행 브릿지 (단일 변환 파일) ─────────────
+        {
+          path: "wp-transform.ts",
+          content: buildWpTransform({ siteName, siteUrl, siteId, owner, repoName }),
         },
       ];
 

@@ -1569,7 +1569,7 @@ jobs:
           echo "📋 DB/db.php 상태"
           if [ -f "_db/wordpress.db" ]; then
             SIZE=$(wc -c < _db/wordpress.db)
-            echo "✅ _db/wordpress.db (${SIZE} bytes)"
+            echo "✅ _db/wordpress.db (\${SIZE} bytes)"
             php -r "
             \\$raw = file_get_contents('_db/wordpress.db');
             \\$data = json_decode(\\$raw, true);

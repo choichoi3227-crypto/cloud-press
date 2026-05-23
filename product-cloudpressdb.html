@@ -36,8 +36,8 @@
 <script src="/src/product-page-shell.js"></script>
 <script>
 renderProductPricing([
-  { name: "Standard", price: "₩19,900", features: ["10GB JSON DB", "자동 샤딩", "백업 7일"], cta: "구독하기" },
-  { name: "Pro", price: "₩49,900", popular: true, features: ["100GB", "전용 샤드 우선", "실시간 복제"], cta: "구독하기" },
+  { name: "Standard", price: "₩14,900", features: ["10GB JSON DB", "자동 샤딩", "백업 7일"], cta: "구독하기", onClick: "subscribeProduct('cpdb','standard')" },
+  { name: "Pro", price: "₩39,900", popular: true, features: ["100GB", "전용 샤드 우선", "실시간 복제"], cta: "구독하기", onClick: "subscribeProduct('cpdb','pro')" },
 ], "pricing-grid");
 </script>
 </body>

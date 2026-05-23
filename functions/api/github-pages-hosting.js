@@ -865,7 +865,7 @@ jobs:
             echo "ℹ️ wordpress/wp-config.php 없음 - Cloudflare Worker PHP_RUNNER 사용"
           fi
         env:
-          SITE_HOST: ${{ secrets.SITE_URL && fromJSON(format('"{0}"', secrets.SITE_URL)) || '${owner}.github.io' }}
+          SITE_HOST: \${{ secrets.SITE_URL || '${owner}.github.io' }}
 
       - name: Node.js 20 설정
         uses: actions/setup-node@v4
@@ -1259,9 +1259,6 @@ status: "publish"
 
   // ── STEP E: worker-site-mirror.js 레포에 업로드 (요청사항 3) ─────────────
   await log("  [E] worker-site-mirror.js 업로드 중 (Cloudflare Worker 소스)...");
-  // worker-site-mirror.js의 플레이스홀더를 실제 값으로 치환하여 레포에 저장
-  // (실제 Cloudflare Worker 배포는 cf-pages-hosting.js가 담당,
-  //  여기서는 레포에 소스를 보관하는 것)
   const workerMirrorContent = `/**
  * worker-site-mirror.js — CloudPress 사이트 Cloudflare Worker
  * 자동 생성됨 (CloudPress 호스팅 생성 시)

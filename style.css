@@ -87,3 +87,11 @@ body { font-family: 'Inter', sans-serif; margin: 0; background-color: #0f172a; c
 #profile-dropdown.open { display: block; }
 #cp-top-profile-bar #profile-dropdown { display: none; }
 #cp-top-profile-bar #profile-dropdown.open { display: block; }
+
+
+/* AWS-like console foundation */
+:root{--aws-bg:#0f141a;--aws-surface:#161e2d;--aws-border:#2a3550;--aws-text:#f2f3f3;--aws-muted:#aab7c4;--aws-accent:#ff9900;}
+body.aws-theme{background:var(--aws-bg);color:var(--aws-text)}
+.aws-panel{background:var(--aws-surface);border:1px solid var(--aws-border);border-radius:12px}
+.aws-btn{background:var(--aws-accent);color:#111827;font-weight:700;border-radius:8px;padding:.6rem 1rem}
+.aws-btn-secondary{background:transparent;border:1px solid var(--aws-border);color:var(--aws-text);border-radius:8px;padding:.6rem 1rem}

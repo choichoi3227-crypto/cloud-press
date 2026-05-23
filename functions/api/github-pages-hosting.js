@@ -14,9 +14,9 @@
 //   /_config/
 //     plan.json          ← 플랜 설정
 //   /worker-site-mirror.js  ← Cloudflare Worker 소스 (레포에도 보관)
-//   /wp-transform.ts     ← 단일 Astro+TS 변환 파일 (PHP→Astro 브릿지)
+//   /wp-transform.ts     ← 단일 PHP 실시간 실행 브릿지 (접속 시 PHP 실행→결과 응답)
 //   .github/workflows/
-//     deploy.yml         ← Astro 빌드 + GitHub Pages 배포
+//     deploy.yml         ← WordPress DB 동기화
 //     php-keepalive.yml  ← PHP keep-alive (최대 20초 대기)
 //     cms-update.yml     ← CMS 콘텐츠 업데이트
 //     plan-monitor.yml   ← 일일 리소스 모니터링
@@ -210,11 +210,14 @@ function buildWordpressDb({ siteUrl, siteName, adminUser, adminEmail, passHash, 
 // 중요: php/js/css 파일들은 /wordpress/ 폴더에 원본 그대로 유지.
 // wp-transform.ts 단일 파일이 PHP→Astro 브릿지 역할을 합니다.
 
+// ── Astro 소스 파일 생성 ──────────────────────────────────────────────────────
+// 중요: Astro 정적 페이지 파일(src/pages/, src/layouts/ 등)은 레포에 없음.
+// wp-transform.ts 단일 파일이 PHP를 실시간 실행하여 그 결과를 그대로 응답합니다.
+
 function buildAstroSource({ siteName, siteUrl, siteId, adminUser, adminEmail, owner, repoName, planLimits }) {
   const ghRawBase = `https://raw.githubusercontent.com/${owner}/${repoName}/main`;
   const storageGb  = planLimits?.storage_gb ?? 5;
   const trafficGb  = planLimits?.traffic_gb ?? 100;
-  const wpBase     = `${ghRawBase}/wordpress`;
 
   return {
     // ── package.json ──────────────────────────────────────────────────────
@@ -224,39 +227,19 @@ function buildAstroSource({ siteName, siteUrl, siteId, adminUser, adminEmail, ow
       version: "1.0.0",
       engines: { node: ">=20.0.0" },
       scripts: {
-        dev:     "astro dev",
-        build:   "astro build",
-        preview: "astro preview",
+        dev:   "node wp-transform.ts",
+        start: "node wp-transform.ts",
       },
-      dependencies: {
-        "astro":              "^4.16.0",
-        "@astrojs/sitemap":   "^3.2.1",
-        "@astrojs/rss":       "^4.0.7",
-      },
+      dependencies: {},
     }, null, 2),
-
-    // ── astro.config.mjs ──────────────────────────────────────────────────
-    "astro.config.mjs": `import { defineConfig } from 'astro/config';
-import sitemap from '@astrojs/sitemap';
-
-const site = process.env.SITE_URL || '${siteUrl || `https://${owner}.github.io/${repoName}`}';
-
-export default defineConfig({
-  site,
-  base: '/',
-  integrations: [sitemap()],
-  output: 'static',
-  build: {
-    inlineStylesheets: 'auto',
-  },
-});
-`,
 
     // ── tsconfig.json ─────────────────────────────────────────────────────
     "tsconfig.json": JSON.stringify({
-      extends: "astro/tsconfigs/strict",
       compilerOptions: {
-        strictNullChecks: true,
+        target: "ES2022",
+        module: "ESNext",
+        moduleResolution: "bundler",
+        strict: true,
         allowJs: true,
         skipLibCheck: true,
       },
@@ -264,36 +247,178 @@ export default defineConfig({
 
     // ────────────────────────────────────────────────────────────────────────
     // wp-transform.ts — 핵심 단일 변환 파일
-    // PHP 파일들은 /wordpress/ 에 100% 원본 그대로.
-    // 이 파일 하나가 PHP→Astro 브릿지 역할:
-    //   - JS 파일 → TypeScript 타입 래퍼 제공
-    //   - PHP 파일 → Astro 컴포넌트 브릿지 제공
-    //   - 모든 WordPress 기능은 원본 PHP/JS에 100% 의존
+    // 사용자 접속 시 PHP 파일을 실시간으로 실행하고, 그 결과를 그대로 응답합니다.
+    // GitHub 레포에는 이 파일 하나만 있고, Astro 정적 페이지 파일은 없습니다.
+    // 모든 백엔드: PHP/JS 담당 | 프론트엔드: PHP 실행 결과를 그대로 응답
     // ────────────────────────────────────────────────────────────────────────
     "wp-transform.ts": `/**
- * wp-transform.ts — CloudPress WordPress PHP↔Astro 단일 변환 파일
+ * wp-transform.ts — CloudPress WordPress PHP 실시간 실행 브릿지
  *
- * ⚠️  이 파일 하나가 모든 PHP→Astro 변환을 담당합니다.
+ * ⚠️  이 파일 하나가 모든 PHP 실행을 담당합니다.
+ *     사용자가 접속하면 PHP 파일을 실시간으로 실행하고,
+ *     해당 PHP 실행 결과를 그대로 응답합니다.
+ *
  *     /wordpress/ 폴더의 PHP·JS·CSS 파일들은 100% 원본 그대로 유지됩니다.
- *     이 파일은 접속·이용·사용을 위한 브릿지이며,
- *     모든 WordPress 기능은 원본 PHP/JS 파일들에 의존합니다.
+ *     GitHub 레포에는 Astro 정적 페이지 파일이 없습니다.
  *
- * 역할:
- *   1. PHP 파일 경로 → Cloudflare Worker PHP_RUNNER URL 매핑
- *   2. JS 파일 → TypeScript 타입 선언 래핑
- *   3. WordPress REST API 응답 타입 정의
- *   4. Astro 빌드 시점 정적 페이지 생성 (PHP 응답 캐시)
- *   5. NGINX 스타일 캐싱 레이어 (Cache-Control 헤더 생성)
+ * 동작 방식:
+ *   1. 사용자 접속 → 요청 경로 파싱
+ *   2. 해당 경로의 WordPress PHP 파일을 실시간 실행 (PHP_RUNNER Service Binding)
+ *   3. PHP 실행 결과(HTML/JSON 등)를 그대로 응답
+ *   4. 정적 자산(css/js/images)은 GitHub raw에서 직접 서빙
  */
 
-// ── 환경 변수 ─────────────────────────────────────────────────────────────────
-const GH_RAW_BASE = '${ghRawBase}';
-const WP_BASE     = '${wpBase}';
-const SITE_URL    = import.meta.env.SITE_URL || '${siteUrl}';
-const SITE_ID     = '${siteId}';
+const GH_OWNER   = '${owner}';
+const GH_REPO    = '${repoName}';
+const GH_BRANCH  = 'main';
+const SITE_URL   = '${siteUrl}';
+const SITE_ID    = '${siteId}';
+const GH_RAW_BASE = 'https://raw.githubusercontent.com/${owner}/${repoName}/main';
+
+const STATIC_EXT = /\.(css|js|jpg|jpeg|png|gif|webp|avif|svg|ico|woff2?|ttf|eot|otf|map|txt|xml|pdf|zip|mp4|mp3|ogg|wav|webm)$/i;
+
+const SEC: Record<string, string> = {
+  'X-Content-Type-Options': 'nosniff',
+  'X-Frame-Options':        'SAMEORIGIN',
+  'Referrer-Policy':        'strict-origin-when-cross-origin',
+};
+
+function mime(p: string): string {
+  const ext = (p.split('.').pop() || '').toLowerCase();
+  const map: Record<string, string> = {
+    css:'text/css;charset=utf-8', js:'application/javascript;charset=utf-8',
+    json:'application/json;charset=utf-8', xml:'application/xml;charset=utf-8',
+    svg:'image/svg+xml', png:'image/png', jpg:'image/jpeg', jpeg:'image/jpeg',
+    gif:'image/gif', webp:'image/webp', avif:'image/avif', ico:'image/x-icon',
+    woff:'font/woff', woff2:'font/woff2', ttf:'font/ttf',
+    html:'text/html;charset=utf-8', php:'text/html;charset=utf-8',
+  };
+  return map[ext] || 'application/octet-stream';
+}
+
+function fixCharset(res: Response): Response {
+  const ct = res.headers.get('Content-Type') || '';
+  if (ct.includes('charset') || (!ct.includes('text/html') && !ct.includes('text/plain'))) return res;
+  const h = new Headers(res.headers);
+  h.set('Content-Type', ct.replace(/;\s*$/, '') + ';charset=utf-8');
+  return new Response(res.body, { status: res.status, statusText: res.statusText, headers: h });
+}
+
+async function ghRaw(filePath: string, ttl = 300): Promise<Response | null> {
+  try {
+    const res = await fetch(
+      \`\${GH_RAW_BASE}/\${filePath}\`,
+      { headers: { 'User-Agent': 'CloudPress/1' }, cf: { cacheEverything: true, cacheTtl: ttl } as any }
+    );
+    return res.ok ? res : null;
+  } catch { return null; }
+}
+
+function wp404(): Response {
+  return new Response(\`<!DOCTYPE html>
+<html lang="ko"><head><meta charset="UTF-8"><title>404</title></head>
+<body><h1>404 — 페이지를 찾을 수 없습니다</h1><a href="/">← 홈으로</a></body></html>\`,
+    { status: 404, headers: { ...SEC, 'Content-Type': 'text/html;charset=utf-8' } }
+  );
+}
+
+// ── PHP 실행 환경 타입 ────────────────────────────────────────────────────────
+interface Env {
+  PHP_RUNNER?: { fetch(req: Request): Promise<Response> };
+  CACHE?:      { get(k: string, t?: string): Promise<ArrayBuffer | null>; put(k: string, v: ArrayBuffer, opts?: object): Promise<void> };
+  GITHUB_TOKEN?: string;
+  SITE_NAME?:    string;
+}
+
+// ── 메인 핸들러: PHP 실시간 실행 → 결과 그대로 응답 ─────────────────────────
+export default {
+  async fetch(req: Request, env: Env, ctx: { waitUntil(p: Promise<unknown>): void }): Promise<Response> {
+    const url   = new URL(req.url);
+    const path  = url.pathname;
+    const isGet = req.method === 'GET' || req.method === 'HEAD';
+
+    // 1. PHP_RUNNER Service Binding으로 PHP 실시간 실행 → 결과 그대로 응답
+    if (env.PHP_RUNNER) {
+      try {
+        let body = '';
+        if (req.method !== 'GET' && req.method !== 'HEAD') {
+          body = await req.clone().text().catch(() => '');
+        }
+        // PHP 파일 경로 결정
+        let phpFile = path.endsWith('.php') ? path : '/index.php';
+        if (path.startsWith('/wp-admin') && !path.endsWith('.php')) {
+          phpFile = path.endsWith('/') ? path + 'index.php' : path + '/index.php';
+        }
+        const payload = {
+          phpFile,
+          phpEnv: {
+            REQUEST_URI:     path + url.search,
+            REQUEST_METHOD:  req.method,
+            HTTP_HOST:       url.host,
+            SERVER_NAME:     url.host,
+            HTTPS:           url.protocol === 'https:' ? 'on' : '',
+            HTTP_COOKIE:     req.headers.get('Cookie')       || '',
+            HTTP_USER_AGENT: req.headers.get('User-Agent')   || '',
+            CONTENT_TYPE:    req.headers.get('Content-Type') || '',
+            CONTENT_LENGTH:  String(body.length),
+            QUERY_STRING:    url.search.replace(/^\?/, ''),
+            GITHUB_OWNER:    GH_OWNER,
+            GITHUB_REPO:     GH_REPO,
+            GITHUB_TOKEN:    env.GITHUB_TOKEN || '',
+          },
+          stdin: body,
+          siteConfig: { githubOwner: GH_OWNER, githubRepo: GH_REPO, ghPagesUrl: SITE_URL },
+        };
+        const phpRes = await env.PHP_RUNNER.fetch(
+          new Request('https://php-runner/run-wordpress', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+          })
+        );
+        // PHP 실행 결과를 그대로 응답 (status < 500이면 정상)
+        if (phpRes.status < 500) return fixCharset(phpRes);
+      } catch {}
+    }
+
+    // 2. 정적 자산(css/js/이미지 등): KV 캐시 → GitHub raw 서빙
+    if (isGet && STATIC_EXT.test(path)) {
+      // KV 캐시 확인
+      if (env.CACHE) {
+        const cacheKey = \`wp:\${GH_OWNER}/\${GH_REPO}:\${path}\`;
+        try {
+          const cached = await env.CACHE.get(cacheKey, 'arrayBuffer');
+          if (cached) return new Response(cached, { headers: { 'Content-Type': mime(path), 'Cache-Control': 'public,max-age=604800,immutable', ...SEC } });
+        } catch {}
+      }
+      // WordPress 정적 자산 → GitHub raw
+      const assetPath = path.startsWith('/wp-content/') || path.startsWith('/wp-includes/') || path.startsWith('/wp-admin/')
+        ? 'wordpress' + path
+        : path.slice(1);
+      const res = await ghRaw(assetPath, 86400);
+      if (res) {
+        const buf = await res.arrayBuffer();
+        if (env.CACHE) {
+          const cacheKey = \`wp:\${GH_OWNER}/\${GH_REPO}:\${path}\`;
+          ctx.waitUntil(env.CACHE.put(cacheKey, buf, { expirationTtl: 86400 }));
+        }
+        return new Response(buf, { headers: { 'Content-Type': mime(path), 'Cache-Control': 'public,max-age=604800,immutable', ...SEC } });
+      }
+    }
+
+    // 3. PHP_RUNNER 없는 환경에서 GitHub Pages 폴백 (사이트 URL로 프록시)
+    if (isGet && SITE_URL) {
+      try {
+        const r = await fetch(SITE_URL + path + url.search);
+        if (r.ok) return fixCharset(r);
+      } catch {}
+    }
+
+    return wp404();
+  },
+};
 
 // ── WordPress 타입 정의 (JS 파일 → TS 타입 래핑) ──────────────────────────────
-
 export interface WPPost {
   ID:           number;
   post_title:   string;
@@ -320,421 +445,49 @@ export interface WPOption {
 }
 
 export interface WPSettings {
-  siteurl:     string;
-  blogname:    string;
+  siteurl:         string;
+  blogname:        string;
   blogdescription: string;
-  admin_email: string;
-  home:        string;
-  WPLANG:      string;
+  admin_email:     string;
+  home:            string;
+  WPLANG:          string;
 }
 
 export interface WPDb {
-  _version:  string;
-  _engine:   string;
-  _site_id:  string;
-  options:   WPOption[];
-  users:     WPUser[];
-  posts:     WPPost[];
+  _version: string;
+  _engine:  string;
+  _site_id: string;
+  options:  WPOption[];
+  users:    WPUser[];
+  posts:    WPPost[];
 }
 
-// ── DB 로더 (원본 _db/wordpress.db JSON → 타입화) ────────────────────────────
-// PHP 파일들이 실제로 읽는 파일을 그대로 타입 래핑합니다.
-
-export async function loadWPDb(): Promise<WPDb | null> {
-  try {
-    const res = await fetch(\`\${GH_RAW_BASE}/_db/wordpress.db\`, { cache: 'no-store' });
-    if (!res.ok) return null;
-    return await res.json() as WPDb;
-  } catch { return null; }
-}
-
-export async function getWPOption(db: WPDb | null, name: string): Promise<string> {
-  if (!db) return '';
-  return db.options.find(o => o.option_name === name)?.option_value ?? '';
-}
-
-export async function getWPSettings(db?: WPDb | null): Promise<WPSettings> {
-  const d = db ?? await loadWPDb();
-  const opt = (n: string) => d?.options.find(o => o.option_name === n)?.option_value ?? '';
-  return {
-    siteurl:         opt('siteurl')         || SITE_URL,
-    blogname:        opt('blogname')        || '${siteName}',
-    blogdescription: opt('blogdescription') || '',
-    admin_email:     opt('admin_email')     || '${adminEmail}',
-    home:            opt('home')            || SITE_URL,
-    WPLANG:          opt('WPLANG')          || 'ko_KR',
-  };
-}
-
-export async function getWPPosts(db?: WPDb | null): Promise<WPPost[]> {
-  const d = db ?? await loadWPDb();
-  if (!d?.posts) return [];
-  return d.posts
-    .filter(p => p.post_status === 'publish' && p.post_type === 'post')
-    .sort((a, b) => new Date(b.post_date).valueOf() - new Date(a.post_date).valueOf());
-}
-
-export async function getWPPost(slug: string, db?: WPDb | null): Promise<WPPost | null> {
-  const d = db ?? await loadWPDb();
-  return d?.posts.find(p => p.post_name === slug) ?? null;
-}
-
-// ── PHP 파일 경로 매핑 (PHP→Worker URL 브릿지) ───────────────────────────────
-// /wordpress/ 폴더의 PHP 파일 원본은 절대 수정하지 않습니다.
-// Cloudflare Worker(worker-site-mirror.js)의 PHP_RUNNER Service Binding을 통해
-// 실제 PHP 실행이 이루어집니다.
-
+// ── PHP 경로 → WordPress 파일 매핑 ───────────────────────────────────────────
 export const WP_PHP_ROUTES: Record<string, string> = {
-  '/':               '/index.php',
-  '/wp-login':       '/wp-login.php',
-  '/wp-admin':       '/wp-admin/index.php',
-  '/wp-admin/':      '/wp-admin/index.php',
-  '/wp-json':        '/index.php',  // REST API — WP가 처리
-  '/feed':           '/index.php',
-  '/sitemap.xml':    '/index.php',
-  '/robots.txt':     '/robots.txt',
+  '/':            '/index.php',
+  '/wp-login':    '/wp-login.php',
+  '/wp-admin':    '/wp-admin/index.php',
+  '/wp-admin/':   '/wp-admin/index.php',
+  '/wp-json':     '/index.php',
+  '/feed':        '/index.php',
+  '/sitemap.xml': '/index.php',
+  '/robots.txt':  '/robots.txt',
 };
 
-// PHP 경로 → Worker PHP_RUNNER 요청 URL 빌더
-export function buildPhpRunnerUrl(path: string, siteUrl: string): string {
-  const base = siteUrl.replace(/\\/$/, '');
-  return \`\${base}\${path}\`;
-}
-
-// ── JS 파일 → TypeScript 모듈 래퍼 ───────────────────────────────────────────
-// WordPress의 JS 파일들은 원본 그대로.
-// 이 래퍼는 Astro 빌드 시 타입 정보만 제공합니다.
-
-export interface WPScriptHandle {
-  handle: string;
-  src:    string;
-  deps:   string[];
-  ver:    string;
-  args:   string | boolean;
-}
-
-// WordPress 기본 스크립트 목록 (wp-includes/js/ 원본에 의존)
-export const WP_CORE_SCRIPTS: WPScriptHandle[] = [
-  { handle: 'jquery',         src: '/wp-includes/js/jquery/jquery.min.js',      deps: [],         ver: '3.7.1',  args: false },
-  { handle: 'jquery-core',    src: '/wp-includes/js/jquery/jquery.min.js',      deps: [],         ver: '3.7.1',  args: false },
-  { handle: 'wp-embed',       src: '/wp-includes/js/wp-embed.min.js',           deps: [],         ver: '6.7',    args: false },
-  { handle: 'comment-reply',  src: '/wp-includes/js/comment-reply.min.js',      deps: [],         ver: '6.7',    args: false },
-];
-
-// ── NGINX 스타일 캐시 헤더 생성 ───────────────────────────────────────────────
-// worker-site-mirror.js의 캐싱 정책과 동기화됩니다.
-
+// ── 캐시 헤더 생성 (NGINX 스타일) ─────────────────────────────────────────────
 export function buildCacheHeaders(path: string): Record<string, string> {
-  // 정적 자산 (css/js/images) → 7일 불변 캐시
-  if (/\\.(css|js|jpg|jpeg|png|gif|webp|avif|svg|ico|woff2?|ttf|eot|otf)$/i.test(path)) {
-    return {
-      'Cache-Control': 'public, max-age=604800, immutable',
-      'Vary':          'Accept-Encoding',
-    };
+  if (STATIC_EXT.test(path)) {
+    return { 'Cache-Control': 'public, max-age=604800, immutable', 'Vary': 'Accept-Encoding' };
   }
-  // PHP 페이지 → 1분 캐시 (CDN 60초, 브라우저 no-store)
   if (path.endsWith('.php') || path === '/' || !path.includes('.')) {
-    return {
-      'Cache-Control': 'public, s-maxage=60, max-age=0, must-revalidate',
-      'Vary':          'Accept-Encoding, Cookie',
-      'X-Cache-Rules': 'wp-dynamic',
-    };
+    return { 'Cache-Control': 'public, s-maxage=60, max-age=0, must-revalidate', 'Vary': 'Accept-Encoding, Cookie', 'X-Cache-Rules': 'wp-dynamic' };
   }
   return { 'Cache-Control': 'public, max-age=300' };
 }
 
-// ── Astro 빌드용 정적 경로 생성 ───────────────────────────────────────────────
-// PHP 파일 원본은 유지하되, Astro가 정적 캐시 HTML을 생성합니다.
-// 실제 동적 요청은 Cloudflare Worker PHP_RUNNER가 처리합니다.
-
-export async function getStaticWPPaths(): Promise<Array<{ params: { slug: string } }>> {
-  const db    = await loadWPDb();
-  const posts = await getWPPosts(db);
-  return posts.map(p => ({ params: { slug: p.post_name } }));
-}
-
-// ── WordPress 스타일 날짜 포맷 ────────────────────────────────────────────────
-export function wpDateFormat(dateStr: string): string {
-  try {
-    const d = new Date(dateStr);
-    return d.toLocaleDateString('ko-KR', {
-      year: 'numeric', month: 'long', day: 'numeric',
-    });
-  } catch { return dateStr; }
-}
-
-// ── Markdown → HTML (WordPress 글 본문용) ────────────────────────────────────
-export function markdownToHtml(md: string): string {
-  if (!md) return '';
-  return md
-    .replace(/^### (.+)$/gm, '<h3>$1</h3>')
-    .replace(/^## (.+)$/gm,  '<h2>$1</h2>')
-    .replace(/^# (.+)$/gm,   '<h1>$1</h1>')
-    .replace(/\\*\\*(.+?)\\*\\*/g, '<strong>$1</strong>')
-    .replace(/\\*(.+?)\\*/g,     '<em>$1</em>')
-    .replace(/\`(.+?)\`/g,      '<code>$1</code>')
-    .replace(/^> (.+)$/gm,    '<blockquote>$1</blockquote>')
-    .replace(/^- (.+)$/gm,    '<li>$1</li>')
-    .replace(/(<li>.*<\\/li>\\n?)+/gs, m => \`<ul>\${m}</ul>\`)
-    .replace(/\\[(.+?)\\]\\((.+?)\\)/g, '<a href="$2">$1</a>')
-    .replace(/!\\[(.*)\\]\\((.+?)\\)/g, '<img alt="$1" src="$2" loading="lazy">')
-    .replace(/\\n\\n/g, '</p><p>');
-}
-
-export default {
-  loadWPDb,
-  getWPSettings,
-  getWPPosts,
-  getWPPost,
-  getStaticWPPaths,
-  buildCacheHeaders,
-  markdownToHtml,
-  wpDateFormat,
-  WP_PHP_ROUTES,
-  WP_CORE_SCRIPTS,
-  SITE_URL,
-  SITE_ID,
-};
+export const SITE_URL_EXPORT = SITE_URL;
+export const SITE_ID_EXPORT  = SITE_ID;
 `,
-
-    // ── src/lib/db.ts ─────────────────────────────────────────────────────
-    // wp-transform.ts를 re-export하여 기존 Astro 페이지와 호환
-    "src/lib/db.ts": `// src/lib/db.ts — wp-transform.ts 브릿지 re-export
-// WordPress 데이터는 wp-transform.ts를 통해 _db/wordpress.db 에서 로드됩니다.
-export {
-  loadWPDb, getWPSettings, getWPPosts, getWPPost,
-  getStaticWPPaths, buildCacheHeaders, markdownToHtml, wpDateFormat,
-  type WPPost, type WPUser, type WPOption, type WPSettings, type WPDb,
-} from '../../wp-transform';
-
-const REPO_RAW = '${ghRawBase}';
-
-export const PLAN_LIMITS = {
-  storage_gb:  ${storageGb},
-  traffic_gb:  ${trafficGb === null ? "null" : trafficGb},
-  custom_domain: ${planLimits?.custom_domain ?? false},
-  backups:     ${planLimits?.backups ?? false},
-};
-
-// WordPress post content (_content/posts/<slug>.md)
-export async function getPostContent(slug: string): Promise<string> {
-  try {
-    const res = await fetch(\`\${REPO_RAW}/_content/posts/\${slug}.md\`, { cache: 'no-store' });
-    if (!res.ok) return '';
-    const text = await res.text();
-    return text.replace(/^---[\\s\\S]*?---\\n?/, '').trim();
-  } catch { return ''; }
-}
-
-// 하위 호환 — getSettings()
-export async function getSettings() {
-  const { getWPSettings } = await import('../../wp-transform');
-  return getWPSettings();
-}
-
-// 하위 호환 — getPosts()
-export async function getPosts(status = 'publish') {
-  const { getWPPosts, loadWPDb } = await import('../../wp-transform');
-  const db = await loadWPDb();
-  if (!db) return [];
-  return db.posts
-    .filter((p: any) => status === 'all' || p.post_status === status)
-    .sort((a: any, b: any) => new Date(b.post_date).valueOf() - new Date(a.post_date).valueOf());
-}
-
-export async function getPost(slug: string) {
-  const { getWPPost } = await import('../../wp-transform');
-  return getWPPost(slug);
-}
-`,
-
-    // ── src/lib/markdown.ts ───────────────────────────────────────────────
-    "src/lib/markdown.ts": `export { markdownToHtml } from '../../wp-transform';
-`,
-
-    // ── src/layouts/Base.astro ────────────────────────────────────────────
-    "src/layouts/Base.astro": `---
-import { getSettings } from '../lib/db';
-interface Props { title?: string; description?: string; }
-const { title, description } = Astro.props;
-const settings = await getSettings();
-const pageTitle = title ? \`\${title} — \${settings.blogname}\` : settings.blogname;
-const siteUrl   = settings.siteurl || '${siteUrl}';
----
-<!DOCTYPE html>
-<html lang="ko">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>{pageTitle}</title>
-  {description && <meta name="description" content={description} />}
-  <link rel="stylesheet" href="/styles/global.css">
-  <link rel="alternate" type="application/rss+xml" title={settings.blogname} href="/rss.xml">
-  <link rel="sitemap" href="/sitemap-index.xml">
-  <meta name="generator" content="CloudPress + WordPress + Astro">
-  <!-- WordPress 핵심 스크립트 (원본 PHP 의존) -->
-  <script src="/wp-includes/js/jquery/jquery.min.js" defer></script>
-</head>
-<body class="wp-site">
-  <header id="masthead" class="site-header">
-    <div class="container header-inner">
-      <a href="/" class="site-title">{settings.blogname}</a>
-      <nav id="site-navigation">
-        <a href="/">홈</a>
-        <a href="/blog">블로그</a>
-        <a href="/wp-admin" rel="noopener">관리자</a>
-      </nav>
-    </div>
-  </header>
-  <div id="page" class="site">
-    <main id="main" class="site-main container">
-      <slot />
-    </main>
-  </div>
-  <footer id="colophon" class="site-footer">
-    <div class="container">
-      <p>© {new Date().getFullYear()} {settings.blogname} · Powered by <a href="https://wordpress.org">WordPress</a> + <a href="https://cloudpress.app">CloudPress</a></p>
-    </div>
-  </footer>
-  <!-- WordPress comment-reply (원본 JS 의존) -->
-  <script src="/wp-includes/js/comment-reply.min.js" defer></script>
-</body>
-</html>
-`,
-
-    // ── src/styles/global.css ─────────────────────────────────────────────
-    "src/styles/global.css": `/* CloudPress WordPress 테마 스타일 */
-*,*::before,*::after{box-sizing:border-box;margin:0}
-body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Oxygen-Sans,Ubuntu,Cantarell,'Helvetica Neue',sans-serif;line-height:1.75;color:#222;background:#fff}
-a{color:#0073aa;text-decoration:none}a:hover{text-decoration:underline;color:#005177}
-h1,h2,h3,h4,h5,h6{line-height:1.3;margin:1.5rem 0 .75rem;font-weight:700}
-p{margin-bottom:1rem}img{max-width:100%;height:auto}
-pre{overflow-x:auto;padding:1rem;background:#f6f8fa;border-radius:6px;margin-bottom:1rem}
-code{background:#f6f8fa;padding:2px 6px;border-radius:3px;font-size:.9em}
-blockquote{border-left:4px solid #e5e7eb;padding-left:1rem;color:#6b7280;margin:1rem 0}
-.container{max-width:860px;margin:0 auto;padding:0 1.5rem}
-/* 헤더 — NGINX 스타일 sticky + blur */
-.site-header{border-bottom:1px solid #e5e7eb;padding:1rem 0;position:sticky;top:0;background:rgba(255,255,255,.97);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);z-index:100;box-shadow:0 1px 3px rgba(0,0,0,.06)}
-.header-inner{display:flex;justify-content:space-between;align-items:center}
-.site-title{font-size:1.35rem;font-weight:800;color:#111;letter-spacing:-.02em}
-#site-navigation a{margin-left:1.5rem;color:#555;font-weight:500;font-size:.925rem;transition:color .15s}
-#site-navigation a:hover{color:#0073aa;text-decoration:none}
-.site-main{padding:2.5rem 0 4rem;min-height:65vh}
-.site-footer{border-top:1px solid #e5e7eb;padding:2rem 0;text-align:center;color:#9ca3af;font-size:.875rem}
-/* WordPress 포스트 스타일 */
-.post-list{list-style:none;padding:0;display:grid;gap:2.5rem}
-.post-card{border-bottom:1px solid #f3f4f6;padding-bottom:2.5rem}
-.post-card:last-child{border-bottom:none}
-.entry-title{font-size:1.5rem;font-weight:700;margin:0 0 .5rem;line-height:1.35}
-.entry-meta{color:#9ca3af;font-size:.85rem;margin-bottom:.75rem}
-.entry-excerpt{color:#4b5563;font-size:.975rem}
-.wp-tag{display:inline-block;background:#f3f4f6;color:#374151;padding:2px 10px;border-radius:99px;font-size:.78rem;margin:2px;border:1px solid #e5e7eb}
-.prose h1{font-size:2rem}.prose h2{font-size:1.6rem}.prose h3{font-size:1.3rem}
-.prose p{margin-bottom:1.25rem}
-/* 관리자 링크 스타일 */
-a[href="/wp-admin"]{background:#0073aa;color:#fff!important;padding:4px 12px;border-radius:4px;font-size:.82rem}
-a[href="/wp-admin"]:hover{background:#005177;text-decoration:none!important}
-`,
-
-    // ── src/pages/index.astro ─────────────────────────────────────────────
-    "src/pages/index.astro": `---
-import Base from '../layouts/Base.astro';
-import { getPosts, getSettings } from '../lib/db';
-const settings = await getSettings();
-const posts    = (await getPosts()).slice(0, Number(settings.posts_per_page || 10));
----
-<Base>
-  <h1 class="entry-title" style="font-size:2rem;margin-bottom:2rem;">{settings.blogdescription || '최근 글'}</h1>
-  {posts.length === 0
-    ? <p style="color:#9ca3af;">아직 작성된 글이 없습니다. <a href="/wp-admin">관리자 패널</a>에서 첫 글을 작성하세요.</p>
-    : <ul class="post-list">
-        {posts.map((post: any) => (
-          <li class="post-card">
-            <div class="entry-meta">{new Date(post.post_date).toLocaleDateString('ko-KR')} · {post.post_author}</div>
-            <div class="entry-title"><a href={\`/blog/\${post.post_name}\`}>{post.post_title}</a></div>
-            {post.post_excerpt && <p class="entry-excerpt">{post.post_excerpt}</p>}
-          </li>
-        ))}
-      </ul>
-  }
-</Base>
-`,
-
-    // ── src/pages/blog/index.astro ────────────────────────────────────────
-    "src/pages/blog/index.astro": `---
-import Base from '../../layouts/Base.astro';
-import { getPosts } from '../../lib/db';
-const posts = await getPosts();
----
-<Base title="블로그">
-  <h1 style="font-size:2rem;font-weight:800;margin-bottom:2rem;">블로그</h1>
-  {posts.length === 0
-    ? <p style="color:#9ca3af;">아직 작성된 글이 없습니다.</p>
-    : <ul class="post-list">
-        {posts.map((post: any) => (
-          <li class="post-card">
-            <div class="entry-meta">{new Date(post.post_date).toLocaleDateString('ko-KR')}</div>
-            <div class="entry-title"><a href={\`/blog/\${post.post_name}\`}>{post.post_title}</a></div>
-            {post.post_excerpt && <p class="entry-excerpt">{post.post_excerpt}</p>}
-          </li>
-        ))}
-      </ul>
-  }
-</Base>
-`,
-
-    // ── src/pages/blog/[slug].astro ───────────────────────────────────────
-    "src/pages/blog/[slug].astro": `---
-import Base from '../../layouts/Base.astro';
-import { getPosts, getPost, getPostContent } from '../../lib/db';
-import { markdownToHtml } from '../../lib/markdown';
-export async function getStaticPaths() {
-  const posts = await getPosts();
-  return posts.map((p: any) => ({ params: { slug: p.post_name }, props: { post: p } }));
-}
-const { post }    = Astro.props;
-const mdContent   = await getPostContent(post.post_name);
-const htmlContent = markdownToHtml(mdContent || post.post_content || '');
----
-<Base title={post.post_title}>
-  <article class="hentry">
-    <header style="margin-bottom:2.5rem;">
-      <h1 class="entry-title" style="font-size:2.2rem;">{post.post_title}</h1>
-      <div class="entry-meta">
-        {new Date(post.post_date).toLocaleDateString('ko-KR')}
-      </div>
-    </header>
-    <div class="prose entry-content" set:html={htmlContent} />
-    <div style="margin-top:3rem;padding-top:2rem;border-top:1px solid #e5e7eb;">
-      <a href="/blog">← 목록으로</a>
-    </div>
-  </article>
-</Base>
-`,
-
-    // ── src/pages/rss.xml.ts ──────────────────────────────────────────────
-    "src/pages/rss.xml.ts": `import rss from '@astrojs/rss';
-import { getPosts, getSettings } from '../lib/db';
-import type { APIContext } from 'astro';
-export async function GET(context: APIContext) {
-  const settings = await getSettings();
-  const posts    = await getPosts();
-  return rss({
-    title:       settings.blogname,
-    description: settings.blogdescription,
-    site:        context.site!,
-    items: posts.map((p: any) => ({
-      title:       p.post_title,
-      pubDate:     new Date(p.post_date),
-      description: p.post_excerpt || '',
-      link:        \`/blog/\${p.post_name}/\`,
-    })),
-  });
-}
-`,
-
-    // ── public/favicon.svg ────────────────────────────────────────────────
-    "public/favicon.svg": `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><text y=".9em" font-size="90">☁️</text></svg>`,
 
     // ── public/robots.txt ─────────────────────────────────────────────────
     "public/robots.txt": `User-agent: *
@@ -751,39 +504,27 @@ Sitemap: ${siteUrl}/sitemap-index.xml
 function buildGithubActionsWorkflows({ siteId, owner, repoName, siteUrl, adminUser, adminEmail }) {
   return {
     // ── 메인 배포 워크플로우 ──────────────────────────────────────────────
-    ".github/workflows/deploy.yml": `name: WordPress Astro 빌드 & GitHub Pages 배포
+    ".github/workflows/deploy.yml": `name: WordPress DB 동기화 & 사이트 유지관리
 
 on:
   push:
     branches: [main]
     paths:
-      - 'src/**'
       - '_db/**'
-      - '_content/**'
-      - 'public/**'
-      - 'astro.config.mjs'
-      - 'package.json'
-      - 'wp-transform.ts'
       - 'wordpress/**'
+      - 'wp-transform.ts'
+      - '_content/**'
+      - '_config/**'
   workflow_dispatch:
     inputs:
       reason:
-        description: '수동 배포 사유'
+        description: '수동 실행 사유'
         required: false
-        default: '수동 빌드'
-
-permissions:
-  contents: read
-  pages: write
-  id-token: write
-
-concurrency:
-  group: "pages"
-  cancel-in-progress: false
+        default: '수동 실행'
 
 jobs:
-  build:
-    name: Astro 빌드
+  sync:
+    name: WordPress DB 동기화
     runs-on: ubuntu-latest
     steps:
       - name: 저장소 체크아웃
@@ -791,7 +532,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: PHP 환경 설정 (WordPress 정적 캐시 생성용)
+      - name: PHP 환경 설정
         uses: shivammathur/setup-php@v2
         with:
           php-version: '8.3'
@@ -799,123 +540,38 @@ jobs:
           ini-values: memory_limit=256M, max_execution_time=60
           coverage: none
 
-      - name: _db/wordpress.db → SQLite 변환 (PHP 액션)
+      - name: _db/wordpress.db 검증 및 SQLite 변환
         run: |
           echo "🔄 wordpress.db JSON → SQLite 변환 중..."
+          if [ ! -f "_db/wordpress.db" ]; then
+            echo "ℹ️ _db/wordpress.db 없음 - 건너뜀"
+            exit 0
+          fi
           php -r "
-          if (!file_exists('_db/wordpress.db')) {
-            echo '_db/wordpress.db 없음 - 건너뜀\\n';
-            exit(0);
-          }
-          \\$json = file_get_contents('_db/wordpress.db');
-          \\$data = json_decode(\\$json, true);
-          if (!\\$data) { echo 'JSON 파싱 오류\\n'; exit(0); }
-          
-          // SQLite 파일 생성
-          \\$pdo = new PDO('sqlite:_db/wordpress.sqlite');
-          \\$pdo->exec('PRAGMA journal_mode=WAL;');
-          
-          // options 테이블
-          \\$pdo->exec('CREATE TABLE IF NOT EXISTS wp_options (option_id INTEGER PRIMARY KEY AUTOINCREMENT, option_name TEXT UNIQUE, option_value TEXT, autoload TEXT DEFAULT yes)');
-          \\$stmt = \\$pdo->prepare('INSERT OR REPLACE INTO wp_options (option_name, option_value, autoload) VALUES (?,?,?)');
-          foreach (\\$data['options'] ?? [] as \\$opt) {
-            \\$stmt->execute([\\$opt['option_name'], \\$opt['option_value'], \\$opt['autoload'] ?? 'yes']);
-          }
-          
-          // users 테이블
-          \\$pdo->exec('CREATE TABLE IF NOT EXISTS wp_users (ID INTEGER PRIMARY KEY, user_login TEXT, user_pass TEXT, user_email TEXT, user_url TEXT, user_registered TEXT, display_name TEXT, user_status INTEGER DEFAULT 0)');
-          \\$stmt = \\$pdo->prepare('INSERT OR REPLACE INTO wp_users VALUES (?,?,?,?,?,?,?,?)');
-          foreach (\\$data['users'] ?? [] as \\$u) {
-            \\$stmt->execute([\\$u['ID'], \\$u['user_login'], \\$u['user_pass'], \\$u['user_email'], \\$u['user_url'] ?? '', \\$u['user_registered'] ?? date('Y-m-d H:i:s'), \\$u['display_name'], \\$u['user_status'] ?? 0]);
-          }
-          
-          // posts 테이블
-          \\$pdo->exec('CREATE TABLE IF NOT EXISTS wp_posts (ID INTEGER PRIMARY KEY, post_author INTEGER, post_date TEXT, post_content TEXT, post_title TEXT, post_status TEXT, post_name TEXT, post_type TEXT DEFAULT post, post_modified TEXT, comment_status TEXT DEFAULT open)');
-          \\$stmt = \\$pdo->prepare('INSERT OR REPLACE INTO wp_posts (ID,post_author,post_date,post_date_gmt,post_content,post_title,post_status,post_name,post_type,post_modified,comment_status) VALUES (?,?,?,?,?,?,?,?,?,?,?)');
-          foreach (\\$data['posts'] ?? [] as \\$p) {
-            \\$stmt->execute([\\$p['ID'], \\$p['post_author'] ?? 1, \\$p['post_date'], \\$p['post_date_gmt'] ?? \\$p['post_date'], \\$p['post_content'] ?? '', \\$p['post_title'], \\$p['post_status'] ?? 'publish', \\$p['post_name'], \\$p['post_type'] ?? 'post', \\$p['post_modified'] ?? \\$p['post_date'], \\$p['comment_status'] ?? 'open']);
-          }
-          
-          echo '✅ SQLite 변환 완료 → _db/wordpress.sqlite\\n';
+          \$json = file_get_contents('_db/wordpress.db');
+          \$data = json_decode(\$json, true);
+          if (!\$data) { echo '❌ JSON 파싱 오류\n'; exit(1); }
+          \$pdo = new PDO('sqlite:_db/wordpress.sqlite');
+          \$pdo->exec('PRAGMA journal_mode=WAL;');
+          \$pdo->exec('CREATE TABLE IF NOT EXISTS wp_options (option_id INTEGER PRIMARY KEY AUTOINCREMENT, option_name TEXT UNIQUE, option_value TEXT, autoload TEXT DEFAULT yes)');
+          \$stmt = \$pdo->prepare('INSERT OR REPLACE INTO wp_options (option_name, option_value, autoload) VALUES (?,?,?)');
+          foreach (\$data['options'] ?? [] as \$opt) { \$stmt->execute([\$opt['option_name'], \$opt['option_value'], \$opt['autoload'] ?? 'yes']); }
+          \$pdo->exec('CREATE TABLE IF NOT EXISTS wp_users (ID INTEGER PRIMARY KEY, user_login TEXT, user_pass TEXT, user_email TEXT, user_url TEXT, user_registered TEXT, display_name TEXT, user_status INTEGER DEFAULT 0)');
+          \$stmt = \$pdo->prepare('INSERT OR REPLACE INTO wp_users VALUES (?,?,?,?,?,?,?,?)');
+          foreach (\$data['users'] ?? [] as \$u) { \$stmt->execute([\$u['ID'], \$u['user_login'], \$u['user_pass'], \$u['user_email'], \$u['user_url'] ?? '', \$u['user_registered'] ?? date('Y-m-d H:i:s'), \$u['display_name'], \$u['user_status'] ?? 0]); }
+          \$pdo->exec('CREATE TABLE IF NOT EXISTS wp_posts (ID INTEGER PRIMARY KEY, post_author INTEGER, post_date TEXT, post_date_gmt TEXT, post_content TEXT, post_title TEXT, post_status TEXT, post_name TEXT, post_type TEXT DEFAULT post, post_modified TEXT, comment_status TEXT DEFAULT open)');
+          \$stmt = \$pdo->prepare('INSERT OR REPLACE INTO wp_posts (ID,post_author,post_date,post_date_gmt,post_content,post_title,post_status,post_name,post_type,post_modified,comment_status) VALUES (?,?,?,?,?,?,?,?,?,?,?)');
+          foreach (\$data['posts'] ?? [] as \$p) { \$stmt->execute([\$p['ID'], \$p['post_author'] ?? 1, \$p['post_date'], \$p['post_date_gmt'] ?? \$p['post_date'], \$p['post_content'] ?? '', \$p['post_title'], \$p['post_status'] ?? 'publish', \$p['post_name'], \$p['post_type'] ?? 'post', \$p['post_modified'] ?? \$p['post_date'], \$p['comment_status'] ?? 'open']); }
+          echo '✅ SQLite 변환 완료 → _db/wordpress.sqlite\n';
           "
 
-      - name: WordPress PHP 정적 캐시 생성 (php-runner 보조)
+      - name: 변경사항 커밋 (SQLite 파일)
         run: |
-          echo "🔄 WordPress PHP 페이지 정적 캐시 생성 중..."
-          mkdir -p _cache
-          
-          # wp-config.php가 있으면 PHP CLI로 정적 HTML 생성
-          if [ -f "wordpress/wp-config.php" ]; then
-            php -r "
-            \\$_SERVER['HTTP_HOST']   = getenv('SITE_HOST') ?: '${owner}.github.io';
-            \\$_SERVER['REQUEST_URI'] = '/';
-            \\$_SERVER['REQUEST_METHOD'] = 'GET';
-            define('ABSPATH', realpath('wordpress/') . '/');
-            ob_start();
-            @include 'wordpress/index.php';
-            \\$html = ob_get_clean();
-            if (\\$html && strlen(\\$html) > 100) {
-              file_put_contents('_cache/index.html', \\$html);
-              echo '✅ 홈 페이지 캐시 생성 완료\\n';
-            } else {
-              echo '⚠️ PHP 실행 결과 없음 - 폴백 사용\\n';
-            }
-            " 2>/dev/null || echo "⚠️ WordPress PHP CLI 실행 실패 - Worker PHP_RUNNER 사용"
-          else
-            echo "ℹ️ wordpress/wp-config.php 없음 - Cloudflare Worker PHP_RUNNER 사용"
-          fi
-        env:
-          SITE_HOST: \${{ secrets.SITE_URL || '${owner}.github.io' }}
-
-      - name: Node.js 20 설정
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-          cache: 'npm'
-          cache-dependency-path: 'package.json'
-
-      - name: Astro 패키지 설치
-        run: |
-          echo "📦 Astro 패키지 설치 중..."
-          npm install --prefer-offline || npm install
-          echo "✅ 패키지 설치 완료"
-          npx astro --version
-
-      - name: Astro 빌드
-        env:
-          GITHUB_TOKEN: \${{ secrets.GITHUB_TOKEN }}
-          SITE_URL: \${{ secrets.SITE_URL || '${siteUrl}' }}
-          SITE_ID: ${siteId}
-        run: |
-          echo "🚀 Astro 빌드 시작..."
-          npm run build
-          echo "✅ 빌드 완료"
-          ls -la dist/
-
-      - name: 빌드 검증
-        run: |
-          if [ ! -f "dist/index.html" ]; then
-            echo "❌ dist/index.html 없음"
-            exit 1
-          fi
-          echo "✅ 빌드 결과 검증 완료 ($(find dist -type f | wc -l)개 파일)"
-
-      - name: Pages artifact 업로드
-        uses: actions/upload-pages-artifact@v3
-        with:
-          path: ./dist
-
-  deploy:
-    name: GitHub Pages 배포
-    needs: build
-    runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: \${{ steps.deployment.outputs.page_url }}
-    steps:
-      - name: GitHub Pages 배포
-        uses: actions/deploy-pages@v4
-        id: deployment
+          git config user.name "CloudPress Bot"
+          git config user.email "bot@cloudpress.app"
+          git add _db/wordpress.sqlite || true
+          git diff --staged --quiet || git commit -m "sync: wordpress.db → wordpress.sqlite"
+          git push || true
 `,
 
     // ── PHP keep-alive 워크플로우 (요청사항 6) ────────────────────────────
@@ -1068,7 +724,7 @@ jobs:
           done
           echo "모든 DB 파일 정상"
 
-      - name: Astro 빌드 트리거
+      - name: DB 동기화 트리거
         if: inputs.action == 'rebuild'
         uses: actions/github-script@v7
         with:
@@ -1080,7 +736,7 @@ jobs:
               ref: 'main',
               inputs: { reason: '콘텐츠 업데이트' },
             });
-            console.log('✅ 배포 워크플로우 트리거 완료');
+            console.log('✅ DB 동기화 워크플로우 트리거 완료');
 `,
 
     // ── 플랜 모니터링 워크플로우 ──────────────────────────────────────────
@@ -1140,7 +796,7 @@ export async function initGithubPagesRepo({
   planLimits,
   log,
 }) {
-  await log("📁 GitHub 레포 초기화 중 (WordPress DB + Astro 소스 생성)...");
+  await log("📁 GitHub 레포 초기화 중 (WordPress DB + wp-transform.ts 생성)...");
 
   const passHash = await hashPassword(adminPass);
   const now      = new Date().toISOString();
@@ -1241,8 +897,8 @@ status: "publish"
   }], postsSha, "init: welcome post meta");
   await delay(PROVISION_DELAYS.between_db_files);
 
-  // ── STEP D: Astro 소스 파일 생성 (wp-transform.ts 포함) ──────────────────
-  await log("  [D] Astro 소스 파일 생성 중 (wp-transform.ts 포함)...");
+  // ── STEP D: wp-transform.ts 및 기본 파일 생성 ──────────────────────────────
+  await log("  [D] 기본 파일 생성 중 (wp-transform.ts 포함)...");
   const astroFiles = buildAstroSource({
     siteName, siteUrl: siteUrl || getGithubPagesUrl(owner, repoName),
     siteId, adminUser, adminEmail, owner, repoName, planLimits,
@@ -1253,9 +909,9 @@ status: "publish"
     await ghPutFile(token, owner, repoName, path, content, `init: ${path}`, null).catch(() => {});
     fileCount++;
     await delay(PROVISION_DELAYS.between_src_files);
-    if (fileCount % 3 === 0) await log(`  📄 Astro 소스 ${fileCount}/${Object.keys(astroFiles).length}개 생성 중...`);
+    if (fileCount % 3 === 0) await log(`  📄 파일 ${fileCount}/${Object.keys(astroFiles).length}개 생성 중...`);
   }
-  await log(`  ✅ Astro 소스 ${fileCount}개 파일 생성 완료 (wp-transform.ts 포함)`);
+  await log(`  ✅ ${fileCount}개 파일 생성 완료 (wp-transform.ts 포함)`);
 
   // ── STEP E: worker-site-mirror.js 레포에 업로드 (요청사항 3) ─────────────
   await log("  [E] worker-site-mirror.js 업로드 중 (Cloudflare Worker 소스)...");
@@ -1493,7 +1149,7 @@ CloudPress WordPress 호스팅으로 생성된 사이트입니다.
 /wordpress/       ← WordPress PHP 파일 (원본 그대로)
 /wp-transform.ts  ← PHP↔Astro 단일 변환 파일
 /worker-site-mirror.js ← Cloudflare Worker 소스
-/src/             ← Astro 소스
+/public/          ← 공개 정적 파일
 \`\`\`
 
 ## 관리자 접속
@@ -1688,22 +1344,7 @@ export async function configureGithubPagesCustomDomainWithToken({ token, owner, 
     } catch {}
   }
 
-  // astro.config.mjs의 SITE_URL도 갱신 (빌드 시 반영)
-  const astroConfigFile = await ghGetFile(token, owner, repoName, "astro.config.mjs").catch(() => null);
-  if (astroConfigFile) {
-    try {
-      const newConfig = astroConfigFile.content.replace(
-        /const site = [^;]+;/,
-        `const site = process.env.SITE_URL || '${domainUrl}';`
-      );
-      if (newConfig !== astroConfigFile.content) {
-        await ghPutFile(token, owner, repoName, "astro.config.mjs",
-          newConfig,
-          `chore: update SITE_URL → ${domainUrl}`,
-          astroConfigFile.sha).catch(() => {});
-      }
-    } catch {}
-  }
+
 
   // 재빌드 트리거
   await ghReq("POST", `/repos/${owner}/${repoName}/actions/workflows/deploy.yml/dispatches`,

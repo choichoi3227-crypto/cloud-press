@@ -1496,9 +1496,9 @@ async function ghRaw(filePath: string, ttl = 300): Promise<Response | null> {
 }
 
 function wp404(): Response {
-  return new Response(\\`<!DOCTYPE html>
+  return new Response(\`<!DOCTYPE html>
 <html lang="ko"><head><meta charset="UTF-8"><title>404</title></head>
-<body><h1>404 — 페이지를 찾을 수 없습니다</h1><a href="/">← 홈으로</a></body></html>\\`,
+<body><h1>404 — 페이지를 찾을 수 없습니다</h1><a href="/">← 홈으로</a></body></html>\`,
     { status: 404, headers: { ...SEC, 'Content-Type': 'text/html;charset=utf-8' } }
   );
 }

@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>전체 서비스 | CloudPress</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" rel="stylesheet">
+</head>
+<body class="bg-[#050505] text-white md:flex md:h-screen">
+<script>if(!localStorage.getItem('admin_token'))location.href='/login';</script>
+<main class="flex-1 p-8 overflow-y-auto">
+    <h1 class="text-2xl font-bold mb-2">전체 서비스 관리</h1>
+    <p class="text-gray-500 text-sm mb-8">AWS 콘솔처럼 CloudPress 상품을 한곳에서 관리합니다.</p>
+    <div id="services-grid" class="grid md:grid-cols-2 gap-6"></div>
+</main>
+<script src="/src/sidebar.js"></script>
+<script>
+const H = () => ({ Authorization: 'Bearer ' + localStorage.getItem('admin_token'), 'Content-Type': 'application/json' });
+const SERVICES = [
+  { id: 'hosting', name: 'WordPress 호스팅', icon: 'fa-server', color: 'blue', href: '/hosting', free: true },
+  { id: 'cachecloud', name: 'CacheCloud', icon: 'fa-bolt', color: 'amber', href: '/product-cachecloud', product: 'cachecloud' },
+  { id: 'cp3', name: 'CP3', icon: 'fa-cube', color: 'green', href: '/product-cp3', product: 'cp3' },
+  { id: 'cpdb', name: 'CloudPressDB', icon: 'fa-database', color: 'violet', href: '/product-cloudpressdb', product: 'cpdb' },
+];
+async function load() {
+  const res = await fetch('/api/products/subscriptions', { headers: H() });
+  const data = await res.json().catch(() => ({}));
+  const subs = {};
+  (data.subscriptions || []).forEach(s => { subs[s.product_type] = s; });
+  document.getElementById('services-grid').innerHTML = SERVICES.map(s => {
+    const sub = subs[s.product];
+    const active = s.free || sub?.status === 'active';
+    return `<div class="p-6 bg-[#111] border border-white/10 rounded-2xl">
+      <div class="flex justify-between items-start mb-4">
+        <i class="fas ${s.icon} text-2xl text-${s.color}-400"></i>
+        <span class="text-xs px-2 py-1 rounded-full ${active ? 'bg-green-900/30 text-green-400' : 'bg-white/5 text-gray-500'}">${active ? '활성' : '미구독'}</span>
+      </div>
+      <h3 class="font-bold text-lg mb-1">${s.name}</h3>
+      <p class="text-sm text-gray-500 mb-4">${s.free ? '기본 포함' : (sub?.plan || '유료 구독 필요')}</p>
+      <div class="flex gap-2">
+        <a href="${s.href}" class="text-sm border border-white/10 px-4 py-2 rounded-lg hover:bg-white/5">콘솔/소개</a>
+        ${!s.free && !active ? `<button onclick="subscribe('${s.product}')" class="text-sm bg-${s.color}-600 px-4 py-2 rounded-lg font-bold">구독 활성화</button>` : ''}
+      </div>
+    </div>`;
+  }).join('');
+}
+async function subscribe(product) {
+  const res = await fetch('/api/products/subscribe', { method: 'POST', headers: H(), body: JSON.stringify({ product_type: product, plan: 'standard' }) });
+  const data = await res.json();
+  alert(data.message || data.error || '완료');
+  load();
+}
+load();
+</script>
+</body>
+</html>

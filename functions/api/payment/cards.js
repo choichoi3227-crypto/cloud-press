@@ -35,7 +35,12 @@ export async function onRequestGet(context) {
     const { results } = await env.DB.prepare(
       "SELECT id, card_name, brand, last4, exp_month, exp_year, is_default, created_at FROM payment_cards WHERE user_id = ? ORDER BY is_default DESC, id DESC"
     ).bind(payload.id).all();
-    return jsonOk({ success: true, cards: results || [] });
+    const cards = (results || []).map((c) => ({
+      ...c,
+      id: c.id,
+      is_default: c.is_default === 1 || c.is_default === true,
+    }));
+    return jsonOk({ success: true, cards });
   } catch {
     return jsonOk({ success: true, cards: [] });
   }
@@ -62,7 +67,7 @@ export async function onRequestPost(context) {
     ).bind(payload.id).first();
     const isDefault = (existing?.cnt || 0) === 0 ? 1 : 0;
 
-    await env.DB.prepare(
+    const ins = await env.DB.prepare(
       `INSERT INTO payment_cards (user_id, billing_key, card_name, brand, last4, exp_month, exp_year, is_default, created_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`
     ).bind(
@@ -76,7 +81,15 @@ export async function onRequestPost(context) {
       isDefault
     ).run();
 
-    return jsonOk({ success: true, message: "카드가 등록되었습니다." });
+    const newId = ins?.meta?.last_row_id;
+    let card = null;
+    if (newId) {
+      card = await env.DB.prepare(
+        "SELECT id, card_name, brand, last4, exp_month, exp_year, is_default, created_at FROM payment_cards WHERE id = ? AND user_id = ?"
+      ).bind(newId, payload.id).first();
+    }
+
+    return jsonOk({ success: true, message: "카드가 등록되었습니다.", card });
   } catch (e) {
     return jsonErr("카드 등록에 실패했습니다: " + e.message, 500);
   }

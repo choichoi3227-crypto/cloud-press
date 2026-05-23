@@ -12,7 +12,8 @@
 
   // 서비스 메뉴 항목 중 활성화 여부
   const servicePages = ['/hosting', '/hosting-create', '/hosting-detail',
-    '/domains', '/dns', '/payment', '/account'];
+    '/domains', '/dns', '/payment', '/payments', '/account', '/services',
+    '/product-cloudpressdb', '/product-cp3', '/product-cachecloud'];
   const isServiceActive = servicePages.some(p => path.startsWith(p));
 
   // ── 사용자 정보 로드 ─────────────────────────────────────────
@@ -42,8 +43,9 @@
     const serviceItems = [
       { href: '/hosting', icon: 'fas fa-server', label: '호스팅 관리' },
       { href: '/domains', icon: 'fas fa-globe', label: '도메인 관리' },
-      { href: '/payment', icon: 'fas fa-credit-card', label: '결제 수단 관리' },
       { href: '/account', icon: 'fas fa-user-circle', label: '내 정보 관리' },
+      { href: '/services', icon: 'fas fa-th-large', label: '전체 서비스 관리' },
+      { href: '/payment', icon: 'fas fa-credit-card', label: '결제수단 관리' },
     ];
 
     return `
@@ -144,8 +146,9 @@
       { href: '/storage', icon: 'fas fa-hdd', label: '스토리지' },
       { href: '/hosting', icon: 'fas fa-server', label: '호스팅 관리' },
       { href: '/domains', icon: 'fas fa-globe', label: '도메인 관리' },
-      { href: '/payment', icon: 'fas fa-credit-card', label: '결제 수단' },
       { href: '/account', icon: 'fas fa-user-circle', label: '내 정보 관리' },
+      { href: '/services', icon: 'fas fa-th-large', label: '전체 서비스 관리' },
+      { href: '/payment', icon: 'fas fa-credit-card', label: '결제수단 관리' },
     ];
 
     return `

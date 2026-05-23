@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CloudPressDB | CloudPress</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="/style.css">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" rel="stylesheet">
+</head>
+<body class="bg-[#050505] text-white">
+<header class="p-5 border-b border-white/10 sticky top-0 bg-[#050505]/90 backdrop-blur-lg z-50">
+    <div class="max-w-7xl mx-auto flex justify-between items-center">
+        <a href="/" class="text-2xl font-black text-blue-500">CLOUD<span class="text-white">PRESS</span></a>
+        <nav class="hidden md:flex gap-8 items-center text-sm text-gray-400">
+            <a href="/features" class="hover:text-white">기능</a>
+            <a href="/pricing" class="hover:text-white">요금제</a>
+            <a href="/about" class="hover:text-white">소개</a>
+            <a href="/login" class="hover:text-white">로그인</a>
+            <a href="/signup" class="bg-violet-600 px-5 py-2 rounded-full font-bold text-white">시작하기</a>
+        </nav>
+    </div>
+</header>
+<main class="max-w-6xl mx-auto px-6 py-16">
+    <div class="text-center mb-16">
+        <span class="text-xs font-bold text-violet-400 bg-violet-400/10 px-3 py-1 rounded-full">유료 · DynamoDB 유사</span>
+        <h1 class="text-5xl font-black mt-4 mb-4">Cloud<span class="text-violet-400">PressDB</span></h1>
+        <p class="text-gray-400 max-w-2xl mx-auto">서버리스 분산 JSON DB. 관리자가 GitHub DB 레포 풀을 등록하면 DNS 플래너가 헬스체크·가중치 라우팅을 수행하고, 사용자 DB는 샤드별 폴더에 저장됩니다.</p>
+    </div>
+    <div class="grid md:grid-cols-3 gap-6 mb-12 text-sm">
+        <div class="p-6 bg-[#111] border border-white/10 rounded-2xl">
+            <h3 class="font-bold mb-2">샤드 구조</h3>
+            <p class="text-gray-500">레포 1개에 다수 사용자 DB — <code class="text-violet-300">databases/{user}/{site}/</code></p>
+        </div>
+        <div class="p-6 bg-[#111] border border-white/10 rounded-2xl">
+            <h3 class="font-bold mb-2">JSON 문서</h3>
+            <p class="text-gray-500">wordpress.db.json · meta.json 형식으로 WordPress 데이터 저장</p>
+        </div>
+        <div class="p-6 bg-[#111] border border-white/10 rounded-2xl">
+            <h3 class="font-bold mb-2">자동 페일오버</h3>
+            <p class="text-gray-500">비정상 레포 제외 후 DNS 플랜 자동 재생성</p>
+        </div>
+    </div>
+    <div id="pricing-grid" class="grid md:grid-cols-2 gap-6 max-w-3xl mx-auto"></div>
+</main>
+<script src="/src/public-nav.js"></script>
+<script src="/src/product-page-shell.js"></script>
+<script>
+renderProductPricing([
+  { name: "Standard", price: "₩19,900", features: ["10GB JSON DB", "자동 샤딩", "백업 7일"], cta: "구독하기" },
+  { name: "Pro", price: "₩49,900", popular: true, features: ["100GB", "전용 샤드 우선", "실시간 복제"], cta: "구독하기" },
+], "pricing-grid");
+</script>
+</body>
+</html>

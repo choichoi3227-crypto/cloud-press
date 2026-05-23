@@ -1146,6 +1146,11 @@ import {
 } from "./functions/api/payment/cards.js";
 import { onRequestGet as tossKeyGet } from "./functions/api/payment/toss-key.js";
 import {
+  onRequestGet    as productsGet,
+  onRequestPost   as productsPost,
+  onRequestDelete as productsDelete,
+} from "./functions/api/products.js";
+import {
   onRequestGet    as githubStorageGet,
   onRequestPost   as githubStoragePost,
   onRequestDelete as githubStorageDelete,
@@ -1382,6 +1387,13 @@ async function handleApiRequest(request, env, _workerCtx = null) {
     if (method === "POST") return runWithMiddleware(editorPost);
   }
 
+  // ── 유료 상품 (CloudPressDB, CP3, CacheCloud)
+  if (path === "/api/products" || path.startsWith("/api/products/")) {
+    if (method === "GET")    return runWithMiddleware(productsGet);
+    if (method === "POST")   return runWithMiddleware(productsPost);
+    if (method === "DELETE") return runWithMiddleware(productsDelete);
+  }
+
   return jsonErr("API 경로를 찾을 수 없습니다.", 404);
 }
 
@@ -1415,7 +1427,8 @@ export default {
     const platformPages = [
       '/dashboard', '/hosting', '/hosting-create', '/hosting-detail',
       '/domains', '/dns', '/traffic', '/storage', '/editor',
-      '/account', '/payment', '/payment-success', '/pricing',
+      '/account', '/payment', '/payments', '/payment-success', '/pricing',
+      '/services', '/product-cachecloud', '/product-cp3', '/product-cloudpressdb',
       '/login', '/signup', '/admin', '/admin-users', '/admin-sites',
       '/admin-inquiries', '/admin-notices', '/admin-settings', '/about', '/contact',
       '/features', '/faq', '/notices', '/chat',

@@ -1488,7 +1488,7 @@ function fixCharset(res: Response): Response {
 async function ghRaw(filePath: string, ttl = 300): Promise<Response | null> {
   try {
     const res = await fetch(
-      \\`\\${GH_RAW_BASE}/\\${filePath}\\`,
+      \`\${GH_RAW_BASE}/\${filePath}\`,
       { headers: { 'User-Agent': 'CloudPress/1' }, cf: { cacheEverything: true, cacheTtl: ttl } as any }
     );
     return res.ok ? res : null;

@@ -256,6 +256,70 @@
         </button>
     </div>
 
+    <!-- ── CloudPressDB 레포 설정 ── -->
+    <div class="p-6 bg-[#111] rounded-2xl border border-blue-500/20 space-y-5">
+        <div class="flex items-center justify-between flex-wrap gap-2">
+            <h2 class="font-bold flex items-center gap-2">
+                <i class="fas fa-database text-blue-400 text-lg"></i>
+                CloudPressDB 레포 설정
+            </h2>
+            <span class="text-xs text-gray-500">호스팅 생성 시 DB 파일이 저장되는 전용 레포</span>
+        </div>
+        <div class="p-4 bg-blue-950/20 border border-blue-500/20 rounded-xl text-xs text-blue-300 space-y-1">
+            <p class="font-bold">🗄️ DB 저장 구조</p>
+            <code class="block text-blue-200/70 mt-1">{db_repo}/{user_id}/{site_id}/  ← 호스팅별 독립 DB 폴더</code>
+            <p class="text-blue-200/60 mt-2">호스팅 생성 시 이 레포에 사용자별·호스팅별 폴더가 자동으로 생성됩니다. 미설정 시 호스팅 레포 내 _db/ 폴더 사용.</p>
+        </div>
+        <div class="grid md:grid-cols-2 gap-4">
+            <div class="space-y-2">
+                <label class="text-xs text-gray-500 block font-bold">DB 레포 Owner (GitHub 사용자명/조직)</label>
+                <input id="set-db-owner" type="text" placeholder="예: myorg"
+                    class="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-blue-500 transition font-mono" />
+            </div>
+            <div class="space-y-2">
+                <label class="text-xs text-gray-500 block font-bold">DB 레포 이름</label>
+                <input id="set-db-repo" type="text" placeholder="예: cloudpress-db"
+                    class="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-blue-500 transition font-mono" />
+            </div>
+        </div>
+        <div class="space-y-2">
+            <label class="text-xs text-gray-500 block font-bold">DB 레포 전용 GitHub 토큰 <span class="text-gray-600 font-normal">(비워두면 기본 GitHub 토큰 사용)</span></label>
+            <input id="set-db-token" type="password" placeholder="ghp_..."
+                class="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-blue-500 transition font-mono" />
+        </div>
+        <div class="p-4 bg-orange-950/20 border border-orange-500/20 rounded-xl text-xs text-orange-300 space-y-1">
+            <p class="font-bold">📦 외부 스토리지 설정 (CP3 미구독 사용자용 대체 스토리지)</p>
+            <p class="text-orange-200/60">CP3 구독 중인 사용자는 위 CP3 레포를 자동 사용합니다. CP3 미구독 사용자의 미디어 파일 저장에 사용됩니다.</p>
+        </div>
+        <div class="grid md:grid-cols-3 gap-4">
+            <div class="space-y-2">
+                <label class="text-xs text-gray-500 block font-bold">외부 스토리지 타입</label>
+                <select id="set-ext-storage-type"
+                    class="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-blue-500 transition">
+                    <option value="">없음 (호스팅 레포 내 저장)</option>
+                    <option value="r2">Cloudflare R2</option>
+                    <option value="s3">AWS S3</option>
+                    <option value="b2">Backblaze B2</option>
+                </select>
+            </div>
+            <div class="space-y-2">
+                <label class="text-xs text-gray-500 block font-bold">버킷 이름</label>
+                <input id="set-ext-storage-bucket" type="text" placeholder="예: my-media-bucket"
+                    class="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-blue-500 transition font-mono" />
+            </div>
+            <div class="space-y-2">
+                <label class="text-xs text-gray-500 block font-bold">스토리지 액세스 토큰</label>
+                <input id="set-ext-storage-token" type="password" placeholder="토큰/시크릿 키"
+                    class="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-blue-500 transition font-mono" />
+            </div>
+        </div>
+        <div id="db-save-alert" class="hidden p-3 rounded-xl text-sm"></div>
+        <button onclick="saveDbRepoSettings()"
+            class="bg-blue-700 hover:bg-blue-600 text-white font-bold px-6 py-2.5 rounded-xl transition flex items-center gap-2">
+            <i class="fas fa-save"></i> DB 레포 · 스토리지 설정 저장
+        </button>
+    </div>
+
     <!-- ── CloudPressDB / CP3 서버 풀 (GitHub 레포 + DNS 플래너) ── -->
     <div class="p-6 bg-[#111] rounded-2xl border border-violet-500/20 space-y-5">
         <h2 class="font-bold flex items-center gap-2">
@@ -1490,6 +1554,47 @@ async function saveCp3Settings() {
 }
 
 loadCp3Settings();
+
+// ── CloudPressDB 레포 + 외부 스토리지 설정 ──────────────────────────────────
+async function loadDbRepoSettings() {
+    try {
+        const res  = await fetch('/api/admin/settings?keys=db_repo_owner,db_repo_name,db_github_token,ext_storage_type,ext_storage_bucket,ext_storage_token', { headers: HEADERS() });
+        const data = await res.json();
+        const s    = data.settings || data || {};
+        if (s.db_repo_owner)       document.getElementById('set-db-owner').value = s.db_repo_owner;
+        if (s.db_repo_name)        document.getElementById('set-db-repo').value  = s.db_repo_name;
+        if (s.db_github_token)     document.getElementById('set-db-token').value  = s.db_github_token ? '••••••••' : '';
+        if (s.ext_storage_type)    document.getElementById('set-ext-storage-type').value   = s.ext_storage_type;
+        if (s.ext_storage_bucket)  document.getElementById('set-ext-storage-bucket').value = s.ext_storage_bucket;
+        if (s.ext_storage_token)   document.getElementById('set-ext-storage-token').value  = s.ext_storage_token ? '••••••••' : '';
+    } catch {}
+}
+
+async function saveDbRepoSettings() {
+    const alert = document.getElementById('db-save-alert');
+    const body  = {
+        db_repo_owner:      document.getElementById('set-db-owner').value.trim(),
+        db_repo_name:       document.getElementById('set-db-repo').value.trim(),
+        db_github_token:    document.getElementById('set-db-token').value.trim(),
+        ext_storage_type:   document.getElementById('set-ext-storage-type').value,
+        ext_storage_bucket: document.getElementById('set-ext-storage-bucket').value.trim(),
+        ext_storage_token:  document.getElementById('set-ext-storage-token').value.trim(),
+    };
+    try {
+        const res  = await fetch('/api/admin/settings', { method: 'POST', headers: HEADERS(), body: JSON.stringify(body) });
+        const data = await res.json();
+        alert.className = 'p-3 rounded-xl text-sm ' + (data.success ? 'bg-blue-900/40 text-blue-300' : 'bg-red-900/40 text-red-300');
+        alert.textContent = data.success ? '✅ DB 레포 · 스토리지 설정이 저장되었습니다.' : '❌ ' + (data.error || '저장 실패');
+        alert.classList.remove('hidden');
+        setTimeout(() => alert.classList.add('hidden'), 4000);
+    } catch (e) {
+        alert.className = 'p-3 rounded-xl text-sm bg-red-900/40 text-red-300';
+        alert.textContent = '❌ 오류: ' + e.message;
+        alert.classList.remove('hidden');
+    }
+}
+
+loadDbRepoSettings();
 </script>
 </body>
 </html>

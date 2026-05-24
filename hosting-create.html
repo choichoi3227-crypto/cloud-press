@@ -145,9 +145,20 @@
              STEP 2 — 플랜 선택
         ══════════════════════════════════════════════ -->
         <div id="step-2" class="hidden space-y-5">
+            <!-- DB/스토리지 미포함 안내 -->
+            <div class="p-4 bg-amber-900/20 border border-amber-500/30 rounded-xl text-sm text-amber-200 space-y-1.5">
+                <div class="font-bold flex items-center gap-2"><i class="fas fa-info-circle text-amber-400"></i> 호스팅 플랜 안내 (중요)</div>
+                <ul class="text-amber-100/80 space-y-1 text-xs ml-4 list-disc">
+                    <li>호스팅 플랜에는 <strong>스토리지·DB가 기본 포함되지 않습니다.</strong></li>
+                    <li>DB: 자체 코드로 작성(무료) 또는 <strong>CloudPressDB</strong> 구독 후 연결</li>
+                    <li>스토리지: <strong>AWS S3, GCP, Azure, 네이버클라우드, 구글드라이브, CP3</strong> 중 선택 연결</li>
+                    <li>PHP는 Astro로, JS는 TypeScript로 실시간 자동 변환되어 배포됩니다.</li>
+                </ul>
+            </div>
+
             <div class="section-card">
                 <div class="section-title"><i class="fas fa-layer-group text-purple-400"></i> 플랜 선택</div>
-                <p class="text-gray-500 text-sm mb-5">플랜별 스토리지·트래픽·기능이 즉시 반영됩니다. 초과 시 자동 추가 청구됩니다.</p>
+                <p class="text-gray-500 text-sm mb-5">호스팅 플랜을 선택하세요. DB·스토리지는 별도 연결이 필요합니다.</p>
 
                 <div class="grid gap-3">
                     <!-- FREE -->
@@ -163,14 +174,135 @@
                         </div>
                         <div class="grid grid-cols-2 gap-2 text-xs">
                             <div class="flex items-center gap-1.5 text-gray-300"><i class="fas fa-server text-gray-500 w-3"></i> 사이트 1개</div>
-                            <div class="flex items-center gap-1.5 text-gray-300"><i class="fas fa-database text-gray-500 w-3"></i> 스토리지 5GB</div>
-                            <div class="flex items-center gap-1.5 text-gray-300"><i class="fas fa-chart-line text-gray-500 w-3"></i> 트래픽 100GB/월</div>
+                            <div class="flex items-center gap-1.5 text-gray-300"><i class="fas fa-chart-line text-gray-500 w-3"></i> 트래픽 50GB/월</div>
+                            <div class="flex items-center gap-1.5 text-amber-400/80"><i class="fas fa-exclamation-triangle w-3"></i> 스토리지 외부연결만</div>
+                            <div class="flex items-center gap-1.5 text-amber-400/80"><i class="fas fa-exclamation-triangle w-3"></i> DB 외부연결만</div>
                             <div class="flex items-center gap-1.5 text-red-400/70"><i class="fas fa-times w-3"></i> 커스텀 도메인 불가</div>
                             <div class="flex items-center gap-1.5 text-red-400/70"><i class="fas fa-times w-3"></i> 자동 백업 불가</div>
                         </div>
                     </div>
 
                     <!-- STARTER -->
+                    <div class="plan-card border border-white/10 rounded-2xl p-5" onclick="selectPlan('starter', this)">
+                        <div class="flex justify-between items-start mb-3">
+                            <div>
+                                <div class="font-black text-lg">Starter</div>
+                                <div class="text-gray-400 text-xs mt-0.5">소규모 팀·블로거</div>
+                            </div>
+                            <div class="text-right">
+                                <div class="text-2xl font-black text-blue-400">₩9,900<span class="text-sm text-gray-500">/월</span></div>
+                            </div>
+                        </div>
+                        <div class="grid grid-cols-2 gap-2 text-xs">
+                            <div class="flex items-center gap-1.5 text-gray-300"><i class="fas fa-server text-blue-400 w-3"></i> 사이트 3개</div>
+                            <div class="flex items-center gap-1.5 text-gray-300"><i class="fas fa-chart-line text-blue-400 w-3"></i> 트래픽 500GB/월</div>
+                            <div class="flex items-center gap-1.5 text-amber-400/80"><i class="fas fa-plug w-3"></i> 스토리지 외부연결</div>
+                            <div class="flex items-center gap-1.5 text-amber-400/80"><i class="fas fa-plug w-3"></i> DB 외부연결</div>
+                            <div class="flex items-center gap-1.5 text-green-400"><i class="fas fa-check w-3"></i> 커스텀 도메인</div>
+                            <div class="flex items-center gap-1.5 text-green-400"><i class="fas fa-check w-3"></i> 자동 백업 (일 1회)</div>
+                            <div class="flex items-center gap-1.5 text-blue-300"><i class="fas fa-code w-3"></i> PHP→Astro 자동변환</div>
+                            <div class="flex items-center gap-1.5 text-blue-300"><i class="fas fa-code w-3"></i> JS→TypeScript 변환</div>
+                        </div>
+                    </div>
+
+                    <!-- PRO -->
+                    <div class="plan-card popular border rounded-2xl p-5" onclick="selectPlan('pro', this)">
+                        <div class="flex justify-between items-start mb-3">
+                            <div>
+                                <div class="font-black text-lg flex items-center gap-2">
+                                    Pro
+                                    <span class="text-xs bg-purple-600 text-white px-2 py-0.5 rounded-full">추천</span>
+                                </div>
+                                <div class="text-gray-400 text-xs mt-0.5">전문가·기업</div>
+                            </div>
+                            <div class="text-right">
+                                <div class="text-2xl font-black text-purple-400">₩24,900<span class="text-sm text-gray-500">/월</span></div>
+                            </div>
+                        </div>
+                        <div class="grid grid-cols-2 gap-2 text-xs">
+                            <div class="flex items-center gap-1.5 text-gray-300"><i class="fas fa-server text-purple-400 w-3"></i> 사이트 10개</div>
+                            <div class="flex items-center gap-1.5 text-gray-300"><i class="fas fa-chart-line text-purple-400 w-3"></i> 트래픽 무제한</div>
+                            <div class="flex items-center gap-1.5 text-amber-400/80"><i class="fas fa-plug w-3"></i> 스토리지 외부연결</div>
+                            <div class="flex items-center gap-1.5 text-amber-400/80"><i class="fas fa-plug w-3"></i> DB 외부연결</div>
+                            <div class="flex items-center gap-1.5 text-green-400"><i class="fas fa-check w-3"></i> 커스텀 도메인</div>
+                            <div class="flex items-center gap-1.5 text-green-400"><i class="fas fa-check w-3"></i> 자동 백업 (시간별)</div>
+                            <div class="flex items-center gap-1.5 text-green-400"><i class="fas fa-check w-3"></i> 팀 계정 (5명)</div>
+                            <div class="flex items-center gap-1.5 text-blue-300"><i class="fas fa-code w-3"></i> PHP→Astro 자동변환</div>
+                        </div>
+                    </div>
+
+                    <!-- ENTERPRISE -->
+                    <div class="plan-card border border-white/10 rounded-2xl p-5" onclick="selectPlan('enterprise', this)">
+                        <div class="flex justify-between items-start mb-3">
+                            <div>
+                                <div class="font-black text-lg flex items-center gap-2">
+                                    Enterprise
+                                    <span class="text-xs bg-yellow-600 text-white px-2 py-0.5 rounded-full">대규모</span>
+                                </div>
+                                <div class="text-gray-400 text-xs mt-0.5">대기업·에이전시</div>
+                            </div>
+                            <div class="text-right">
+                                <div class="text-2xl font-black text-yellow-400">₩59,900<span class="text-sm text-gray-500">/월</span></div>
+                            </div>
+                        </div>
+                        <div class="grid grid-cols-2 gap-2 text-xs">
+                            <div class="flex items-center gap-1.5 text-gray-300"><i class="fas fa-infinity text-yellow-400 w-3"></i> 무제한 사이트</div>
+                            <div class="flex items-center gap-1.5 text-gray-300"><i class="fas fa-chart-line text-yellow-400 w-3"></i> 트래픽 무제한</div>
+                            <div class="flex items-center gap-1.5 text-amber-400/80"><i class="fas fa-plug w-3"></i> 스토리지 외부연결</div>
+                            <div class="flex items-center gap-1.5 text-amber-400/80"><i class="fas fa-plug w-3"></i> DB 외부연결</div>
+                            <div class="flex items-center gap-1.5 text-green-400"><i class="fas fa-check w-3"></i> 커스텀 도메인 무제한</div>
+                            <div class="flex items-center gap-1.5 text-green-400"><i class="fas fa-check w-3"></i> 자동 백업 (분당)</div>
+                            <div class="flex items-center gap-1.5 text-green-400"><i class="fas fa-check w-3"></i> 팀 계정 무제한</div>
+                            <div class="flex items-center gap-1.5 text-green-400"><i class="fas fa-check w-3"></i> 우선 지원</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 유료 플랜 결제수단 섹션 (선택 시 표시, 어드민 제외) -->
+                <div id="payment-section" class="hidden mt-5 pt-5 border-t border-white/10">
+                    <div class="text-sm font-bold text-gray-300 mb-4 flex items-center gap-2">
+                        <i class="fas fa-credit-card text-yellow-400"></i> 결제수단 등록
+                        <span class="text-red-400 text-xs ml-1">* 유료 플랜 필수</span>
+                    </div>
+                    <div id="saved-cards" class="space-y-2 mb-4"></div>
+                    <div id="new-card-form" class="space-y-3">
+                        <div class="grid grid-cols-2 gap-3">
+                            <div class="col-span-2">
+                                <label class="cp-label">카드 번호</label>
+                                <input id="card_number" type="text" class="cp-input font-mono" placeholder="0000 0000 0000 0000"
+                                    maxlength="19" oninput="formatCardNumber(this)">
+                            </div>
+                            <div>
+                                <label class="cp-label">유효기간</label>
+                                <input id="card_expiry" type="text" class="cp-input font-mono" placeholder="MM/YY"
+                                    maxlength="5" oninput="formatExpiry(this)">
+                            </div>
+                            <div>
+                                <label class="cp-label">CVC</label>
+                                <input id="card_cvc" type="text" class="cp-input font-mono" placeholder="000" maxlength="4">
+                            </div>
+                            <div class="col-span-2">
+                                <label class="cp-label">카드 소유자 이름</label>
+                                <input id="card_name" type="text" class="cp-input" placeholder="홍길동">
+                            </div>
+                        </div>
+                        <div class="flex items-center gap-2 text-xs text-gray-600">
+                            <i class="fas fa-lock text-green-500"></i>
+                            카드 정보는 TossPayments로 안전하게 전송되며 서버에 저장되지 않습니다.
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="flex gap-3">
+                <button onclick="goStep(1)" class="flex-1 border border-white/20 py-4 rounded-xl font-bold hover:bg-white/5 transition">
+                    <i class="fas fa-arrow-left mr-2"></i> 이전
+                </button>
+                <button onclick="goStep(3)" class="flex-1 bg-blue-600 hover:bg-blue-500 py-4 rounded-xl font-bold transition">
+                    다음 단계 <i class="fas fa-arrow-right ml-2"></i>
+                </button>
+            </div>
+        </div>
                     <div class="plan-card border border-white/10 rounded-2xl p-5" onclick="selectPlan('starter', this)">
                         <div class="flex justify-between items-start mb-3">
                             <div>
@@ -356,27 +488,6 @@
             <div class="p-4 bg-green-950/30 border border-green-500/25 rounded-xl text-xs text-green-300">
                 <i class="fas fa-clock mr-1"></i>
                 구축 완료까지 <strong>5~8분</strong>이 소요됩니다. 시작 즉시 이 페이지에서 실시간 진행 상황을 확인할 수 있습니다.
-            </div>
-
-            <div class="section-card">
-                <div class="section-title"><i class="fas fa-database text-cyan-300"></i> DB / 스토리지 구성</div>
-                <p class="text-gray-500 text-sm mb-4">기본 DB/스토리지 자동 생성은 제공되지 않습니다. 필요한 항목을 선택해 연결하세요.</p>
-                <div class="grid md:grid-cols-2 gap-3 mb-3">
-                    <label class="p-3 border border-white/10 rounded-xl flex items-center gap-2"><input type="radio" name="db_mode" value="self" checked> <span>DB 직접 구성 (무료)</span></label>
-                    <label class="p-3 border border-white/10 rounded-xl flex items-center gap-2"><input type="radio" name="db_mode" value="cpdb"> <span>CloudPressDB 사용 (유료 구독)</span></label>
-                </div>
-                <label class="cp-label">외부 스토리지</label>
-                <select id="storage_provider" class="cp-input">
-                    <option value="none">사용 안 함</option>
-                    <option value="s3">AWS S3</option>
-                    <option value="gcs">GCP Cloud Storage</option>
-                    <option value="azure">Azure Blob</option>
-                    <option value="naver">네이버 클라우드</option>
-                    <option value="gdrive">Google Drive (OAuth 동의 필요)</option>
-                    <option value="cp3">CP3 (유료 구독)</option>
-                </select>
-                <div id="service-prereq" class="hidden mt-3 p-3 rounded-xl text-xs border"></div>
-                <p class="text-xs text-gray-600 mt-2">※ PHP→Astro, JS→TS 실시간 변환은 생성 파이프라인에서 처리되며 원본/변환본을 함께 저장합니다.</p>
             </div>
 
             <div class="flex gap-3">
@@ -604,9 +715,10 @@
 
     // 플랜 설정
     const PLAN_INFO = {
-        free:    { label: 'Free',    price: '무료',      storage: '5GB',  traffic: '100GB/월', color: 'text-green-400' },
-        starter: { label: 'Starter', price: '₩9,900/월', storage: '18GB', traffic: '1TB/월',   color: 'text-blue-400'  },
-        pro:     { label: 'Pro',     price: '₩29,900/월',storage: '36GB', traffic: '무제한',   color: 'text-purple-400'},
+        free:       { label: 'Free',       price: '무료',       storage: '외부연결', traffic: '50GB/월',   color: 'text-green-400'  },
+        starter:    { label: 'Starter',    price: '₩9,900/월',  storage: '외부연결', traffic: '500GB/월',  color: 'text-blue-400'   },
+        pro:        { label: 'Pro',        price: '₩24,900/월', storage: '외부연결', traffic: '무제한',    color: 'text-purple-400' },
+        enterprise: { label: 'Enterprise', price: '₩59,900/월', storage: '외부연결', traffic: '무제한',    color: 'text-yellow-400' },
     };
 
     let selectedPlan    = 'free';
@@ -617,7 +729,6 @@
     let elapsedTimer    = null;
     let createdSiteId   = null;
     let lastLogCount    = 0;
-    let subscriptions   = {};
 
     // 총 목표 시간: 6분(360초) 기준으로 타이머 링 회전
     const TARGET_SEC = 360;
@@ -741,26 +852,8 @@
         } catch {}
     }
 
-    async function loadSubscriptions() {
-        try {
-            const res = await fetch('/api/products/subscriptions', { headers: HEADERS });
-            const data = await res.json();
-            subscriptions = {};
-            (data.subscriptions || []).forEach(s => { subscriptions[s.product_type] = s.status === 'active'; });
-        } catch { subscriptions = {}; }
-    }
-
-    function showPrereq(message, ok = false) {
-        const el = document.getElementById('service-prereq');
-        if (!el) return;
-        el.className = `mt-3 p-3 rounded-xl text-xs border ${ok ? 'border-green-500/30 bg-green-900/20 text-green-300' : 'border-yellow-500/30 bg-yellow-900/20 text-yellow-300'}`;
-        el.textContent = message;
-        el.classList.remove('hidden');
-    }
-
     // 초기화
     checkCfStatus();
-    loadSubscriptions();
 
     // ─────────────────────────────────────────────────────────────────────────
     // 스텝 이동
@@ -798,12 +891,6 @@
             }
         }
         if (n === 4) {
-            const dbMode = document.querySelector('input[name="db_mode"]:checked')?.value || 'self';
-            const storage = document.getElementById('storage_provider')?.value || 'none';
-            if (dbMode === 'cpdb' && !subscriptions.cpdb) { showAlert('CloudPressDB 구독이 필요합니다.'); return; }
-            if (storage === 'cp3' && !subscriptions.cp3) { showAlert('CP3 구독이 필요합니다.'); return; }
-            if (storage === 'gdrive') showPrereq('Google Drive 사용 시 OAuth 인증/동의 후 연결됩니다.', true);
-
             // 요약 업데이트
             const plan = PLAN_INFO[selectedPlan];
             document.getElementById('sum-name').textContent    = document.getElementById('site_name').value.trim() || '-';
@@ -1145,8 +1232,6 @@
                 headers: HEADERS,
                 body:    JSON.stringify({
                     site_name, php_version: '8.2',
-                    db_mode: document.querySelector('input[name="db_mode"]:checked')?.value || 'self',
-                    storage_provider: document.getElementById('storage_provider')?.value || 'none',
                     initial_domain: initial_domain || undefined,
                     plan: selectedPlan,
                     payment_method_id: payment_method_id || undefined,

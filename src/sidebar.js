@@ -44,8 +44,8 @@
       { href: '/hosting', icon: 'fas fa-server', label: '호스팅 관리' },
       { href: '/domains', icon: 'fas fa-globe', label: '도메인 관리' },
       { href: '/account', icon: 'fas fa-user-circle', label: '내 정보 관리' },
-      { href: '/services', icon: 'fas fa-th-large', label: '전체 서비스 관리' },
       { href: '/payment', icon: 'fas fa-credit-card', label: '결제수단 관리' },
+      { href: '/services', icon: 'fas fa-th-large', label: '전체 서비스 관리' },
     ];
 
     return `

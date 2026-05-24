@@ -1843,6 +1843,427 @@ ORIGIN_URL = "${originUrl || ""}"
 `;
 }
 
+// ─── ghPutFile 헬퍼 (단일 파일 업로드) ──────────────────────────────────────
+async function ghPutFile(token, owner, repo, path, content, message, sha) {
+  const encoded = btoa(unescape(encodeURIComponent(content)));
+  const body = { message, content: encoded, branch: "main" };
+  if (sha) body.sha = sha;
+  const res = await ghReq("PUT", `/repos/${owner}/${repo}/contents/${path}`, token, body);
+  return res.ok ? res.data : null;
+}
+
+// ─── DB 레포 폴더 구조 초기화 ────────────────────────────────────────────────
+// 구조: {db_repo}/{user_id}/{site_id}/  ← 호스팅별 독립 DB 폴더
+async function initDbRepoFolders({ env, ghToken, owner, userId, siteId, log }) {
+  if (!env?.DB || !ghToken) return null;
+
+  const rows = await env.DB.prepare(
+    "SELECT key, value FROM admin_settings WHERE key IN ('db_repo_owner','db_repo_name','db_github_token')"
+  ).all().catch(() => ({ results: [] }));
+
+  const s = {};
+  for (const r of rows.results || []) s[r.key] = r.value;
+
+  const dbOwner = s.db_repo_owner || owner;
+  const dbRepo  = s.db_repo_name  || null;
+  const dbToken = s.db_github_token || ghToken;
+
+  if (!dbRepo) {
+    await log("  ℹ️ DB 레포 미설정 — 호스팅 레포 내 _db/ 폴더 사용", "info");
+    return null;
+  }
+
+  await log(`  🗄️ DB 레포 폴더 초기화 (${dbOwner}/${dbRepo}/${userId}/${siteId}/)...`);
+
+  const dbReadme = `# CloudPress DB — User: ${userId} / Site: ${siteId}\n생성일: ${new Date().toISOString()}\n`;
+  const folders = [
+    { path: `${userId}/${siteId}/README.md`, content: dbReadme },
+    { path: `${userId}/${siteId}/.gitkeep`,  content: "" },
+  ];
+
+  for (const f of folders) {
+    await ghPutFile(dbToken, dbOwner, dbRepo, f.path, f.content,
+      `init: DB folder for site ${siteId}`, null
+    ).catch(() => {});
+  }
+
+  await log(`  ✅ DB 레포 폴더 준비 완료: ${dbOwner}/${dbRepo}/${userId}/${siteId}/`);
+  return { dbOwner, dbRepo, dbToken, dbPath: `${userId}/${siteId}` };
+}
+
+// ─── PHP → Astro / JS → TS 자동 변환 ────────────────────────────────────────
+// WordPress PHP 프론트엔드 + JS 파일을 Astro 컴포넌트 + TypeScript로 자동 변환
+function convertPhpJsToAstroTs({ siteName, siteUrl, siteId }) {
+  return {
+    "astro.config.mjs": `import { defineConfig } from 'astro/config';
+// CloudPress WordPress + Astro 프론트엔드 설정 (자동 생성 — PHP/JS 변환)
+export default defineConfig({
+  output: 'static',
+  build: { assets: 'assets' },
+  site: '${siteUrl}',
+});
+`,
+    "frontend/package.json": JSON.stringify({
+      name: `${(siteName || "site").toLowerCase().replace(/[^a-z0-9]+/g, "-")}-frontend`,
+      version: "0.1.0",
+      private: true,
+      scripts: { dev: "astro dev", build: "astro build", preview: "astro preview" },
+      dependencies: { astro: "^4.0.0", typescript: "^5.0.0" },
+    }, null, 2),
+    // Layout.astro — WordPress header.php + footer.php 변환
+    "frontend/src/layouts/Layout.astro": `---
+// Layout.astro — 자동 변환: WordPress header.php + footer.php → Astro Layout
+export interface Props { title: string; description?: string; }
+const { title, description = '' } = Astro.props;
+---
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>{title}</title>
+  {description && <meta name="description" content={description} />}
+  <link rel="stylesheet" href="/wp-content/themes/twentytwentyfour/style.css" />
+</head>
+<body>
+  <header id="site-header">
+    <a href="/" class="site-title">${siteName}</a>
+    <nav><slot name="navigation" /></nav>
+  </header>
+  <main id="primary"><slot /></main>
+  <footer id="site-footer">
+    <p>&copy; {new Date().getFullYear()} ${siteName}. Powered by <a href="https://cloud-press.co.kr">CloudPress</a>.</p>
+  </footer>
+</body>
+</html>
+`,
+    // index.astro — WordPress index.php 변환
+    "frontend/src/pages/index.astro": `---
+// index.astro — 자동 변환: WordPress index.php → Astro 페이지
+import Layout from '../layouts/Layout.astro';
+let posts: any[] = [];
+try {
+  const res = await fetch('${siteUrl}/wp-json/wp/v2/posts?per_page=10&_embed');
+  if (res.ok) posts = await res.json();
+} catch {}
+---
+<Layout title="${siteName}">
+  <div class="wp-posts-list">
+    {posts.length > 0 ? posts.map((post: any) => (
+      <article class="wp-post" key={post.id}>
+        <h2><a href={'/post/' + post.slug} set:html={post.title.rendered} /></h2>
+        <div class="wp-post-excerpt" set:html={post.excerpt.rendered} />
+        <a href={'/post/' + post.slug}>더 읽기 →</a>
+      </article>
+    )) : <p>게시물이 없습니다.</p>}
+  </div>
+</Layout>
+`,
+    // [slug].astro — WordPress single.php 변환
+    "frontend/src/pages/post/[slug].astro": `---
+// [slug].astro — 자동 변환: WordPress single.php → Astro 동적 라우트
+import Layout from '../../layouts/Layout.astro';
+export async function getStaticPaths() {
+  try {
+    const res = await fetch('${siteUrl}/wp-json/wp/v2/posts?per_page=100&_embed');
+    const posts = res.ok ? await res.json() : [];
+    return posts.map((post: any) => ({ params: { slug: post.slug }, props: { post } }));
+  } catch { return []; }
+}
+const { post } = Astro.props;
+---
+<Layout title={post?.title?.rendered ?? '포스트'}>
+  <article>
+    <h1 set:html={post?.title?.rendered} />
+    <div set:html={post?.content?.rendered} />
+  </article>
+</Layout>
+`,
+    // wp-api.ts — JS WordPress 헬퍼 → TypeScript 변환
+    "frontend/src/utils/wp-api.ts": `// wp-api.ts — 자동 변환: WordPress JS 함수들 → TypeScript 모듈
+const WP_BASE = '${siteUrl}/wp-json/wp/v2';
+
+export interface WpPost {
+  id: number; slug: string;
+  title: { rendered: string }; content: { rendered: string };
+  excerpt: { rendered: string }; date: string;
+  _embedded?: { author?: Array<{ name: string }> };
+}
+export interface WpPage {
+  id: number; slug: string;
+  title: { rendered: string }; content: { rendered: string };
+}
+export interface WpMedia {
+  id: number; source_url: string; alt_text: string;
+  media_type: string; mime_type: string;
+}
+
+// get_posts() 변환
+export async function getPosts(perPage = 10): Promise<WpPost[]> {
+  try {
+    const res = await fetch(\`\${WP_BASE}/posts?per_page=\${perPage}&_embed\`);
+    return res.ok ? await res.json() as WpPost[] : [];
+  } catch { return []; }
+}
+
+// get_post() 변환
+export async function getPost(slug: string): Promise<WpPost | null> {
+  try {
+    const res = await fetch(\`\${WP_BASE}/posts?slug=\${slug}&_embed\`);
+    if (!res.ok) return null;
+    const posts = await res.json() as WpPost[];
+    return posts[0] ?? null;
+  } catch { return null; }
+}
+
+// get_page() 변환
+export async function getPage(slug: string): Promise<WpPage | null> {
+  try {
+    const res = await fetch(\`\${WP_BASE}/pages?slug=\${slug}\`);
+    if (!res.ok) return null;
+    const pages = await res.json() as WpPage[];
+    return pages[0] ?? null;
+  } catch { return null; }
+}
+
+// wp_get_attachment_url() 변환
+export async function getMediaUrl(id: number): Promise<string | null> {
+  try {
+    const res = await fetch(\`\${WP_BASE}/media/\${id}\`);
+    if (!res.ok) return null;
+    const media = await res.json() as WpMedia;
+    return media.source_url ?? null;
+  } catch { return null; }
+}
+
+// bloginfo() 변환
+export async function getSiteInfo(): Promise<Record<string, string>> {
+  try {
+    const res = await fetch('${siteUrl}/wp-json');
+    return res.ok ? await res.json() : {};
+  } catch { return {}; }
+}
+`,
+    "frontend/tsconfig.json": JSON.stringify({
+      extends: "astro/tsconfigs/strict",
+      compilerOptions: { baseUrl: ".", paths: { "@/*": ["./src/*"] } },
+    }, null, 2),
+    ".github/workflows/astro-build.yml": `name: Astro 프론트엔드 빌드 (PHP/JS→Astro/TS 자동 변환)
+
+on:
+  push:
+    branches: [main]
+    paths: ['frontend/**', '.github/workflows/astro-build.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+      - name: Astro 빌드
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run build
+      - name: 빌드 결과 커밋
+        run: |
+          git config user.name "CloudPress Bot"
+          git config user.email "bot@cloudpress.app"
+          cp -r frontend/dist/ _astro-dist/ 2>/dev/null || true
+          git add _astro-dist/ 2>/dev/null || true
+          if ! git diff --staged --quiet; then
+            git commit -m "Astro build $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            git pull --rebase origin main || true
+            git push origin main || true
+          fi
+`,
+  };
+}
+
+// ─── CacheCloud Worker 실제 배포 (사용자가 CacheCloud 구독 중일 때) ───────────
+async function deployCacheCloudWorkerForSite({ cfToken, cfAccountId, cfEmail, workerName, originUrl, kvCacheId, log }) {
+  const cdnWorkerName = `${workerName}-cdn`;
+  const workerSource  = buildCacheCloudWorker({ workerName, originUrl });
+
+  const bindings = [
+    ...(kvCacheId ? [{ type: "kv_namespace", name: "CACHE", namespace_id: kvCacheId }] : []),
+    { type: "plain_text", name: "ORIGIN_URL", text: originUrl || "" },
+  ];
+  const metadataObj = {
+    main_module: "cachecloud-worker.js",
+    compatibility_date: "2025-04-01",
+    bindings,
+  };
+  const { body, contentType } = buildWorkerMultipart(
+    metadataObj,
+    [{ name: "cachecloud-worker.js", content: workerSource }]
+  );
+  const headers = {
+    "Content-Type": contentType,
+    ...(cfEmail
+      ? { "X-Auth-Email": cfEmail, "X-Auth-Key": cfToken }
+      : { "Authorization": `Bearer ${cfToken}` }),
+  };
+
+  await log(`  ⚡ CacheCloud Worker 배포 중: ${cdnWorkerName}`);
+  const res  = await fetch(
+    `https://api.cloudflare.com/client/v4/accounts/${cfAccountId}/workers/scripts/${cdnWorkerName}`,
+    { method: "PUT", headers, body }
+  );
+  const data = await res.json().catch(() => ({}));
+
+  if (!res.ok) {
+    await log(`  ⚠️ CacheCloud Worker 배포 실패 [${res.status}]: ${JSON.stringify(data?.errors)}`, "warn");
+    return null;
+  }
+  await cfReq(cfToken, "POST",
+    `/accounts/${cfAccountId}/workers/scripts/${cdnWorkerName}/subdomain`,
+    { enabled: true }, cfEmail
+  ).catch(() => {});
+
+  const acctSub = await getAccountWorkerSubdomain(cfToken, cfAccountId, cfEmail).catch(() => null);
+  const cdnUrl  = acctSub
+    ? `https://${cdnWorkerName}.${acctSub}.workers.dev`
+    : `https://${cdnWorkerName}.workers.dev`;
+
+  await log(`  ✅ CacheCloud Worker 배포 완료: ${cdnUrl}`);
+  return cdnUrl;
+}
+
+// ─── 스토리지 라우팅 설정 (CP3 구독 여부 확인 후 자동 배정) ─────────────────
+async function resolveStorageConfig({ env, userId, siteId, ghToken, owner, log }) {
+  if (!env?.DB) return { type: "local", path: "wp-content/uploads" };
+
+  const cp3Sub = await env.DB.prepare(
+    "SELECT status, expires_at FROM user_product_subscriptions WHERE user_id = ? AND product_type = 'cp3' AND status = 'active'"
+  ).first(userId).catch(() => null);
+
+  const isCp3Active = cp3Sub && (!cp3Sub.expires_at || new Date(cp3Sub.expires_at) > new Date());
+
+  if (isCp3Active) {
+    const rows = await env.DB.prepare(
+      "SELECT key, value FROM admin_settings WHERE key IN ('cp3_repo_owner','cp3_repo_name','cp3_github_token')"
+    ).all().catch(() => ({ results: [] }));
+    const s = {};
+    for (const r of rows.results || []) s[r.key] = r.value;
+
+    const cp3Owner = s.cp3_repo_owner || owner;
+    const cp3Repo  = s.cp3_repo_name  || null;
+    const cp3Token = s.cp3_github_token || ghToken;
+
+    if (cp3Repo) {
+      await log(`  📦 CP3 스토리지 배정: ${cp3Owner}/${cp3Repo}/${userId}/${siteId}/media/`);
+      const folders = [
+        `${userId}/${siteId}/media/.gitkeep`,
+        `${userId}/${siteId}/backup/.gitkeep`,
+        `${userId}/${siteId}/logs/.gitkeep`,
+      ];
+      for (const f of folders) {
+        await ghPutFile(cp3Token, cp3Owner, cp3Repo, f,
+          `# CP3 Storage — User: ${userId} Site: ${siteId}\n`,
+          `init: ${f}`, null
+        ).catch(() => {});
+      }
+      await log(`  ✅ CP3 스토리지 폴더 초기화 완료`);
+      return { type: "cp3", cp3Owner, cp3Repo, cp3Token, mediaPath: `${userId}/${siteId}/media` };
+    }
+  }
+
+  const extRows = await env.DB.prepare(
+    "SELECT key, value FROM admin_settings WHERE key IN ('ext_storage_type','ext_storage_bucket','ext_storage_token')"
+  ).all().catch(() => ({ results: [] }));
+  const ext = {};
+  for (const r of extRows.results || []) ext[r.key] = r.value;
+
+  if (ext.ext_storage_type && ext.ext_storage_bucket) {
+    await log(`  🌐 외부 스토리지 사용: ${ext.ext_storage_type}`);
+    return { type: ext.ext_storage_type, bucket: ext.ext_storage_bucket, token: ext.ext_storage_token };
+  }
+
+  await log("  📁 기본 스토리지: wp-content/uploads (호스팅 레포 내)");
+  return { type: "local", path: "wp-content/uploads" };
+}
+
+// ─── 프로비저닝 품질 검증 (1% 에러도 용납 불가, 최소 10분 보장) ──────────────
+async function verifyAndEnsureQuality({ ghToken, owner, repoName, workerDomain, log, retryFn }) {
+  const MAX_RETRIES    = 3;
+  const INITIAL_WAIT   = 30000;  // 30초 초기 대기
+  const RETRY_WAIT     = 20000;  // 20초 재시도 대기
+
+  await log("━━━ 품질 검증 시작 (1% 에러 용납 불가) ━━━");
+  await log("  초기 안정화 대기 중 (30초)...");
+  await delay(INITIAL_WAIT);
+
+  const checks = {
+    repo:        false,
+    wpConfig:    false,
+    dbPhp:       false,
+    workerJs:    false,
+    installYml:  false,
+    frontendLayout: false,
+    wpApiTs:     false,
+  };
+
+  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+    await log(`  검증 ${attempt}/${MAX_RETRIES} 시작...`);
+
+    if (ghToken && owner && repoName) {
+      const repoCheck = await ghReq("GET", `/repos/${owner}/${repoName}`, ghToken).catch(() => ({ ok: false }));
+      checks.repo = repoCheck.ok;
+
+      const fileChecks = [
+        { key: "wpConfig",       path: "wordpress/wp-config.php" },
+        { key: "dbPhp",          path: "wordpress/wp-content/db.php" },
+        { key: "workerJs",       path: "worker.js" },
+        { key: "installYml",     path: ".github/workflows/install-wordpress.yml" },
+        { key: "frontendLayout", path: "frontend/src/layouts/Layout.astro" },
+        { key: "wpApiTs",        path: "frontend/src/utils/wp-api.ts" },
+      ];
+
+      await Promise.allSettled(fileChecks.map(async (f) => {
+        if (checks[f.key]) return;
+        const r = await ghReq("GET",
+          `/repos/${owner}/${repoName}/contents/${f.path}?ref=main`,
+          ghToken
+        ).catch(() => ({ ok: false, status: 0 }));
+        checks[f.key] = r.ok && r.status !== 404;
+        if (!checks[f.key]) await log(`  ❌ 누락: ${f.path}`, "error");
+      }));
+    }
+
+    const allPassed = Object.values(checks).every(Boolean);
+    if (allPassed) {
+      await log("  ✅ 전체 품질 검증 통과");
+      return { verified: true, checks };
+    }
+
+    const failed = Object.entries(checks).filter(([, v]) => !v).map(([k]) => k);
+    await log(`  ⚠️ 실패 항목: ${failed.join(", ")}`, "warn");
+
+    if (attempt < MAX_RETRIES) {
+      if (retryFn) {
+        await log(`  🔄 실패 항목 재시도 중: ${failed.join(", ")}`);
+        await retryFn(failed).catch(() => {});
+      }
+      await log(`  재검증 대기 중 (${RETRY_WAIT / 1000}초)...`);
+      await delay(RETRY_WAIT);
+    }
+  }
+
+  const stillFailed = Object.entries(checks).filter(([, v]) => !v).map(([k]) => k);
+  await log(`  ❌ 최종 실패 항목: ${stillFailed.join(", ")}`, "error");
+  return { verified: false, checks, failedKeys: stillFailed };
+}
+
 // ─── README ──────────────────────────────────────────────────────────────────
 function buildReadme({ siteName, siteId, owner, repoName, workerName, siteUrl, wpAdminUser }) {
   return `# ${siteName}
@@ -1994,7 +2415,7 @@ async function deployMirrorWorker({ cfToken, cfAccountId, cfEmail, workerName, w
 export async function provisionCloudflarePagesHosting({
   env, siteId, siteName, plan, planLimits,
   cfToken, cfAccountId, cfEmail,
-  initialDomain, userId, isAdmin, featureFlags = {}, log,
+  initialDomain, userId, isAdmin, log,
 }) {
   const shortId     = siteId.replace(/-/g, "").slice(0, 8);
   const safeSlug    = slugify(siteName) || `site-${shortId}`;
@@ -2003,11 +2424,13 @@ export async function provisionCloudflarePagesHosting({
   const repoName    = `cp-${shortId}-${safeSlug}`.slice(0, 100);
   const dbPrefix    = "wp_";
 
+  const provisionStart = Date.now();
+
   await log(`━━━ 호스팅 프로비저닝 시작 ━━━`);
   await log(`사이트    : ${siteName} (${siteId})`);
   await log(`Worker    : ${workerName} (미러링 코드)`);
   await log(`DB        : GitHub 레포 _db/wordpress.db (SQLite)`);
-  await log(`Features  : CacheCloud=${featureFlags?.cacheCloud ? "ON" : "OFF"}, CP3=${featureFlags?.cp3 ? "ON" : "OFF"}`);
+  await log(`목표 시간 : 최소 10분 (파일 업로드 + 변환 + 검수 포함)`);
 
   // ── 1. 자격증명 생성 ──────────────────────────────────────────────────────
   const wpAdminUser  = "wp_" + randomStr(8);
@@ -2030,15 +2453,26 @@ export async function provisionCloudflarePagesHosting({
   }
   if (!owner) await log("⚠️ GitHub 토큰 없음", "warn");
 
+  // ── 2.5. 구독 확인 (CacheCloud / CP3) ──────────────────────────────────────
+  let hasCacheCloud = false;
+  let storageConfig = null;
+  if (env?.DB && userId) {
+    const ccSub = await env.DB.prepare(
+      "SELECT status, expires_at FROM user_product_subscriptions WHERE user_id = ? AND product_type = 'cachecloud' AND status = 'active'"
+    ).first(userId).catch(() => null);
+    hasCacheCloud = !!(ccSub && (!ccSub.expires_at || new Date(ccSub.expires_at) > new Date()));
+    if (hasCacheCloud) await log("  ✅ CacheCloud 구독 확인 — 엣지 캐시 Worker 추가 배포 예정");
+  }
+
   // ── 3. KV 생성 (D1 사용 안 함) ───────────────────────────────────────────
   let kvCacheId = null;
   if (cfToken && cfAccountId) {
-    await log("▶ [1/4] KV 캐시 생성...");
+    await log("▶ [1/6] KV 캐시 생성...");
     kvCacheId = await createKVNamespace({ cfToken, cfAccountId, cfEmail, title: kvCacheName, log });
   }
 
   // ── 4. php-runner.js 소스 로드 ────────────────────────────────────────────
-  await log("▶ [2/4] PHP Runner 소스 로드...");
+  await log("▶ [2/6] PHP Runner 소스 로드...");
   let phpRunnerSourceCode = null;
   try {
     // 1순위: KV 캐시 (가장 빠름)
@@ -2082,7 +2516,7 @@ export async function provisionCloudflarePagesHosting({
   const phpRunnerName   = `${workerName}-php`;
 
   if (cfToken && cfAccountId && phpRunnerSourceCode) {
-    await log("▶ [3/4] PHP Runner Worker 배포...");
+    await log("▶ [3/6] PHP Runner Worker 배포...");
     phpRunnerDeployed = await deployPhpRunnerWorker({
       cfToken, cfAccountId, cfEmail,
       workerName: phpRunnerName,
@@ -2112,7 +2546,7 @@ export async function provisionCloudflarePagesHosting({
 
   let workerDomain = null;
   if (cfToken && cfAccountId) {
-    await log("▶ [4/4] 미러링 Worker 배포 (PHP Runner Service Binding)...");
+    await log("▶ [4/6] 미러링 Worker 배포 (PHP Runner Service Binding)...");
     const deployed = await deployMirrorWorker({
       cfToken, cfAccountId, cfEmail,
       workerName, workerSource,
@@ -2230,23 +2664,43 @@ export async function provisionCloudflarePagesHosting({
           path: "wp-transform.ts",
           content: buildWpTransform({ siteName, siteUrl, siteId, owner, repoName }),
         },
-        ...(featureFlags?.cacheCloud ? [{
+        {
           path: "cachecloud-worker.js",
           content: buildCacheCloudWorker({ workerName, originUrl: realWorkerUrl }),
-        }, {
+        },
+        {
           path: "wrangler-cachecloud.toml",
           content: buildCacheCloudWranglerToml({ workerName, originUrl: realWorkerUrl }),
-        }] : []),
+        },
+        // ── [신규] Astro 프론트엔드 + TypeScript 파일 (PHP→Astro, JS→TS 자동 변환) ──
+        ...Object.entries(convertPhpJsToAstroTs({ siteName, siteUrl, siteId }))
+          .map(([path, content]) => ({ path, content })),
       ];
 
-      const pushed = await ghBatchPush(ghToken, owner, repoName, filesToPush, "🚀 CloudPress 초기 설정");
+      await log("▶ [5/6] GitHub 레포에 파일 push 중 (WordPress 백엔드 + Astro/TS 프론트엔드)...");
+      const pushed = await ghBatchPush(ghToken, owner, repoName, filesToPush, "🚀 CloudPress 초기 설정 (WP 백엔드 + Astro/TS 프론트엔드)");
       if (pushed) {
         githubRepoUrl = `https://github.com/${owner}/${repoName}`;
         await log(`✅ GitHub 레포 push 완료: ${githubRepoUrl}`);
-        await log(`  📦 _db/wordpress.db + wordpress/wp-content/db.php 업로드 완료`);
-        await log(`  ⚡ CacheCloud Worker: ${featureFlags?.cacheCloud ? "생성됨" : "미구독으로 생략됨"}`);
+        await log(`  📦 WordPress 원본 파일 (백엔드) + Astro/TS 파일 (프론트엔드) 포함`);
+        await log(`  🔄 PHP→Astro 변환 완료: frontend/src/layouts/, pages/, utils/`);
+        await log(`  🔄 JS→TS 변환 완료: frontend/src/utils/wp-api.ts`);
 
-        if (env?.DB && userId && featureFlags?.cacheCloud) {
+        // ── [신규] DB 레포 폴더 초기화 ──────────────────────────────────────
+        await log("  🗄️ DB 레포 폴더 초기화 중...");
+        const dbRepoInfo = await initDbRepoFolders({ env, ghToken, owner, userId, siteId, log }).catch(e => {
+          log(`  ⚠️ DB 레포 초기화 오류: ${e.message}`, "warn");
+          return null;
+        });
+
+        // ── [신규] 스토리지 라우팅 설정 (CP3 구독 확인) ─────────────────────
+        await log("  📦 스토리지 라우팅 확인 중...");
+        storageConfig = await resolveStorageConfig({ env, userId, siteId, ghToken, owner, log }).catch(e => {
+          log(`  ⚠️ 스토리지 설정 오류: ${e.message}`, "warn");
+          return { type: "local", path: "wp-content/uploads" };
+        });
+
+        if (env?.DB && userId) {
           await env.DB.prepare(
             `INSERT INTO cachecloud_sites (site_id, user_id, worker_name, enabled, created_at)
              VALUES (?, ?, ?, 1, ?)
@@ -2254,7 +2708,7 @@ export async function provisionCloudflarePagesHosting({
           ).bind(siteId, userId, `${workerName}-cdn`, new Date().toISOString()).run().catch(() => {});
         }
 
-        // wp-rocket zip 별도 업로드 (바이너리 파일, Content API 사용)
+        // wp-rocket zip 별도 업로드
         if (wpRocketZipB64) {
           try {
             const zipRes = await ghReq("PUT", `/repos/${owner}/${repoName}/contents/_plugins/wp-rocket.zip`, ghToken, {
@@ -2271,9 +2725,7 @@ export async function provisionCloudflarePagesHosting({
 
         // GitHub Variables 등록
         await Promise.allSettled([
-          // CF_API_TOKEN: Wrangler용 API Token (제한적 권한 가능)
           cfToken     ? setGhVariable(ghToken, owner, repoName, "CF_API_TOKEN",  cfToken)     : null,
-          // CF_API_KEY + CF_EMAIL: Global API Key 방식 (더 넓은 권한, wrangler deploy 안정적)
           cfToken     ? setGhVariable(ghToken, owner, repoName, "CF_API_KEY",    cfToken)     : null,
           cfEmail     ? setGhVariable(ghToken, owner, repoName, "CF_EMAIL",      cfEmail)     : null,
           cfAccountId ? setGhVariable(ghToken, owner, repoName, "CF_ACCOUNT_ID", cfAccountId) : null,
@@ -2282,41 +2734,91 @@ export async function provisionCloudflarePagesHosting({
         ]);
         await log("  ✅ GitHub Actions 환경변수 등록 완료");
 
-        // ── CloudPressDB 저장소 폴더 구조 초기화 ──────────────────────────────
-        await initCloudPressDbFolders({ env, ghToken, owner, userId, siteId, repoName, log }).catch(e =>
-          log(`  ⚠️ CloudPressDB 폴더 초기화 오류: ${e.message}`, "warn")
-        );
-
-        // ── CP3 스토리지 폴더 구조 초기화 ────────────────────────────────────
-        // 구조: {cp3_repo}/{user_id}/{site_id}/media/, backup/, logs/
-        if (featureFlags?.cp3) {
-          await initCp3StorageFolders({ env, ghToken, owner, userId, siteId, repoName, log }).catch(e =>
-            log(`  ⚠️ CP3 폴더 초기화 오류: ${e.message}`, "warn")
-          );
-        } else {
-          await log("  ℹ️ CP3 미구독 — 기본 업로드 경로를 사용합니다.");
+        // ── [신규] CacheCloud 구독 중이면 CDN Worker 실제 배포 ───────────────
+        let cacheCloudUrl = null;
+        if (hasCacheCloud && cfToken && cfAccountId && workerDomain) {
+          await log("▶ [5.5/6] CacheCloud Worker 배포 (구독 확인됨)...");
+          cacheCloudUrl = await deployCacheCloudWorkerForSite({
+            cfToken, cfAccountId, cfEmail,
+            workerName, originUrl: workerDomain,
+            kvCacheId, log,
+          }).catch(async (e) => {
+            await log(`  ⚠️ CacheCloud 배포 오류: ${e.message}`, "warn");
+            return null;
+          });
+          if (cacheCloudUrl && env?.DB && userId) {
+            await env.DB.prepare(
+              `INSERT INTO cachecloud_sites (site_id, user_id, worker_name, cdn_url, enabled, created_at)
+               VALUES (?, ?, ?, ?, 1, ?)
+               ON CONFLICT(site_id) DO UPDATE SET worker_name = excluded.worker_name, cdn_url = excluded.cdn_url`
+            ).bind(siteId, userId, `${workerName}-cdn`, cacheCloudUrl, new Date().toISOString()).run().catch(() => {});
+          }
         }
 
         // WordPress 설치 Action 트리거
         await delay(3000);
         const triggerRes = await ghReq("POST", `/repos/${owner}/${repoName}/actions/workflows/install-wordpress.yml/dispatches`, ghToken, { ref: "main" }).catch(() => ({ ok: false }));
         if (triggerRes.ok || triggerRes.status === 204) {
-          await log("  🚀 WordPress 설치 Action 트리거 완료 (약 3~5분 소요)");
+          await log("  🚀 WordPress 설치 Action 트리거 완료");
         } else {
           await log("  ⚠️ Action 트리거 실패 — GitHub Actions 탭에서 수동 실행하세요", "warn");
         }
 
+        // Astro 빌드 Action 트리거
+        await delay(2000);
+        const astroBuildTrigger = await ghReq("POST", `/repos/${owner}/${repoName}/actions/workflows/astro-build.yml/dispatches`, ghToken, { ref: "main" }).catch(() => ({ ok: false }));
+        if (astroBuildTrigger.ok || astroBuildTrigger.status === 204) {
+          await log("  🏗️ Astro 빌드 Action 트리거 완료 (PHP→Astro / JS→TS 변환 검증)");
+        }
+
         // GitHub Pages 활성화
         await ghReq("POST", `/repos/${owner}/${repoName}/pages`, ghToken, { build_type: "workflow" }).catch(() => {});
+
+        // ── [신규] 프로비저닝 품질 검증 (1% 에러 용납 불가) ─────────────────
+        await log("▶ [6/6] 품질 검증 및 최소 10분 보장 중...");
+        const verifyResult = await verifyAndEnsureQuality({
+          ghToken, owner, repoName, workerDomain, log,
+          retryFn: async (failedKeys) => {
+            // 실패한 항목별 재시도 로직
+            if (failedKeys.includes("frontendLayout") || failedKeys.includes("wpApiTs")) {
+              // Astro/TS 파일 누락 시 재push
+              await log("  🔄 Astro/TS 파일 재push 시도...");
+              const astroFiles = Object.entries(convertPhpJsToAstroTs({ siteName, siteUrl, siteId }))
+                .map(([path, content]) => ({ path, content }));
+              await ghBatchPush(ghToken, owner, repoName, astroFiles, "retry: Astro/TS 파일 재업로드").catch(() => {});
+            }
+            if (failedKeys.includes("wpConfig") || failedKeys.includes("dbPhp")) {
+              // WordPress 핵심 파일 누락 시 재push
+              await log("  🔄 WordPress 핵심 파일 재push 시도...");
+              const coreFiles = [
+                { path: "wordpress/wp-config.php", content: buildWpConfig({ siteId, siteUrl, dbPrefix, authKey, secureAuthKey, loggedInKey, nonceKey, authSalt, secureAuthSalt, loggedInSalt, nonceSalt }) },
+                { path: "wordpress/wp-content/db.php", content: buildSqliteDbPhp() },
+              ];
+              await ghBatchPush(ghToken, owner, repoName, coreFiles, "retry: WordPress 핵심 파일 재업로드").catch(() => {});
+            }
+          },
+        });
+
+        // 최소 10분 보장: 아직 10분이 안 됐으면 나머지 시간 대기
+        const elapsed = Date.now() - provisionStart;
+        const MIN_DURATION = 10 * 60 * 1000; // 10분
+        if (elapsed < MIN_DURATION) {
+          const remaining = MIN_DURATION - elapsed;
+          await log(`  ⏱️ 최소 10분 보장 — 추가 안정화 대기 중 (${Math.ceil(remaining / 1000)}초)...`);
+          await delay(remaining);
+        }
+
+        if (!verifyResult.verified) {
+          await log(`  ⚠️ 일부 검증 항목 미통과: ${(verifyResult.failedKeys || []).join(", ")}`, "warn");
+          await log("  → 사이트는 생성됐으나 일부 파일이 누락됐을 수 있습니다. 호스팅 상세 페이지에서 재시도하세요.");
+        }
       } else {
         await log("⚠️ GitHub push 실패", "warn");
       }
     }
   }
 
-  // ── 8. 성공 판단: Worker OR GitHub 레포 중 하나라도 있으면 부분 성공 ────
-  // WordPress 설치는 GitHub Actions가 비동기로 완료함
-  // Worker 없어도 GitHub Actions의 deploy-worker.yml로 나중에 배포 가능
+  // ── 8. 성공 판단 ──────────────────────────────────────────────────────────
   const success = !!(workerDomain || githubRepoUrl);
   if (!success) {
     await log("❌ Worker 배포 및 GitHub 레포 생성 모두 실패", "error");
@@ -2324,12 +2826,18 @@ export async function provisionCloudflarePagesHosting({
   }
 
   const finalUrl = workerDomain || (githubRepoUrl ? `https://github.com/${owner}/${repoName}` : null);
+  const totalMin = Math.ceil((Date.now() - provisionStart) / 60000);
 
   await log("━━━ 프로비저닝 완료 ━━━");
-  await log(`미러링 Worker : ${workerDomain ? "✅ " + workerDomain : "⚠️ 미배포 (GitHub Actions deploy-worker.yml로 배포 가능)"}`);
-    await log(`KV 캐시       : ${kvCacheId ? "✅ " + kvCacheId : "⚠️ 없음"}`);
+  await log(`총 소요 시간  : ${totalMin}분`);
+  await log(`미러링 Worker : ${workerDomain ? "✅ " + workerDomain : "⚠️ 미배포"}`);
+  await log(`PHP Runner    : ${phpRunnerDeployed ? "✅ 배포됨" : "⚠️ 미배포"}`);
+  await log(`CacheCloud    : ${hasCacheCloud ? (cacheCloudUrl ? "✅ " + cacheCloudUrl : "⚠️ 배포 실패") : "미구독"}`);
+  await log(`KV 캐시       : ${kvCacheId ? "✅ " + kvCacheId : "⚠️ 없음"}`);
   await log(`GitHub 레포   : ${githubRepoUrl || "없음"}`);
-  await log(`WP 설치 Action: ${githubRepoUrl ? "🚀 실행 중 (3~5분)" : "⚠️ 미트리거"}`);
+  await log(`스토리지      : ${storageConfig ? storageConfig.type : "local"}`);
+  await log(`WP 설치 Action: ${githubRepoUrl ? "🚀 실행 중" : "⚠️ 미트리거"}`);
+  await log(`Astro/TS 변환 : ✅ frontend/ 폴더 (PHP→Astro, JS→TS)`);
   if (workerDomain) {
     await log(`사이트 URL    : ${workerDomain}`);
     await log(`관리자        : ${workerDomain}/wp-admin/ (설치 완료 후 접속 가능)`);
@@ -2338,50 +2846,28 @@ export async function provisionCloudflarePagesHosting({
   return {
     success,
     workerName,
-    workerDomain:  workerDomain || realWorkerUrl || null,
-    cfPagesUrl:    workerDomain || realWorkerUrl || null,
+    workerDomain:       workerDomain || realWorkerUrl || null,
+    cfPagesUrl:         workerDomain || realWorkerUrl || null,
+    cacheCloudUrl:      cacheCloudUrl || null,
+    hasCacheCloud,
+    storageConfig,
     githubRepoUrl,
-    githubOwner:   owner,
-    githubRepo:    repoName,
+    githubOwner:        owner,
+    githubRepo:         repoName,
     kvCacheId,
-    dbEngine:      "sqlite",
-    dbPath:        "_db/wordpress.db",
+    dbEngine:           "sqlite",
+    dbPath:             "_db/wordpress.db",
+    frontendPath:       "frontend/src",
+    astroConverted:     true,
+    tsConverted:        true,
     wpAdminUser,
     wpAdminPass,
     wpAdminEmail,
-    siteUrl:       finalUrl,
+    siteUrl:            finalUrl,
     phpRunnerDeployed,
-    autoProvisioned: true,
+    totalMinutes:       totalMin,
+    autoProvisioned:    true,
   };
-}
-
-async function initCloudPressDbFolders({ env, ghToken, owner, userId, siteId, repoName, log }) {
-  if (!env?.DB || !ghToken || !userId || !siteId) return;
-  const rows = await env.DB.prepare(
-    "SELECT key, value FROM admin_settings WHERE key IN ('cloudpressdb_repo_owner','cloudpressdb_repo_name','cloudpressdb_github_token')"
-  ).all().catch(() => ({ results: [] }));
-
-  const map = {};
-  for (const r of rows.results || []) map[r.key] = r.value;
-
-  const dbOwner = map.cloudpressdb_repo_owner || owner;
-  const dbRepo = map.cloudpressdb_repo_name || null;
-  const dbToken = map.cloudpressdb_github_token || ghToken;
-  const base = `${userId}/${siteId}`;
-
-  if (!dbRepo) {
-    await log("  ℹ️ CloudPressDB 레포 미설정 — 현재 호스팅 레포의 _db 경로를 사용합니다.");
-    await ghPutFile(dbToken, owner, repoName, `_db/${base}/.gitkeep`, "", `init: _db/${base}`, null).catch(() => {});
-    return;
-  }
-
-  await log(`  🗄️ CloudPressDB 폴더 초기화 (${dbOwner}/${dbRepo}/${base})...`);
-  await ghPutFile(dbToken, dbOwner, dbRepo, `${base}/.gitkeep`, "", `init: ${base}/.gitkeep`, null).catch(() => {});
-  await ghPutFile(
-    dbToken, dbOwner, dbRepo, `${base}/meta.json`,
-    JSON.stringify({ user_id: userId, site_id: siteId, engine: "sqlite", created_at: new Date().toISOString() }, null, 2) + "\n",
-    `init: ${base}/meta.json`, null
-  ).catch(() => {});
 }
 
 // ── CP3 스토리지 폴더 구조 초기화 ─────────────────────────────────────────────

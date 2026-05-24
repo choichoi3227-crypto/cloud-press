@@ -6,6 +6,11 @@ export async function onRequestGet(context) {
   const url    = new URL(request.url);
   const code   = url.searchParams.get("code");
   const error  = url.searchParams.get("error");
+  const stateRaw = url.searchParams.get("state") || "{}";
+  let stateObj = {};
+  try { stateObj = JSON.parse(decodeURIComponent(stateRaw)); } catch {}
+  const folderName = stateObj.folder || "cloudpress-storage";
+  const originUrl  = stateObj.origin  || new URL(request.url).origin;
 
   const HTML_CLOSE = (msg, success) => new Response(`<!DOCTYPE html>
 <html lang="ko">
@@ -75,12 +80,19 @@ h2{margin:0 0 8px;}p{color:#9ca3af;font-size:14px;}</style></head>
       );
     }
 
-    // refresh_token을 DB에 저장
+    // refresh_token 및 폴더명을 DB에 저장
     await env.DB.prepare(
       "INSERT INTO admin_settings (key, value) VALUES ('gdrive_refresh_token', ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value"
     ).bind(tokenData.refresh_token).run();
+    await env.DB.prepare(
+      "INSERT INTO admin_settings (key, value) VALUES ('gdrive_folder', ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value"
+    ).bind(folderName).run();
 
-    return HTML_CLOSE("Google Drive가 성공적으로 연결되었습니다! Refresh Token이 저장되었습니다.", true);
+    // 성공: storage 페이지로 리다이렉트 (연결 완료 파라미터 포함)
+    const storageUrl = new URL("/storage", originUrl);
+    storageUrl.searchParams.set("gdrive_connected", "1");
+    storageUrl.searchParams.set("folder", folderName);
+    return Response.redirect(storageUrl.toString(), 302);
   } catch (e) {
     return HTML_CLOSE(`오류: ${e.message}`, false);
   }

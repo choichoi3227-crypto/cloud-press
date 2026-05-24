@@ -99,7 +99,8 @@ body.aws-theme{background:var(--aws-bg);color:var(--aws-text)}
 /* ── 공백 수정 + 모바일 전역 개선 ──────────────────────────────────────────── */
 /* 불필요한 여백 제거 */
 main { min-height: 0; }
-section:empty, div:empty { display: none; }
+/* NOTE: section:empty / div:empty 규칙 제거 — 사이드바·nav 등 JS로 채워지는 요소가 숨겨지는 버그 방지 */
+/* section:empty, div:empty { display: none; }  ← 제거 */
 
 /* 모바일 기본 패딩/마진 정규화 */
 @media (max-width: 768px) {
@@ -139,8 +140,8 @@ section:empty, div:empty { display: none; }
   .md\:col-span-2 { grid-column: span 1 !important; }
 }
 
-/* 공백 유발하는 hidden 처리 강화 */
-.hidden { display: none !important; }
+/* NOTE: .hidden은 !important 없이 — Tailwind의 md:flex 등 반응형 클래스가 override 가능해야 함 */
+/* .hidden { display: none !important; }  ← 제거: md:flex, md:block 등이 작동하지 않게 됨 */
 
 /* 호스팅 생성 페이지 헤더 공백 방지 */
 #step-indicators.hidden + * { margin-top: 0 !important; }

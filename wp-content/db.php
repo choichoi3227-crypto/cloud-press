@@ -397,13 +397,23 @@ class CloudPress_DB extends wpdb {
             if (is_null($arg)) {
                 $arg = 'NULL';
             } elseif (is_int($arg) || is_float($arg)) {
-                // 숫자는 그대로
+                // 숫자는 타입 강제
+                $arg = is_int($arg) ? (int) $arg : (float) $arg;
             } else {
-                $arg = "'" . addslashes((string) $arg) . "'";
+                // SQL Injection 방어: 위험 패턴 차단 + escape
+                $str = (string) $arg;
+                // null 바이트 제거
+                $str = str_replace("\x00", '', $str);
+                // addslashes + 작은따옴표 이스케이프
+                $arg = "'" . str_replace(
+                    ["\\", "'", "\r", "\n"],
+                    ["\\\\", "\\'", "\\r", "\\n"],
+                    $str
+                ) . "'";
             }
         });
 
-        // %s 교체
+        // %s/%d/%f 교체
         $i = 0;
         return preg_replace_callback("/'?%[sdf]'?/", function($m) use (&$i, $args) {
             return $args[$i++] ?? 'NULL';

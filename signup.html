@@ -34,7 +34,7 @@
         <form id="signupForm" class="space-y-4">
             <div class="space-y-1">
                 <label class="text-xs text-gray-400 ml-1">이메일 주소</label>
-                <input type="email" id="email" required placeholder="example@email.com"
+                <input type="text" id="email" autocomplete="email" inputmode="email" placeholder="example@email.com"
                     class="w-full p-4 bg-white/5 border border-white/10 rounded-xl focus:border-blue-500 outline-none transition text-white">
             </div>
             <div class="space-y-1">
@@ -86,6 +86,10 @@
             const passwordConfirm = document.getElementById('passwordConfirm').value;
 
             // 클라이언트 유효성 검사
+            const emailRe = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+            if (!email || !emailRe.test(email)) {
+                return showError('올바른 이메일 형식을 입력해주세요.');
+            }
             if (password.length < 8) {
                 return showError('비밀번호는 8자 이상이어야 합니다.');
             }

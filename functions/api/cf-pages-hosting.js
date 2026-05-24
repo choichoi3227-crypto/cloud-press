@@ -1569,7 +1569,7 @@ jobs:
           echo "📋 DB/db.php 상태"
           if [ -f "_db/wordpress.db" ]; then
             SIZE=$(wc -c < _db/wordpress.db)
-            echo "✅ _db/wordpress.db (${SIZE} bytes)"
+            echo "✅ _db/wordpress.db (\${SIZE} bytes)"
             echo 'PD9waHAKJHJhdyA9IGZpbGVfZ2V0X2NvbnRlbnRzKCdfZGIvd29yZHByZXNzLmRiJyk7CiRkYXRhID0ganNvbl9kZWNvZGUoJHJhdywgdHJ1ZSk7CmlmICgkZGF0YSAmJiBpc3NldCgkZGF0YVsnb3B0aW9ucyddKSkgewogIGVjaG8gJyAg7ZiV7IudOiBDbG91ZFByZXNzIEpTT04g7Iuc65OcJyAuIFBIUF9FT0w7CiAgZWNobyAnICDsmLXshZg6ICcgLiBjb3VudCgkZGF0YVsnb3B0aW9ucyddKSAuIFBIUF9FT0w7Cn0gZWxzZWlmICgkcmF3ICE9PSAnJyAmJiAkcmF3WzBdICE9PSAneycpIHsKICBlY2hvICcgIO2YleyLnTogU1FMaXRlIOuwlOydtOuEiOumrCcgLiBQSFBfRU9MOwogICRwZG8gPSBuZXcgUERPKCdzcWxpdGU6X2RiL3dvcmRwcmVzcy5kYicpOwogICR0YWJsZXMgPSAkcGRvLT5xdWVyeSgiU0VMRUNUIG5hbWUgRlJPTSBzcWxpdGVfbWFzdGVyIFdIRVJFIHR5cGU9J3RhYmxlJyIpLT5mZXRjaEFsbCgpOwogIGVjaG8gJyAg7YWM7J2067iUOiAnIC4gY291bnQoJHRhYmxlcykgLiBQSFBfRU9MOwp9Cg==' | base64 -d > /tmp/check_db.php
             php /tmp/check_db.php || true
           else

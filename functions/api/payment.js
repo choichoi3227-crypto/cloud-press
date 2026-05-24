@@ -16,33 +16,89 @@ async function getSettings(env) {
 }
 
 // ── 플랜 가격 정의 ─────────────────────────────────────────────────────────
+// product_type: hosting | cpdb | cp3 | cachecloud
 const PLANS = {
-  starter: { monthly: 9900,  yearly: 7920  },
-  pro:     { monthly: 29900, yearly: 23920 },
+  // 워드프레스 호스팅 (호스팅당)
+  hosting: {
+    starter:    { monthly: 9900,  yearly: 7920  },
+    pro:        { monthly: 24900, yearly: 19920 },
+    enterprise: { monthly: 59900, yearly: 47920 },
+  },
+  // CloudPressDB (계정 단위)
+  cpdb: {
+    basic:    { monthly: 5900,  yearly: 4720  },
+    standard: { monthly: 14900, yearly: 11920 },
+    pro:      { monthly: 39900, yearly: 31920 },
+  },
+  // CP3 오브젝트 스토리지 (계정 단위)
+  cp3: {
+    basic:    { monthly: 3900,  yearly: 3120  },
+    standard: { monthly: 9900,  yearly: 7920  },
+    pro:      { monthly: 29900, yearly: 23920 },
+  },
+  // CacheCloud (계정 단위)
+  cachecloud: {
+    basic:    { monthly: 4900,  yearly: 3920  },
+    standard: { monthly: 12900, yearly: 10320 },
+    pro:      { monthly: 29900, yearly: 23920 },
+  },
+};
+
+// 상품 타입별 유효 플랜
+const VALID_PLANS = {
+  hosting:    ["starter", "pro", "enterprise"],
+  cpdb:       ["basic", "standard", "pro"],
+  cp3:        ["basic", "standard", "pro"],
+  cachecloud: ["basic", "standard", "pro"],
+};
+
+const PRODUCT_NAMES = {
+  hosting:    "워드프레스 호스팅",
+  cpdb:       "CloudPressDB",
+  cp3:        "CP3",
+  cachecloud: "CacheCloud",
 };
 
 // ── payments 테이블 보장 ──────────────────────────────────────────────────
 async function ensureTable(db) {
   await db.prepare(`
     CREATE TABLE IF NOT EXISTS payments (
-      id            TEXT PRIMARY KEY,
-      user_id       TEXT NOT NULL,
-      site_id       TEXT NOT NULL,
-      plan          TEXT NOT NULL,
-      billing_cycle TEXT NOT NULL DEFAULT 'monthly',
-      amount        INTEGER NOT NULL,
-      status        TEXT NOT NULL DEFAULT 'pending',
-      toss_order_id TEXT UNIQUE,
+      id               TEXT PRIMARY KEY,
+      user_id          TEXT NOT NULL,
+      site_id          TEXT,
+      product_type     TEXT NOT NULL DEFAULT 'hosting',
+      plan             TEXT NOT NULL,
+      billing_cycle    TEXT NOT NULL DEFAULT 'monthly',
+      amount           INTEGER NOT NULL,
+      status           TEXT NOT NULL DEFAULT 'pending',
+      toss_order_id    TEXT UNIQUE,
       toss_payment_key TEXT,
-      toss_receipt_url  TEXT,
-      expires_at    TEXT,
-      created_at    TEXT DEFAULT CURRENT_TIMESTAMP
+      toss_receipt_url TEXT,
+      expires_at       TEXT,
+      created_at       TEXT DEFAULT CURRENT_TIMESTAMP
     )
   `).run().catch(() => {});
+
+  // 기존 테이블에 product_type 컬럼 추가 (없으면)
+  await db.prepare("ALTER TABLE payments ADD COLUMN product_type TEXT DEFAULT 'hosting'").run().catch(() => {});
+  await db.prepare("ALTER TABLE payments ADD COLUMN site_id TEXT").run().catch(() => {});
 
   // sites 테이블에 plan 컬럼 추가 (없으면)
   await db.prepare("ALTER TABLE sites ADD COLUMN site_plan TEXT DEFAULT 'free'").run().catch(() => {});
   await db.prepare("ALTER TABLE sites ADD COLUMN plan_expires_at TEXT").run().catch(() => {});
+
+  // 상품 구독 테이블
+  await db.prepare(`
+    CREATE TABLE IF NOT EXISTS user_product_subscriptions (
+      user_id      TEXT NOT NULL,
+      product_type TEXT NOT NULL,
+      plan         TEXT NOT NULL DEFAULT 'basic',
+      status       TEXT NOT NULL DEFAULT 'inactive',
+      expires_at   TEXT,
+      created_at   TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (user_id, product_type)
+    )
+  `).run().catch(() => {});
 }
 
 // ── path 추출 ─────────────────────────────────────────────────────────────
@@ -121,40 +177,56 @@ export async function onRequestPost(context) {
 
   // ── 결제 요청 초기화 ──────────────────────────────────────────────────
   if (sub === "request") {
-    const { site_id, plan, billing_cycle = "monthly" } = body;
+    const { product_type = "hosting", site_id, plan, billing_cycle = "monthly" } = body;
 
-    if (!site_id) return jsonErr("site_id가 필요합니다.", 400);
-    if (!plan || !["starter", "pro"].includes(plan))
-      return jsonErr("유효하지 않은 플랜입니다. (starter 또는 pro)", 400);
+    if (!["hosting", "cpdb", "cp3", "cachecloud"].includes(product_type))
+      return jsonErr("유효하지 않은 상품 타입입니다.", 400);
+    if (!plan || !VALID_PLANS[product_type]?.includes(plan))
+      return jsonErr(`유효하지 않은 플랜입니다. (${VALID_PLANS[product_type]?.join(", ")})`, 400);
     if (!["monthly", "yearly"].includes(billing_cycle))
       return jsonErr("billing_cycle은 monthly 또는 yearly여야 합니다.", 400);
 
-    // 사이트 존재 및 소유 확인
-    const site = await env.DB.prepare(
-      "SELECT id, site_name FROM sites WHERE id = ? AND user_id = ?"
-    ).bind(site_id, payload.id).first();
-    if (!site) return jsonErr("사이트를 찾을 수 없습니다.", 404);
+    let siteName = null;
 
-    const amount = PLANS[plan][billing_cycle];
-    const orderId = `cp-${site_id.slice(0,8)}-${Date.now()}`;
+    // 호스팅은 site_id 필수
+    if (product_type === "hosting") {
+      if (!site_id) return jsonErr("hosting 결제에는 site_id가 필요합니다.", 400);
+      const site = await env.DB.prepare(
+        "SELECT id, site_name FROM sites WHERE id = ? AND user_id = ?"
+      ).bind(site_id, payload.id).first();
+      if (!site) return jsonErr("사이트를 찾을 수 없습니다.", 404);
+      siteName = site.site_name;
+    }
+
+    const amount = PLANS[product_type][plan][billing_cycle];
+    const shortId = (site_id || payload.id).slice(0, 8);
+    const orderId = `cp-${product_type}-${shortId}-${Date.now()}`;
+    const productLabel = PRODUCT_NAMES[product_type] || product_type;
+    const planLabel = { starter: "스타터", pro: "프로", enterprise: "엔터프라이즈", basic: "베이직", standard: "스탠다드" }[plan] || plan;
+    const cycleLabel = billing_cycle === "monthly" ? "월간" : "연간";
+    const orderName = siteName
+      ? `${productLabel} ${planLabel} (${cycleLabel}) - ${siteName}`
+      : `${productLabel} ${planLabel} (${cycleLabel})`;
 
     // 결제 레코드 생성 (pending)
     await env.DB.prepare(
-      `INSERT INTO payments (id, user_id, site_id, plan, billing_cycle, amount, status, toss_order_id, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?)`
+      `INSERT INTO payments (id, user_id, site_id, product_type, plan, billing_cycle, amount, status, toss_order_id, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)`
     ).bind(
-      crypto.randomUUID(), payload.id, site_id, plan, billing_cycle,
+      crypto.randomUUID(), payload.id, site_id || null,
+      product_type, plan, billing_cycle,
       amount, orderId, new Date().toISOString()
     ).run();
 
     return jsonOk({
-      success:       true,
-      order_id:      orderId,
+      success:        true,
+      order_id:       orderId,
       amount,
-      order_name:    `CloudPress ${plan === 'starter' ? '스타터' : '프로'} 플랜 (${billing_cycle === 'monthly' ? '월간' : '연간'}) - ${site.site_name}`,
+      order_name:     orderName,
+      product_type,
       customer_email: payload.email,
       customer_name:  payload.email.split("@")[0],
-      site_name:      site.site_name,
+      site_name:      siteName,
     });
   }
 
@@ -223,14 +295,32 @@ export async function onRequestPost(context) {
       order_id
     ).run();
 
-    // 호스팅 플랜 업그레이드
-    await env.DB.prepare(
-      "UPDATE sites SET site_plan = ?, plan_expires_at = ? WHERE id = ?"
-    ).bind(payment.plan, expiresAt.toISOString(), payment.site_id).run();
+    const productType = payment.product_type || "hosting";
+    const planLabels = { starter: "스타터", pro: "프로", enterprise: "엔터프라이즈", basic: "베이직", standard: "스탠다드" };
+
+    // 상품 타입별 구독 처리
+    if (productType === "hosting" && payment.site_id) {
+      // 호스팅: 해당 사이트 플랜 업그레이드
+      await env.DB.prepare(
+        "UPDATE sites SET site_plan = ?, plan_expires_at = ? WHERE id = ?"
+      ).bind(payment.plan, expiresAt.toISOString(), payment.site_id).run();
+    } else if (["cpdb", "cp3", "cachecloud"].includes(productType)) {
+      // 유료 상품: user_product_subscriptions 업데이트
+      await env.DB.prepare(
+        `INSERT INTO user_product_subscriptions (user_id, product_type, plan, status, expires_at, created_at)
+         VALUES (?, ?, ?, 'active', ?, ?)
+         ON CONFLICT(user_id, product_type) DO UPDATE SET
+           plan = excluded.plan, status = 'active', expires_at = excluded.expires_at`
+      ).bind(
+        payment.user_id, productType, payment.plan,
+        expiresAt.toISOString(), new Date().toISOString()
+      ).run().catch(() => {});
+    }
 
     return jsonOk({
       success:      true,
-      message:      `${payment.plan === 'starter' ? '스타터' : '프로'} 플랜이 활성화되었습니다!`,
+      message:      `${PRODUCT_NAMES[productType] || productType} ${planLabels[payment.plan] || payment.plan} 플랜이 활성화되었습니다!`,
+      product_type: productType,
       plan:         payment.plan,
       expires_at:   expiresAt.toISOString(),
       receipt_url:  tossData.receipt?.url || null,

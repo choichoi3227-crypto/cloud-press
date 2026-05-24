@@ -1569,19 +1569,22 @@ jobs:
           echo "📋 DB/db.php 상태"
           if [ -f "_db/wordpress.db" ]; then
             SIZE=$(wc -c < _db/wordpress.db)
-            echo "✅ _db/wordpress.db (\${SIZE} bytes)"
-            php -r "
-            \\$raw = file_get_contents('_db/wordpress.db');
-            \\$data = json_decode(\\$raw, true);
-            if (\\$data && isset(\\$data['options'])) {
-              echo '  형식: CloudPress JSON 시드\\n';
-              echo '  옵션: ' . count(\\$data['options']) . '\\n';
-            } elseif (\\$raw !== '' && \\$raw[0] !== '{') {
-              echo '  형식: SQLite 바이너리\\n';
-              \\$pdo = new PDO('sqlite:_db/wordpress.db');
-              echo '  테이블: ' . count(\\$pdo->query(\"SELECT name FROM sqlite_master WHERE type='table'\")->fetchAll()) . '\\n';
-            }
-            "
+            echo "✅ _db/wordpress.db (${SIZE} bytes)"
+            cat > /tmp/check_db.php << 'PHPEOF'
+<?php
+$raw = file_get_contents('_db/wordpress.db');
+$data = json_decode($raw, true);
+if ($data && isset($data['options'])) {
+  echo '  형식: CloudPress JSON 시드' . PHP_EOL;
+  echo '  옵션: ' . count($data['options']) . PHP_EOL;
+} elseif ($raw !== '' && $raw[0] !== '{') {
+  echo '  형식: SQLite 바이너리' . PHP_EOL;
+  $pdo = new PDO('sqlite:_db/wordpress.db');
+  $tables = $pdo->query("SELECT name FROM sqlite_master WHERE type='table'")->fetchAll();
+  echo '  테이블: ' . count($tables) . PHP_EOL;
+}
+PHPEOF
+            php /tmp/check_db.php || true
           else
             echo "⚠️ _db/wordpress.db 없음"
           fi
@@ -1595,17 +1598,19 @@ jobs:
       - name: JSON 시드 → SQLite 병합 (선택)
         run: |
           if [ ! -f "_db/wordpress.db" ]; then exit 0; fi
-          php -r "
-          \\$raw = @file_get_contents('_db/wordpress.db');
-          \\$data = json_decode(\\$raw ?: '', true);
-          if (!\\$data || empty(\\$data['options'])) { echo 'JSON 시드 아님 — 건너뜀\\n'; exit(0); }
-          \\$pdo = new PDO('sqlite:_db/wordpress.sqlite');
-          \\$pdo->exec('PRAGMA journal_mode=WAL');
-          \\$pdo->exec('CREATE TABLE IF NOT EXISTS wp_options (option_id INTEGER PRIMARY KEY AUTOINCREMENT, option_name TEXT UNIQUE, option_value TEXT, autoload TEXT DEFAULT yes)');
-          \\$st = \\$pdo->prepare('INSERT OR REPLACE INTO wp_options (option_name, option_value, autoload) VALUES (?,?,?)');
-          foreach (\\$data['options'] ?? [] as \\$o) { \\$st->execute([\\$o['option_name'], \\$o['option_value'], \\$o['autoload'] ?? 'yes']); }
-          echo '✅ wordpress.sqlite 병합 완료\\n';
-          "
+          cat > /tmp/merge_db.php << 'PHPEOF'
+<?php
+$raw = @file_get_contents('_db/wordpress.db');
+$data = json_decode($raw ?: '', true);
+if (!$data || empty($data['options'])) { echo 'JSON 시드 아님 — 건너뜀' . PHP_EOL; exit(0); }
+$pdo = new PDO('sqlite:_db/wordpress.sqlite');
+$pdo->exec('PRAGMA journal_mode=WAL');
+$pdo->exec('CREATE TABLE IF NOT EXISTS wp_options (option_id INTEGER PRIMARY KEY AUTOINCREMENT, option_name TEXT UNIQUE, option_value TEXT, autoload TEXT DEFAULT yes)');
+$st = $pdo->prepare('INSERT OR REPLACE INTO wp_options (option_name, option_value, autoload) VALUES (?,?,?)');
+foreach ($data['options'] ?? [] as $o) { $st->execute([$o['option_name'], $o['option_value'], $o['autoload'] ?? 'yes']); }
+echo '✅ wordpress.sqlite 병합 완료' . PHP_EOL;
+PHPEOF
+          php /tmp/merge_db.php
 `;
 }
 
@@ -2068,11 +2073,11 @@ jobs:
         with:
           node-version: '20'
           cache: 'npm'
-          cache-dependency-path: frontend/package-lock.json
+
       - name: Astro 빌드
         working-directory: frontend
         run: |
-          npm ci
+          npm install
           npm run build
       - name: 빌드 결과 커밋
         run: |

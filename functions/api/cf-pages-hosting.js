@@ -1994,7 +1994,7 @@ async function deployMirrorWorker({ cfToken, cfAccountId, cfEmail, workerName, w
 export async function provisionCloudflarePagesHosting({
   env, siteId, siteName, plan, planLimits,
   cfToken, cfAccountId, cfEmail,
-  initialDomain, userId, isAdmin, log,
+  initialDomain, userId, isAdmin, featureFlags = {}, log,
 }) {
   const shortId     = siteId.replace(/-/g, "").slice(0, 8);
   const safeSlug    = slugify(siteName) || `site-${shortId}`;
@@ -2007,6 +2007,7 @@ export async function provisionCloudflarePagesHosting({
   await log(`사이트    : ${siteName} (${siteId})`);
   await log(`Worker    : ${workerName} (미러링 코드)`);
   await log(`DB        : GitHub 레포 _db/wordpress.db (SQLite)`);
+  await log(`Features  : CacheCloud=${featureFlags?.cacheCloud ? "ON" : "OFF"}, CP3=${featureFlags?.cp3 ? "ON" : "OFF"}`);
 
   // ── 1. 자격증명 생성 ──────────────────────────────────────────────────────
   const wpAdminUser  = "wp_" + randomStr(8);
@@ -2229,14 +2230,13 @@ export async function provisionCloudflarePagesHosting({
           path: "wp-transform.ts",
           content: buildWpTransform({ siteName, siteUrl, siteId, owner, repoName }),
         },
-        {
+        ...(featureFlags?.cacheCloud ? [{
           path: "cachecloud-worker.js",
           content: buildCacheCloudWorker({ workerName, originUrl: realWorkerUrl }),
-        },
-        {
+        }, {
           path: "wrangler-cachecloud.toml",
           content: buildCacheCloudWranglerToml({ workerName, originUrl: realWorkerUrl }),
-        },
+        }] : []),
       ];
 
       const pushed = await ghBatchPush(ghToken, owner, repoName, filesToPush, "🚀 CloudPress 초기 설정");
@@ -2244,9 +2244,9 @@ export async function provisionCloudflarePagesHosting({
         githubRepoUrl = `https://github.com/${owner}/${repoName}`;
         await log(`✅ GitHub 레포 push 완료: ${githubRepoUrl}`);
         await log(`  📦 _db/wordpress.db + wordpress/wp-content/db.php 업로드 완료`);
-        await log(`  ⚡ CacheCloud Worker 소스 포함 (cachecloud-worker.js)`);
+        await log(`  ⚡ CacheCloud Worker: ${featureFlags?.cacheCloud ? "생성됨" : "미구독으로 생략됨"}`);
 
-        if (env?.DB && userId) {
+        if (env?.DB && userId && featureFlags?.cacheCloud) {
           await env.DB.prepare(
             `INSERT INTO cachecloud_sites (site_id, user_id, worker_name, enabled, created_at)
              VALUES (?, ?, ?, 1, ?)
@@ -2282,11 +2282,20 @@ export async function provisionCloudflarePagesHosting({
         ]);
         await log("  ✅ GitHub Actions 환경변수 등록 완료");
 
+        // ── CloudPressDB 저장소 폴더 구조 초기화 ──────────────────────────────
+        await initCloudPressDbFolders({ env, ghToken, owner, userId, siteId, repoName, log }).catch(e =>
+          log(`  ⚠️ CloudPressDB 폴더 초기화 오류: ${e.message}`, "warn")
+        );
+
         // ── CP3 스토리지 폴더 구조 초기화 ────────────────────────────────────
         // 구조: {cp3_repo}/{user_id}/{site_id}/media/, backup/, logs/
-        await initCp3StorageFolders({ env, ghToken, owner, userId, siteId, repoName, log }).catch(e =>
-          log(`  ⚠️ CP3 폴더 초기화 오류: ${e.message}`, "warn")
-        );
+        if (featureFlags?.cp3) {
+          await initCp3StorageFolders({ env, ghToken, owner, userId, siteId, repoName, log }).catch(e =>
+            log(`  ⚠️ CP3 폴더 초기화 오류: ${e.message}`, "warn")
+          );
+        } else {
+          await log("  ℹ️ CP3 미구독 — 기본 업로드 경로를 사용합니다.");
+        }
 
         // WordPress 설치 Action 트리거
         await delay(3000);
@@ -2344,6 +2353,35 @@ export async function provisionCloudflarePagesHosting({
     phpRunnerDeployed,
     autoProvisioned: true,
   };
+}
+
+async function initCloudPressDbFolders({ env, ghToken, owner, userId, siteId, repoName, log }) {
+  if (!env?.DB || !ghToken || !userId || !siteId) return;
+  const rows = await env.DB.prepare(
+    "SELECT key, value FROM admin_settings WHERE key IN ('cloudpressdb_repo_owner','cloudpressdb_repo_name','cloudpressdb_github_token')"
+  ).all().catch(() => ({ results: [] }));
+
+  const map = {};
+  for (const r of rows.results || []) map[r.key] = r.value;
+
+  const dbOwner = map.cloudpressdb_repo_owner || owner;
+  const dbRepo = map.cloudpressdb_repo_name || null;
+  const dbToken = map.cloudpressdb_github_token || ghToken;
+  const base = `${userId}/${siteId}`;
+
+  if (!dbRepo) {
+    await log("  ℹ️ CloudPressDB 레포 미설정 — 현재 호스팅 레포의 _db 경로를 사용합니다.");
+    await ghPutFile(dbToken, owner, repoName, `_db/${base}/.gitkeep`, "", `init: _db/${base}`, null).catch(() => {});
+    return;
+  }
+
+  await log(`  🗄️ CloudPressDB 폴더 초기화 (${dbOwner}/${dbRepo}/${base})...`);
+  await ghPutFile(dbToken, dbOwner, dbRepo, `${base}/.gitkeep`, "", `init: ${base}/.gitkeep`, null).catch(() => {});
+  await ghPutFile(
+    dbToken, dbOwner, dbRepo, `${base}/meta.json`,
+    JSON.stringify({ user_id: userId, site_id: siteId, engine: "sqlite", created_at: new Date().toISOString() }, null, 2) + "\n",
+    `init: ${base}/meta.json`, null
+  ).catch(() => {});
 }
 
 // ── CP3 스토리지 폴더 구조 초기화 ─────────────────────────────────────────────

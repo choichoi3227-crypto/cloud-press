@@ -4,6 +4,19 @@
 import { jsonOk, jsonErr, requireAuth, PLAN_LIMITS } from "../_shared.js";
 import { provisionCloudflarePagesHosting } from "./cf-pages-hosting.js";
 
+async function isSubscribed(env, userId, productType) {
+  if (!env?.DB || !userId) return false;
+  const row = await env.DB.prepare(
+    `SELECT status, expires_at
+     FROM user_product_subscriptions
+     WHERE user_id = ? AND product_type = ?
+     ORDER BY created_at DESC LIMIT 1`
+  ).bind(userId, productType).first().catch(() => null);
+  if (!row || row.status !== "active") return false;
+  if (!row.expires_at) return true;
+  return new Date(row.expires_at).getTime() > Date.now();
+}
+
 export async function onRequestPost(context) {
   const { request, env } = context;
 
@@ -100,6 +113,10 @@ export async function onRequestPost(context) {
         initialDomain: site.initial_domain || null,
         userId:        payload.id,
         isAdmin:       payload.role === "admin",
+        featureFlags: {
+          cacheCloud: await isSubscribed(env, payload.id, "cachecloud"),
+          cp3: await isSubscribed(env, payload.id, "cp3"),
+        },
         log,
       });
 

@@ -92,6 +92,9 @@
                 <button class="tab-btn border border-white/10 px-3 py-2 rounded-xl text-sm font-bold whitespace-nowrap" onclick="switchTab('php',this)">
                     <i class="fas fa-code mr-1 text-indigo-400"></i> PHP 버전
                 </button>
+                <button class="tab-btn border border-white/10 px-3 py-2 rounded-xl text-sm font-bold whitespace-nowrap" onclick="switchTab('convert',this)">
+                    <i class="fas fa-random mr-1 text-cyan-400"></i> 코드 변환
+                </button>
             </div>
 
             <!-- ── 개요 탭 ── -->
@@ -514,6 +517,74 @@
                 </div>
             </div>
 
+            <!-- ── 코드 변환 탭 ── -->
+            <div id="tab-convert" class="tab-content hidden space-y-4">
+                <div class="section-card">
+                    <h3 class="font-bold flex items-center gap-2 mb-1">
+                        <i class="fas fa-random text-cyan-400"></i> 실시간 코드 변환
+                    </h3>
+                    <p class="text-sm text-gray-500 mb-5">PHP 파일을 Astro로, JavaScript 파일을 TypeScript로 실시간 변환합니다. 변환된 파일은 프론트엔드로, 원본 파일은 백엔드로 사용됩니다.</p>
+
+                    <div class="flex gap-2 mb-4">
+                        <button onclick="setConvertType('php_to_astro', this)"
+                            id="conv-btn-php" class="conv-type-btn px-4 py-2 rounded-xl text-sm font-bold border border-cyan-500/50 bg-cyan-900/20 text-cyan-300 transition">
+                            <i class="fas fa-code mr-1"></i> PHP → Astro
+                        </button>
+                        <button onclick="setConvertType('js_to_ts', this)"
+                            id="conv-btn-js" class="conv-type-btn px-4 py-2 rounded-xl text-sm font-bold border border-white/10 text-gray-400 transition hover:border-white/30">
+                            <i class="fas fa-file-code mr-1"></i> JS → TypeScript
+                        </button>
+                    </div>
+
+                    <div class="mb-4">
+                        <label class="text-xs text-gray-500 font-bold uppercase tracking-wider mb-2 block">파일명 (선택)</label>
+                        <input id="conv-filename" type="text" placeholder="component.php"
+                            class="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white focus:border-cyan-500 outline-none font-mono">
+                    </div>
+
+                    <div class="grid md:grid-cols-2 gap-4">
+                        <div>
+                            <div class="text-xs text-gray-500 font-bold uppercase tracking-wider mb-2">원본 코드</div>
+                            <textarea id="conv-input" rows="14"
+                                placeholder="<?php&#10;// 여기에 PHP 코드를 붙여넣으세요&#10;echo '<h1>' . get_the_title() . '</h1>';"
+                                class="w-full bg-[#0a0a0a] border border-white/10 rounded-xl p-4 text-sm text-green-300 font-mono resize-y focus:border-cyan-500 outline-none"></textarea>
+                        </div>
+                        <div>
+                            <div class="text-xs text-gray-500 font-bold uppercase tracking-wider mb-2 flex items-center justify-between">
+                                <span>변환된 코드</span>
+                                <button onclick="copyConvertResult()" class="text-xs text-cyan-400 hover:text-cyan-300 transition">
+                                    <i class="fas fa-copy mr-1"></i> 복사
+                                </button>
+                            </div>
+                            <textarea id="conv-output" rows="14" readonly
+                                placeholder="변환 결과가 여기에 표시됩니다..."
+                                class="w-full bg-[#0a0a0a] border border-white/10 rounded-xl p-4 text-sm text-cyan-300 font-mono resize-y"></textarea>
+                        </div>
+                    </div>
+
+                    <div id="conv-notes" class="hidden mt-3 p-3 bg-blue-900/20 border border-blue-500/20 rounded-xl text-xs text-blue-300 space-y-1"></div>
+
+                    <div class="mt-4 flex items-center gap-3">
+                        <button onclick="runConvert()"
+                            id="conv-run-btn"
+                            class="bg-cyan-600 hover:bg-cyan-500 text-white px-6 py-2.5 rounded-xl font-bold transition flex items-center gap-2">
+                            <i class="fas fa-play"></i> 변환 실행
+                        </button>
+                        <span id="conv-status" class="text-xs text-gray-500"></span>
+                    </div>
+                </div>
+
+                <div class="section-card">
+                    <h3 class="font-bold mb-3 flex items-center gap-2"><i class="fas fa-info-circle text-blue-400"></i> 자동 변환 안내</h3>
+                    <div class="space-y-2 text-sm text-gray-400">
+                        <p>• 호스팅 생성 시 레포지토리에 업로드된 <strong class="text-white">.php 파일</strong>은 모두 <strong class="text-cyan-300">.astro</strong>로 자동 변환됩니다.</p>
+                        <p>• <strong class="text-white">.js 파일</strong>은 모두 <strong class="text-cyan-300">.ts</strong>로 자동 변환됩니다.</p>
+                        <p>• 변환된 파일(.astro, .ts)은 <strong class="text-white">프론트엔드</strong>로, 원본(.php, .js)은 <strong class="text-white">백엔드</strong>로 사용됩니다.</p>
+                        <p>• 변환은 미리 만들어둔 템플릿이 아닌 <strong class="text-white">AI 기반 실시간 변환</strong>으로 수행됩니다.</p>
+                    </div>
+                </div>
+            </div>
+
         </div>
     </main>
 
@@ -908,6 +979,69 @@
                 btn.disabled = false;
                 btn.innerHTML = '<i class="fas fa-check mr-2"></i> 선택한 버전 적용';
             }
+        }
+
+        // ── 코드 변환 ──────────────────────────────────────────────────────────
+        let currentConvertType = 'php_to_astro';
+
+        function setConvertType(type, btn) {
+            currentConvertType = type;
+            document.querySelectorAll('.conv-type-btn').forEach(b => {
+                b.className = 'conv-type-btn px-4 py-2 rounded-xl text-sm font-bold border border-white/10 text-gray-400 transition hover:border-white/30';
+            });
+            btn.className = 'conv-type-btn px-4 py-2 rounded-xl text-sm font-bold border border-cyan-500/50 bg-cyan-900/20 text-cyan-300 transition';
+            const filenameEl = document.getElementById('conv-filename');
+            if (type === 'php_to_astro') {
+                filenameEl.placeholder = 'component.php';
+                document.getElementById('conv-input').placeholder = '<?php\n// 여기에 PHP 코드를 붙여넣으세요\necho \'<h1>\' . get_the_title() . \'</h1>\';';
+            } else {
+                filenameEl.placeholder = 'module.js';
+                document.getElementById('conv-input').placeholder = '// 여기에 JavaScript 코드를 붙여넣으세요\nconst greet = (name) => {\n  return `Hello, ${name}!`;\n};';
+            }
+        }
+
+        async function runConvert() {
+            const code = document.getElementById('conv-input').value.trim();
+            const filename = document.getElementById('conv-filename').value.trim() || '';
+            if (!code) { showAlert('변환할 코드를 입력하세요.', 'error'); return; }
+
+            const btn = document.getElementById('conv-run-btn');
+            const statusEl = document.getElementById('conv-status');
+            btn.disabled = true;
+            btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i> 변환 중...';
+            statusEl.textContent = '';
+
+            try {
+                const res = await fetch('/api/convert', {
+                    method: 'POST',
+                    headers: HEADERS,
+                    body: JSON.stringify({ type: currentConvertType, code, filename }),
+                });
+                const data = await res.json();
+                if (res.ok && data.converted) {
+                    document.getElementById('conv-output').value = data.converted;
+                    statusEl.textContent = `✅ 변환 완료: ${data.filename}`;
+
+                    const notesEl = document.getElementById('conv-notes');
+                    if (data.notes?.length) {
+                        notesEl.innerHTML = data.notes.map(n => `<div>• ${n}</div>`).join('');
+                        notesEl.classList.remove('hidden');
+                    }
+                } else {
+                    showAlert(data.error || '변환에 실패했습니다.', 'error');
+                }
+            } catch {
+                showAlert('변환 요청 중 오류가 발생했습니다.', 'error');
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = '<i class="fas fa-play mr-2"></i> 변환 실행';
+            }
+        }
+
+        function copyConvertResult() {
+            const output = document.getElementById('conv-output').value;
+            if (!output) return;
+            navigator.clipboard.writeText(output).then(() => showAlert('클립보드에 복사되었습니다.'));
         }
 
         // ── 캐시 ─────────────────────────────────────────────────────────────

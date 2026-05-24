@@ -1436,9 +1436,12 @@ export default {
 
     // 루트 / → index.html
     if (url.pathname === '/' && env.ASSETS) {
-      const indexUrl = new URL(request.url);
-      indexUrl.pathname = '/index.html';
-      return env.ASSETS.fetch(new Request(indexUrl.toString(), request));
+      try {
+        const indexUrl = new URL(request.url);
+        indexUrl.pathname = '/index.html';
+        const res = await env.ASSETS.fetch(new Request(indexUrl.toString(), request));
+        if (res.ok) return res;
+      } catch (_) {}
     }
 
     // 정적 파일 → ASSETS
@@ -1448,18 +1451,40 @@ export default {
       url.pathname.endsWith('.js') ||
       url.pathname.startsWith('/src/') ||
       url.pathname.startsWith('/favicon');
-    if (isStaticAsset && env.ASSETS) return env.ASSETS.fetch(request);
+    if (isStaticAsset && env.ASSETS) {
+      try {
+        const res = await env.ASSETS.fetch(request);
+        if (res.ok) return res;
+      } catch (_) {}
+    }
 
     // 플랫폼 경로 → .html ASSETS
     if (platformPages.includes(url.pathname) && env.ASSETS) {
-      const htmlUrl = new URL(request.url);
-      htmlUrl.pathname = url.pathname + '.html';
-      return env.ASSETS.fetch(new Request(htmlUrl.toString(), request));
+      try {
+        const htmlUrl = new URL(request.url);
+        htmlUrl.pathname = url.pathname + '.html';
+        const res = await env.ASSETS.fetch(new Request(htmlUrl.toString(), request));
+        if (res.ok) return res;
+      } catch (_) {}
     }
 
-    if (env.ASSETS) return env.ASSETS.fetch(request);
+    if (env.ASSETS) {
+      try {
+        const res = await env.ASSETS.fetch(request);
+        if (res.ok) return res;
+      } catch (_) {}
+    }
 
-    return new Response("CloudPress WordPress Hosting Platform v4.0", {
+    // Fallback: index.html (SPA 라우팅 지원)
+    if (env.ASSETS) {
+      try {
+        const indexUrl = new URL(request.url);
+        indexUrl.pathname = '/index.html';
+        return await env.ASSETS.fetch(new Request(indexUrl.toString(), request));
+      } catch (_) {}
+    }
+
+    return new Response("CloudPress WordPress Hosting Platform v5.0", {
       headers: { "Content-Type": "text/plain;charset=utf-8" },
     });
   },

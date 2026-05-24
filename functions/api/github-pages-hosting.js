@@ -609,7 +609,7 @@ jobs:
           echo "📋 _db/wordpress.db 상태 확인..."
           if [ -f "_db/wordpress.db" ]; then
             SIZE=$(wc -c < _db/wordpress.db)
-            echo "✅ wordpress.db 존재 (${SIZE} bytes)"
+            echo "✅ wordpress.db 존재 (\${SIZE} bytes)"
             php -r "
             \\$data = json_decode(file_get_contents('_db/wordpress.db'), true);
             echo '  옵션 수: ' . count(\\$data['options'] ?? []) . '\\n';

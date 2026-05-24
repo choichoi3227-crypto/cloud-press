@@ -103,3 +103,25 @@ CREATE TABLE IF NOT EXISTS user_product_subscriptions (
 );
 
 
+
+-- ── admin_settings 테이블 생성 (없으면) ──────────────────────────────────────
+CREATE TABLE IF NOT EXISTS admin_settings (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL DEFAULT ''
+);
+
+-- ── CloudPressDB 레포 설정 키 기본값 삽입 (없으면) ────────────────────────────
+INSERT OR IGNORE INTO admin_settings (key, value) VALUES ('db_repo_owner', '');
+INSERT OR IGNORE INTO admin_settings (key, value) VALUES ('db_repo_name',  '');
+INSERT OR IGNORE INTO admin_settings (key, value) VALUES ('db_github_token', '');
+
+-- ── 외부 스토리지 설정 키 기본값 삽입 (없으면) ───────────────────────────────
+INSERT OR IGNORE INTO admin_settings (key, value) VALUES ('ext_storage_type',   '');
+INSERT OR IGNORE INTO admin_settings (key, value) VALUES ('ext_storage_bucket', '');
+INSERT OR IGNORE INTO admin_settings (key, value) VALUES ('ext_storage_token',  '');
+
+-- ── user_product_subscriptions 테이블 cachecloud/cp3 레코드 인덱스 ──────────
+CREATE INDEX IF NOT EXISTS idx_subs_user_type ON user_product_subscriptions(user_id, product_type);
+
+-- ── cachecloud_sites cdn_url 컬럼 추가 (없으면) ──────────────────────────────
+-- wrangler d1 execute cloudpress-db --command="ALTER TABLE cachecloud_sites ADD COLUMN cdn_url TEXT"

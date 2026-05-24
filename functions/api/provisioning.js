@@ -151,6 +151,7 @@ export async function onRequestPost(context) {
       await log(`GitHub        : ${githubOwner ? "https://github.com/" + githubOwner + "/" + githubRepo : "없음"}`);
       await log(`PHP Runner    : ${phpRunnerDeployed ? "✅ 배포됨" : "⚠️ Actions에서 추후 배포"}`);
       await log(`WP 설치 Action: GitHub Actions install-wordpress.yml 실행 중`);
+      await log(`🔄 코드 변환  : PHP→Astro, JS→TypeScript 실시간 변환 활성화됨`);
 
       await sendNotification({
         success: true, siteUrl: primaryDomain,

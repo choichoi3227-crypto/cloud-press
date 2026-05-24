@@ -518,66 +518,50 @@
         </button>
     </div>
 
-    <!-- ── Google Drive 연동 설정 ── -->
+    <!-- ── Google Drive 서비스 계정 설정 ── -->
     <div class="p-6 bg-[#111] rounded-2xl border border-white/5 space-y-5">
         <div class="flex items-center justify-between flex-wrap gap-2">
             <h2 class="font-bold flex items-center gap-2">
                 <i class="fab fa-google-drive text-yellow-400 text-lg"></i>
-                Google Drive 스토리지 연동
+                Google Drive 스토리지 (서비스 계정)
             </h2>
-            <span class="text-xs text-gray-500">미디어·백업 외부 스토리지로 활용</span>
+            <span class="text-xs text-gray-500">사용자별 개인 폴더 자동 분리</span>
         </div>
 
-        <!-- 설정 가이드 -->
+        <!-- 안내 -->
         <div class="p-4 bg-blue-950/30 border border-blue-500/25 rounded-xl space-y-3 text-sm">
-            <p class="font-bold text-blue-300 flex items-center gap-2"><i class="fas fa-book-open"></i> Google Drive OAuth 설정 가이드</p>
+            <p class="font-bold text-blue-300 flex items-center gap-2"><i class="fas fa-book-open"></i> 서비스 계정 설정 가이드</p>
             <ol class="text-blue-200/75 text-xs space-y-2 list-decimal ml-4">
-                <li>
-                    <a href="https://console.cloud.google.com/" target="_blank" class="text-blue-400 hover:underline font-bold">Google Cloud Console</a>
-                    에서 프로젝트를 생성하거나 선택합니다.
-                </li>
-                <li><strong>API 및 서비스 → 라이브러리</strong>에서 <em>Google Drive API</em>를 검색해 사용 설정합니다.</li>
-                <li><strong>사용자 인증 정보 → OAuth 2.0 클라이언트 ID</strong>를 생성합니다.
-                    <ul class="list-disc ml-4 mt-1 space-y-1">
-                        <li>애플리케이션 유형: <em>웹 애플리케이션</em></li>
-                        <li>승인된 리디렉션 URI: <code class="bg-black/40 px-1 rounded">https://YOUR_DOMAIN/api/oauth/google/callback</code></li>
-                    </ul>
-                </li>
-                <li>발급된 <strong>클라이언트 ID</strong>와 <strong>클라이언트 보안 비밀번호</strong>를 아래에 입력합니다.</li>
-                <li>OAuth 동의 화면에서 <strong>google.drive.file</strong> 또는 <strong>drive</strong> 스코프를 추가합니다.</li>
-                <li>아래 "Google Drive 연결하기" 버튼으로 최초 인증을 완료합니다.</li>
+                <li><a href="https://console.cloud.google.com/" target="_blank" class="text-blue-400 hover:underline font-bold">Google Cloud Console</a>에서 프로젝트를 선택합니다.</li>
+                <li><strong>API 및 서비스 → 라이브러리</strong>에서 <em>Google Drive API</em>를 사용 설정합니다.</li>
+                <li><strong>IAM 및 관리자 → 서비스 계정</strong>에서 서비스 계정을 생성합니다.</li>
+                <li>서비스 계정 → <strong>키 → 키 추가 → JSON</strong>으로 키 파일을 다운로드합니다.</li>
+                <li>다운로드한 JSON 파일 전체 내용을 아래에 붙여넣습니다.</li>
+                <li>(선택) 특정 드라이브 폴더를 루트로 지정하려면 폴더 ID를 입력합니다. 비워두면 내 드라이브 루트에 자동 생성됩니다.</li>
             </ol>
-            <div class="p-3 bg-yellow-900/20 border border-yellow-500/20 rounded-xl text-xs text-yellow-300">
-                <i class="fas fa-exclamation-triangle mr-1"></i>
-                Google OAuth 인증 중 <strong>"액세스 차단됨: 승인 오류"</strong>가 발생하면,
-                Google Cloud Console → OAuth 동의 화면 → <strong>테스트 사용자</strong>에 본인 Google 계정을 추가하거나,
-                앱을 <strong>프로덕션</strong>으로 전환하세요.
+            <div class="p-3 bg-green-900/20 border border-green-500/20 rounded-xl text-xs text-green-300">
+                <i class="fas fa-info-circle mr-1"></i>
+                사용자는 별도 로그인 없이 <strong>cloudpress-storage/{user_id}/</strong> 폴더에 자동으로 파일이 저장됩니다.
             </div>
         </div>
 
-        <div class="grid md:grid-cols-2 gap-4">
-            <div class="space-y-2">
-                <label class="text-xs text-gray-500 block font-bold">Client ID</label>
-                <input id="set-gdrive-client-id" type="text" placeholder="xxxxx.apps.googleusercontent.com"
-                    class="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-blue-500 transition font-mono" />
-                <p class="text-xs text-gray-600">Google Cloud Console → 사용자 인증 정보 → OAuth 2.0 클라이언트 ID</p>
-            </div>
-            <div class="space-y-2">
-                <label class="text-xs text-gray-500 block font-bold">Client Secret</label>
-                <input id="set-gdrive-client-secret" type="password" placeholder="GOCSPX-..."
-                    class="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-blue-500 transition font-mono" />
-                <p class="text-xs text-gray-600">OAuth 2.0 클라이언트 보안 비밀번호</p>
-            </div>
-        </div>
-
+        <!-- 서비스 계정 JSON -->
         <div class="space-y-2">
-            <label class="text-xs text-gray-500 block font-bold">Refresh Token <span class="text-gray-600 font-normal">(아래 버튼으로 자동 발급 또는 직접 입력)</span></label>
-            <input id="set-gdrive-refresh-token" type="password" placeholder="1//0g..."
-                class="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-blue-500 transition font-mono" />
-            <p class="text-xs text-gray-600">OAuth 인증 완료 후 자동 입력됩니다. 또는 OAuth Playground에서 직접 발급 가능합니다.</p>
+            <label class="text-xs text-gray-500 block font-bold">서비스 계정 JSON 키</label>
+            <textarea id="set-gdrive-sa-json" rows="6" placeholder='{"type":"service_account","project_id":"...","private_key_id":"...","private_key":"-----BEGIN PRIVATE KEY-----\n...","client_email":"...@....iam.gserviceaccount.com",...}'
+                class="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-xs font-mono focus:outline-none focus:border-yellow-500 transition resize-none"></textarea>
+            <p class="text-xs text-gray-600">Google Cloud Console에서 다운로드한 서비스 계정 JSON 파일 전체 내용</p>
         </div>
 
-        <!-- 연결 상태 표시 -->
+        <!-- 루트 폴더 ID (선택) -->
+        <div class="space-y-2">
+            <label class="text-xs text-gray-500 block font-bold">루트 폴더 ID <span class="font-normal text-gray-600">(선택 — 비우면 내 드라이브 루트)</span></label>
+            <input id="set-gdrive-root-folder" type="text" placeholder="1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs"
+                class="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-sm font-mono focus:outline-none focus:border-yellow-500 transition" />
+            <p class="text-xs text-gray-600">구글 드라이브 폴더 URL의 마지막 경로 값 (예: drive.google.com/drive/folders/<strong>여기</strong>)</p>
+        </div>
+
+        <!-- 연결 상태 -->
         <div id="gdrive-status-bar" class="hidden p-3 bg-white/5 border border-white/10 rounded-xl text-xs text-gray-400 flex items-center gap-2">
             <i class="fas fa-circle text-gray-600" id="gdrive-status-ico"></i>
             <span id="gdrive-status-text">연결 상태 확인 중...</span>
@@ -589,9 +573,9 @@
                 class="bg-yellow-600 hover:bg-yellow-500 text-white font-bold px-6 py-2.5 rounded-xl transition flex items-center gap-2">
                 <i class="fas fa-save"></i> 설정 저장
             </button>
-            <button onclick="connectGdrive()"
+            <button onclick="testGdriveConnection()"
                 class="bg-white/10 hover:bg-white/20 text-white font-bold px-6 py-2.5 rounded-xl transition flex items-center gap-2">
-                <i class="fab fa-google text-yellow-400"></i> Google Drive 연결하기
+                <i class="fas fa-plug text-yellow-400"></i> 연결 테스트
             </button>
         </div>
     </div>
@@ -1426,50 +1410,71 @@ async function deletePoolServer(id) {
 loadPoolServers();
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// Google Drive 연동 설정
+// Google Drive 서비스 계정 설정
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 async function loadGdriveSettings() {
     try {
-        const res  = await fetch('/api/admin/settings?keys=gdrive_client_id,gdrive_client_secret,gdrive_refresh_token', { headers: HEADERS() });
+        const res  = await fetch('/api/admin/settings?keys=gdrive_service_account_json,gdrive_root_folder_id', { headers: HEADERS() });
         const data = await res.json();
         if (!res.ok) return;
         const s = data.settings || {};
-        if (s.gdrive_client_id)       document.getElementById('set-gdrive-client-id').value = s.gdrive_client_id;
-        if (s.gdrive_client_secret)   document.getElementById('set-gdrive-client-secret').value = s.gdrive_client_secret;
-        if (s.gdrive_refresh_token)   document.getElementById('set-gdrive-refresh-token').value = s.gdrive_refresh_token;
+
+        if (s.gdrive_service_account_json) {
+            // 마스킹된 값이면 placeholder로 표시
+            const el = document.getElementById('set-gdrive-sa-json');
+            if (s.gdrive_service_account_json.includes('••')) {
+                el.placeholder = '✅ 서비스 계정 JSON이 저장되어 있습니다. 변경 시에만 새로 입력하세요.';
+            } else {
+                el.value = s.gdrive_service_account_json;
+            }
+        }
+        if (s.gdrive_root_folder_id) {
+            document.getElementById('set-gdrive-root-folder').value = s.gdrive_root_folder_id;
+        }
 
         // 연결 상태 표시
-        const bar  = document.getElementById('gdrive-status-bar');
-        const ico  = document.getElementById('gdrive-status-ico');
-        const txt  = document.getElementById('gdrive-status-text');
+        const bar = document.getElementById('gdrive-status-bar');
+        const ico = document.getElementById('gdrive-status-ico');
+        const txt = document.getElementById('gdrive-status-text');
         bar.classList.remove('hidden');
-        if (s.gdrive_refresh_token) {
+        if (s.gdrive_service_account_json) {
             ico.className = 'fas fa-circle text-green-400';
-            txt.textContent = 'Google Drive 연결됨 (Refresh Token 있음)';
-        } else if (s.gdrive_client_id) {
-            ico.className = 'fas fa-circle text-yellow-400';
-            txt.textContent = 'Client ID/Secret 저장됨 — "Google Drive 연결하기"로 인증 완료 필요';
+            txt.textContent = '✅ 서비스 계정 연결됨 — 사용자별 폴더 자동 생성 활성화';
         } else {
             ico.className = 'fas fa-circle text-gray-600';
-            txt.textContent = '연결되지 않음 — Client ID와 Secret을 입력 후 설정 저장을 눌러주세요';
+            txt.textContent = '미설정 — 서비스 계정 JSON을 입력 후 저장하세요';
         }
     } catch (_) {}
 }
 
 async function saveGdriveSettings() {
     const alertEl = document.getElementById('gdrive-save-alert');
-    const clientId     = document.getElementById('set-gdrive-client-id').value.trim();
-    const clientSecret = document.getElementById('set-gdrive-client-secret').value.trim();
-    const refreshToken = document.getElementById('set-gdrive-refresh-token').value.trim();
+    const saJson     = document.getElementById('set-gdrive-sa-json').value.trim();
+    const rootFolder = document.getElementById('set-gdrive-root-folder').value.trim();
 
-    if (!clientId && !clientSecret && !refreshToken) {
-        showAlert(alertEl, '저장할 값을 입력해주세요.', 'warning'); return;
+    if (!saJson && !rootFolder) {
+        showAlert(alertEl, '서비스 계정 JSON을 입력해주세요.', 'warning'); return;
     }
+
+    // JSON 유효성 검사
+    if (saJson) {
+        try {
+            const parsed = JSON.parse(saJson);
+            if (parsed.type !== 'service_account') {
+                showAlert(alertEl, '서비스 계정 JSON이 아닙니다. "type": "service_account" 가 포함되어야 합니다.', 'error'); return;
+            }
+            if (!parsed.client_email || !parsed.private_key) {
+                showAlert(alertEl, 'JSON에 client_email 또는 private_key가 없습니다.', 'error'); return;
+            }
+        } catch (e) {
+            showAlert(alertEl, 'JSON 형식이 올바르지 않습니다: ' + e.message, 'error'); return;
+        }
+    }
+
     const payload = {};
-    if (clientId)     payload.gdrive_client_id     = clientId;
-    if (clientSecret) payload.gdrive_client_secret = clientSecret;
-    if (refreshToken) payload.gdrive_refresh_token = refreshToken;
+    if (saJson)      payload.gdrive_service_account_json = saJson;
+    if (rootFolder)  payload.gdrive_root_folder_id       = rootFolder;
 
     try {
         const res  = await fetch('/api/admin/settings', {
@@ -1478,36 +1483,25 @@ async function saveGdriveSettings() {
         });
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || '저장 실패');
-        showAlert(alertEl, '✅ Google Drive 설정이 저장되었습니다.', 'success');
+        showAlert(alertEl, '✅ Google Drive 서비스 계정이 저장되었습니다.', 'success');
+        document.getElementById('set-gdrive-sa-json').value = '';
         loadGdriveSettings();
     } catch (e) {
         showAlert(alertEl, e.message, 'error');
     }
 }
 
-async function connectGdrive() {
-    const clientId     = document.getElementById('set-gdrive-client-id').value.trim();
-    const clientSecret = document.getElementById('set-gdrive-client-secret').value.trim();
-    if (!clientId || !clientSecret) {
-        alert('먼저 Client ID와 Client Secret을 입력하고 "설정 저장"을 눌러주세요.'); return;
+async function testGdriveConnection() {
+    const alertEl = document.getElementById('gdrive-save-alert');
+    showAlert(alertEl, '🔄 연결 테스트 중...', 'info');
+    try {
+        const res  = await fetch('/api/admin/gdrive-test', { headers: HEADERS() });
+        const data = await res.json();
+        if (!res.ok || !data.success) throw new Error(data.error || '연결 실패');
+        showAlert(alertEl, `✅ 연결 성공! 서비스 계정: ${data.email || ''}`, 'success');
+    } catch (e) {
+        showAlert(alertEl, '❌ ' + e.message + ' — 서비스 계정 JSON을 확인하세요.', 'error');
     }
-    // 설정 먼저 저장
-    await saveGdriveSettings();
-
-    // Google OAuth 인증창 열기
-    const redirectUri = encodeURIComponent(location.origin + '/api/oauth/google/callback');
-    const scope       = encodeURIComponent('https://www.googleapis.com/auth/drive.file');
-    const authUrl     = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${encodeURIComponent(clientId)}&redirect_uri=${redirectUri}&response_type=code&scope=${scope}&access_type=offline&prompt=consent&state=admin`;
-    const popup = window.open(authUrl, 'gdrive_oauth', 'width=600,height=700,scrollbars=yes');
-    if (!popup) { alert('팝업이 차단되었습니다. 팝업을 허용한 후 다시 시도해주세요.'); return; }
-
-    // 팝업 완료 감지
-    const timer = setInterval(() => {
-        if (popup.closed) {
-            clearInterval(timer);
-            loadGdriveSettings();
-        }
-    }, 800);
 }
 
 loadGdriveSettings();

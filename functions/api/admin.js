@@ -135,44 +135,38 @@ export async function onRequestGet(context) {
 
     // ── Google Drive 서비스 계정 연결 테스트 ──────────────────────────────
     if (path === "gdrive-test") {
+      await env.DB.prepare(`
+        CREATE TABLE IF NOT EXISTS admin_settings (
+          key TEXT PRIMARY KEY, value TEXT NOT NULL DEFAULT ''
+        )
+      `).run().catch(() => {});
+
       const row = await env.DB.prepare(
         "SELECT value FROM admin_settings WHERE key = 'gdrive_service_account_json'"
       ).first().catch(() => null);
       if (!row?.value) return jsonErr("서비스 계정 JSON이 설정되지 않았습니다.", 400);
 
       let sa;
-      try { sa = JSON.parse(row.value); } catch { return jsonErr("서비스 계정 JSON 파싱 실패", 400); }
+      try { sa = JSON.parse(row.value); } catch (e) { return jsonErr("서비스 계정 JSON 파싱 실패: " + e.message, 400); }
+      if (!sa.client_email || !sa.private_key) return jsonErr("JSON에 client_email 또는 private_key가 없습니다.", 400);
 
-      // JWT 생성 → access token 발급 테스트
       try {
-        const now   = Math.floor(Date.now() / 1000);
-        const claim = { iss: sa.client_email, scope: "https://www.googleapis.com/auth/drive", aud: "https://oauth2.googleapis.com/token", exp: now + 3600, iat: now };
-        const header  = btoa(JSON.stringify({ alg: "RS256", typ: "JWT" })).replace(/=/g,"").replace(/\+/g,"-").replace(/\//g,"_");
-        const payload2 = btoa(JSON.stringify(claim)).replace(/=/g,"").replace(/\+/g,"-").replace(/\//g,"_");
-
-        // RS256 서명 (Web Crypto API)
-        const pemBody = sa.private_key.replace(/-----BEGIN PRIVATE KEY-----|-----END PRIVATE KEY-----|
-/g, "");
-        const keyData = Uint8Array.from(atob(pemBody), c => c.charCodeAt(0));
-        const cryptoKey = await crypto.subtle.importKey("pkcs8", keyData.buffer, { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" }, false, ["sign"]);
-        const sig = await crypto.subtle.sign("RSASSA-PKCS1-v1_5", cryptoKey, new TextEncoder().encode(`${header}.${payload2}`));
-        const sigB64 = btoa(String.fromCharCode(...new Uint8Array(sig))).replace(/=/g,"").replace(/\+/g,"-").replace(/\//g,"_");
-        const jwt = `${header}.${payload2}.${sigB64}`;
-
-        const tokenRes = await fetch("https://oauth2.googleapis.com/token", {
-          method: "POST",
-          headers: { "Content-Type": "application/x-www-form-urlencoded" },
-          body: new URLSearchParams({ grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer", assertion: jwt }),
+        const accessToken = await getServiceAccountToken(sa);
+        // Drive API로 루트 폴더 목록 조회 (연결 확인)
+        const driveRes = await fetch("https://www.googleapis.com/drive/v3/files?pageSize=1&fields=files(id,name)", {
+          headers: { Authorization: "Bearer " + accessToken },
         });
-        const tokenData = await tokenRes.json();
-        if (!tokenRes.ok || !tokenData.access_token) throw new Error(tokenData.error_description || tokenData.error || "토큰 발급 실패");
+        if (!driveRes.ok) {
+          const err = await driveRes.json().catch(() => ({}));
+          throw new Error(err.error?.message || "Drive API 호출 실패");
+        }
         return jsonOk({ success: true, email: sa.client_email, message: "서비스 계정 연결 성공" });
       } catch (e) {
         return jsonErr("연결 테스트 실패: " + e.message, 500);
       }
     }
 
-    // ── 스토리지 할당량 통계 ─────────────────────────────────────────────
+        // ── 스토리지 할당량 통계 ─────────────────────────────────────────────
     if (path === "quota-stats") {
       // GitHub Storage 사용량: github_storage_files 테이블이 있으면 집계
       let usedBytes = 0;
@@ -371,4 +365,65 @@ export async function onRequestDelete(context) {
   } catch (e) {
     return jsonErr("서버 오류: " + e.message, 500);
   }
+}
+
+// ── Google 서비스 계정 → Access Token 발급 헬퍼 ──────────────────────────────
+// Cloudflare Workers / Pages Functions 환경 (Web Crypto API 사용)
+export async function getServiceAccountToken(sa) {
+  const now = Math.floor(Date.now() / 1000);
+
+  // JWT Header + Payload (URL-safe base64)
+  const toB64Url = (obj) =>
+    btoa(JSON.stringify(obj))
+      .replace(/\+/g, "-").replace(/\//g, "_").replace(/=/g, "");
+
+  const header  = toB64Url({ alg: "RS256", typ: "JWT" });
+  const payload = toB64Url({
+    iss:   sa.client_email,
+    scope: "https://www.googleapis.com/auth/drive",
+    aud:   "https://oauth2.googleapis.com/token",
+    exp:   now + 3600,
+    iat:   now,
+  });
+  const sigInput = `${header}.${payload}`;
+
+  // PEM → ArrayBuffer (줄바꿈 \n 및 헤더/푸터 제거)
+  const pemClean = sa.private_key
+    .replace("-----BEGIN PRIVATE KEY-----", "")
+    .replace("-----END PRIVATE KEY-----", "")
+    .replace(/\s+/g, "");          // 모든 공백/개행 제거
+  const keyBytes = Uint8Array.from(atob(pemClean), (c) => c.charCodeAt(0));
+
+  const cryptoKey = await crypto.subtle.importKey(
+    "pkcs8",
+    keyBytes.buffer,
+    { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" },
+    false,
+    ["sign"]
+  );
+
+  const sigBuf = await crypto.subtle.sign(
+    "RSASSA-PKCS1-v1_5",
+    cryptoKey,
+    new TextEncoder().encode(sigInput)
+  );
+  const sig = btoa(String.fromCharCode(...new Uint8Array(sigBuf)))
+    .replace(/\+/g, "-").replace(/\//g, "_").replace(/=/g, "");
+
+  const jwt = `${sigInput}.${sig}`;
+
+  // Google OAuth2 토큰 엔드포인트에 JWT 제출
+  const res = await fetch("https://oauth2.googleapis.com/token", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer",
+      assertion:  jwt,
+    }),
+  });
+  const data = await res.json();
+  if (!res.ok || !data.access_token) {
+    throw new Error(data.error_description || data.error || "Access Token 발급 실패");
+  }
+  return data.access_token;
 }

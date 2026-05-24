@@ -61,6 +61,36 @@ const PRODUCT_NAMES = {
 
 // ── payments 테이블 보장 ──────────────────────────────────────────────────
 async function ensureTable(db) {
+  // 기존 테이블의 site_id가 NOT NULL인지 확인하여 문제 있으면 재생성
+  try {
+    const tableInfo = await db.prepare("PRAGMA table_info(payments)").all().catch(() => ({ results: [] }));
+    const siteIdCol = (tableInfo.results || []).find(c => c.name === 'site_id');
+    if (siteIdCol && siteIdCol.notnull === 1) {
+      // NOT NULL 제약 있는 경우 — 새 테이블로 교체
+      await db.prepare("ALTER TABLE payments RENAME TO payments_old").run().catch(() => {});
+      await db.prepare(`
+        CREATE TABLE IF NOT EXISTS payments (
+          id               TEXT PRIMARY KEY,
+          user_id          TEXT NOT NULL,
+          site_id          TEXT,
+          product_type     TEXT NOT NULL DEFAULT 'hosting',
+          plan             TEXT NOT NULL,
+          billing_cycle    TEXT NOT NULL DEFAULT 'monthly',
+          amount           INTEGER NOT NULL,
+          status           TEXT NOT NULL DEFAULT 'pending',
+          toss_order_id    TEXT UNIQUE,
+          toss_payment_key TEXT,
+          toss_receipt_url TEXT,
+          expires_at       TEXT,
+          created_at       TEXT DEFAULT CURRENT_TIMESTAMP
+        )
+      `).run().catch(() => {});
+      // 기존 데이터 이전
+      await db.prepare("INSERT OR IGNORE INTO payments SELECT * FROM payments_old").run().catch(() => {});
+      await db.prepare("DROP TABLE IF EXISTS payments_old").run().catch(() => {});
+    }
+  } catch (_) {}
+
   await db.prepare(`
     CREATE TABLE IF NOT EXISTS payments (
       id               TEXT PRIMARY KEY,

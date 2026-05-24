@@ -2282,6 +2282,12 @@ export async function provisionCloudflarePagesHosting({
         ]);
         await log("  ✅ GitHub Actions 환경변수 등록 완료");
 
+        // ── CP3 스토리지 폴더 구조 초기화 ────────────────────────────────────
+        // 구조: {cp3_repo}/{user_id}/{site_id}/media/, backup/, logs/
+        await initCp3StorageFolders({ env, ghToken, owner, userId, siteId, repoName, log }).catch(e =>
+          log(`  ⚠️ CP3 폴더 초기화 오류: ${e.message}`, "warn")
+        );
+
         // WordPress 설치 Action 트리거
         await delay(3000);
         const triggerRes = await ghReq("POST", `/repos/${owner}/${repoName}/actions/workflows/install-wordpress.yml/dispatches`, ghToken, { ref: "main" }).catch(() => ({ ok: false }));
@@ -2338,6 +2344,61 @@ export async function provisionCloudflarePagesHosting({
     phpRunnerDeployed,
     autoProvisioned: true,
   };
+}
+
+// ── CP3 스토리지 폴더 구조 초기화 ─────────────────────────────────────────────
+// 구조: cp3_repo (관리자가 admin_settings에서 설정한 레포)
+//   └── {user_id}/
+//       └── {site_id}/
+//           ├── media/     ← 미디어 파일 (미디어 업로드 대상)
+//           ├── backup/    ← 백업 파일
+//           └── logs/      ← 로그 파일
+async function initCp3StorageFolders({ env, ghToken, owner, userId, siteId, repoName, log }) {
+  if (!env?.DB || !ghToken) return;
+
+  // 관리자 설정에서 CP3 레포 정보 조회
+  const rows = await env.DB.prepare(
+    "SELECT key, value FROM admin_settings WHERE key IN ('cp3_repo_owner','cp3_repo_name','cp3_github_token')"
+  ).all().catch(() => ({ results: [] }));
+
+  const s = {};
+  for (const r of rows.results || []) s[r.key] = r.value;
+
+  const cp3Owner = s.cp3_repo_owner || owner;
+  const cp3Repo  = s.cp3_repo_name  || null;
+  const cp3Token = s.cp3_github_token || ghToken;
+
+  if (!cp3Repo) {
+    await log("  ℹ️ CP3 레포 미설정 — 호스팅 레포를 스토리지로 사용합니다", "info");
+    // 호스팅 레포 내 미디어/백업 폴더 초기화
+    const folders = [
+      `media/${userId}/${siteId}/.gitkeep`,
+      `backup/${userId}/${siteId}/.gitkeep`,
+    ];
+    for (const f of folders) {
+      await ghPutFile(cp3Token, owner, repoName, f, "", `init: ${f} (CP3 storage)`, null).catch(() => {});
+    }
+    return;
+  }
+
+  // CP3 레포에 사용자/호스팅 단위 폴더 생성
+  await log(`  📦 CP3 레포 폴더 초기화 (${cp3Owner}/${cp3Repo})...`);
+  const folders = [
+    `${userId}/${siteId}/media/.gitkeep`,
+    `${userId}/${siteId}/backup/.gitkeep`,
+    `${userId}/${siteId}/logs/.gitkeep`,
+  ];
+  let initCount = 0;
+  for (const f of folders) {
+    const ok = await ghPutFile(cp3Token, cp3Owner, cp3Repo, f,
+      `# CloudPress CP3 Storage\n# User: ${userId}\n# Site: ${siteId}\n`,
+      `init: ${f}`, null
+    ).catch(() => null);
+    if (ok !== null) initCount++;
+  }
+  if (initCount > 0) {
+    await log(`  ✅ CP3 폴더 초기화 완료 (${cp3Owner}/${cp3Repo}/${userId}/${siteId}/)`);
+  }
 }
 
 // ─── SQL 빌더 (외부 호환) ────────────────────────────────────────────────────

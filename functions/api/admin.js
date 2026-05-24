@@ -111,12 +111,21 @@ export async function onRequestGet(context) {
         )
       `).run().catch(() => {});
 
+      const url2   = new URL(request.url);
+      const keysQ  = url2.searchParams.get("keys");
+      const filterKeys = keysQ ? keysQ.split(",").map(k => k.trim()).filter(Boolean) : null;
+
       const rows = await env.DB.prepare("SELECT key, value FROM admin_settings").all()
         .catch(() => ({ results: [] }));
 
       const settings = {};
-      const sensitive = ["toss_secret_key", "smtp_password", "supabase_service_key"];
+      const sensitive = [
+        "toss_secret_key", "smtp_password", "supabase_service_key",
+        "gdrive_client_secret", "gdrive_refresh_token",
+        "cp3_github_token",
+      ];
       for (const row of (rows.results || [])) {
+        if (filterKeys && !filterKeys.includes(row.key)) continue;
         settings[row.key] = sensitive.includes(row.key) && row.value
           ? row.value.slice(0, 6) + "••••••••"
           : row.value;
@@ -247,6 +256,10 @@ export async function onRequestPut(context) {
         "supabase_url", "supabase_service_key",
         "toss_client_key", "toss_secret_key",
         "site_name", "support_email", "platform_domain",
+        // Google Drive OAuth
+        "gdrive_client_id", "gdrive_client_secret", "gdrive_refresh_token",
+        // CP3 스토리지 레포
+        "cp3_repo_owner", "cp3_repo_name", "cp3_github_token",
       ];
 
       const saved = [];

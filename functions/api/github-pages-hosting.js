@@ -27,14 +27,14 @@ import { ghReq, pickGithubToken } from "./github-storage.js";
 // ── 상수 ─────────────────────────────────────────────────────────────────────
 
 const PROVISION_DELAYS = {
-  after_repo_create:       8000,
-  between_db_files:         400,
-  between_src_files:        300,
-  between_workflow_files:   500,
-  after_astro_trigger:    15000,
-  after_pages_activate:    5000,
-  validation_phase:       20000,
-  plan_config_phase:       8000,
+  after_repo_create:       12000,   // 레포 생성 후 안정화 대기 (12초)
+  between_db_files:         800,    // DB 파일 간 간격 (0.8초)
+  between_src_files:        600,    // 소스 파일 간 간격 (0.6초)
+  between_workflow_files:   1000,   // 워크플로 파일 간 간격 (1초)
+  after_astro_trigger:     60000,   // Astro 빌드 트리거 후 대기 (60초)
+  after_pages_activate:    30000,   // GitHub Pages 활성화 후 대기 (30초)
+  validation_phase:       120000,   // 검증 단계 대기 (2분)
+  plan_config_phase:       30000,   // 플랜 설정 단계 대기 (30초)
 };
 
 export const GITHUB_PAGES_IPV4 = [

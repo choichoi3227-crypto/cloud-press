@@ -1394,6 +1394,77 @@ async function handleApiRequest(request, env, _workerCtx = null) {
     if (method === "DELETE") return runWithMiddleware(productsDelete);
   }
 
+
+  // ── Google OAuth 콜백
+  if (path === "/api/oauth/google/callback" && method === "GET") {
+    const code  = url.searchParams.get("code");
+    const state = url.searchParams.get("state");
+    const error = url.searchParams.get("error");
+
+    if (error) {
+      return new Response(
+        `<html><body><script>window.opener&&window.opener.postMessage({type:'gdrive_oauth_error',error:${JSON.stringify(error)}},'*');window.close();</script><p>OAuth 오류: ${error}. 창을 닫아주세요.</p></body></html>`,
+        { headers: { "Content-Type": "text/html;charset=utf-8" } }
+      );
+    }
+    if (!code) {
+      return new Response(
+        `<html><body><script>window.opener&&window.opener.postMessage({type:'gdrive_oauth_error',error:'no_code'},'*');window.close();</script><p>인증 코드가 없습니다.</p></body></html>`,
+        { headers: { "Content-Type": "text/html;charset=utf-8" } }
+      );
+    }
+    try {
+      const rows = await env.DB.prepare(
+        "SELECT key, value FROM admin_settings WHERE key IN ('gdrive_client_id','gdrive_client_secret')"
+      ).all().catch(() => ({ results: [] }));
+      const s = {};
+      for (const r of rows.results || []) s[r.key] = r.value;
+
+      if (!s.gdrive_client_id || !s.gdrive_client_secret) {
+        return new Response(
+          `<html><body><script>window.opener&&window.opener.postMessage({type:'gdrive_oauth_error',error:'no_credentials'},'*');window.close();</script><p>Client ID/Secret이 설정되지 않았습니다.</p></body></html>`,
+          { headers: { "Content-Type": "text/html;charset=utf-8" } }
+        );
+      }
+
+      const redirectUri = new URL(request.url).origin + "/api/oauth/google/callback";
+      const tokenRes = await fetch("https://oauth2.googleapis.com/token", {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({
+          code,
+          client_id:     s.gdrive_client_id,
+          client_secret: s.gdrive_client_secret,
+          redirect_uri:  redirectUri,
+          grant_type:    "authorization_code",
+        }),
+      });
+      const tokenData = await tokenRes.json();
+
+      if (!tokenRes.ok || !tokenData.refresh_token) {
+        const errMsg = tokenData.error_description || tokenData.error || "token_exchange_failed";
+        return new Response(
+          `<html><body><script>window.opener&&window.opener.postMessage({type:'gdrive_oauth_error',error:${JSON.stringify(errMsg)}},'*');window.close();</script><p>토큰 교환 실패: ${errMsg}</p></body></html>`,
+          { headers: { "Content-Type": "text/html;charset=utf-8" } }
+        );
+      }
+
+      await env.DB.prepare(
+        "INSERT INTO admin_settings (key, value) VALUES ('gdrive_refresh_token', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value"
+      ).bind(tokenData.refresh_token).run();
+
+      return new Response(
+        `<html><body><script>window.opener&&window.opener.postMessage({type:'gdrive_oauth_success'},'*');window.close();</script><p>✅ Google Drive 연결 완료! 창이 자동으로 닫힙니다.</p></body></html>`,
+        { headers: { "Content-Type": "text/html;charset=utf-8" } }
+      );
+    } catch (e) {
+      return new Response(
+        `<html><body><script>window.opener&&window.opener.postMessage({type:'gdrive_oauth_error',error:${JSON.stringify(e.message)}},'*');window.close();</script><p>서버 오류: ${e.message}</p></body></html>`,
+        { headers: { "Content-Type": "text/html;charset=utf-8" } }
+      );
+    }
+  }
+
   return jsonErr("API 경로를 찾을 수 없습니다.", 404);
 }
 

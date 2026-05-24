@@ -325,6 +325,18 @@ export async function onRequestPost(context) {
     if (!["cachecloud", "cp3", "cpdb"].includes(product_type)) {
       return jsonErr("유효하지 않은 상품", 400);
     }
+
+    // 결제 완료된 구독이 있는지 확인
+    const paidPayment = await env.DB.prepare(
+      `SELECT id FROM payments WHERE user_id = ? AND product_type = ? AND status = 'paid'
+       AND (expires_at IS NULL OR expires_at > datetime('now'))
+       ORDER BY created_at DESC LIMIT 1`
+    ).bind(auth.id, product_type).first().catch(() => null);
+
+    if (!paidPayment) {
+      return jsonErr(`${product_type} 결제가 필요합니다. 결제 후 자동으로 활성화됩니다.`, 402);
+    }
+
     await env.DB.prepare(
       `INSERT INTO user_product_subscriptions (user_id, product_type, plan, status, created_at)
        VALUES (?, ?, ?, 'active', ?)

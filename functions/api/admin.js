@@ -260,6 +260,10 @@ export async function onRequestPut(context) {
         "gdrive_client_id", "gdrive_client_secret", "gdrive_refresh_token",
         // CP3 스토리지 레포
         "cp3_repo_owner", "cp3_repo_name", "cp3_github_token",
+        // CloudPressDB 레포 (호스팅 생성 시 DB 폴더 구조용)
+        "db_repo_owner", "db_repo_name", "db_github_token",
+        // 외부 스토리지 (CP3 미구독 시 대체)
+        "ext_storage_type", "ext_storage_bucket", "ext_storage_token",
       ];
 
       const saved = [];

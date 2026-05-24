@@ -1569,21 +1569,8 @@ jobs:
           echo "📋 DB/db.php 상태"
           if [ -f "_db/wordpress.db" ]; then
             SIZE=$(wc -c < _db/wordpress.db)
-            echo "✅ _db/wordpress.db (\${SIZE} bytes)"
-            cat > /tmp/check_db.php << 'PHPEOF'
-<?php
-$raw = file_get_contents('_db/wordpress.db');
-$data = json_decode($raw, true);
-if ($data && isset($data['options'])) {
-  echo '  형식: CloudPress JSON 시드' . PHP_EOL;
-  echo '  옵션: ' . count($data['options']) . PHP_EOL;
-} elseif ($raw !== '' && $raw[0] !== '{') {
-  echo '  형식: SQLite 바이너리' . PHP_EOL;
-  $pdo = new PDO('sqlite:_db/wordpress.db');
-  $tables = $pdo->query("SELECT name FROM sqlite_master WHERE type='table'")->fetchAll();
-  echo '  테이블: ' . count($tables) . PHP_EOL;
-}
-PHPEOF
+            echo "✅ _db/wordpress.db (${SIZE} bytes)"
+            echo 'PD9waHAKJHJhdyA9IGZpbGVfZ2V0X2NvbnRlbnRzKCdfZGIvd29yZHByZXNzLmRiJyk7CiRkYXRhID0ganNvbl9kZWNvZGUoJHJhdywgdHJ1ZSk7CmlmICgkZGF0YSAmJiBpc3NldCgkZGF0YVsnb3B0aW9ucyddKSkgewogIGVjaG8gJyAg7ZiV7IudOiBDbG91ZFByZXNzIEpTT04g7Iuc65OcJyAuIFBIUF9FT0w7CiAgZWNobyAnICDsmLXshZg6ICcgLiBjb3VudCgkZGF0YVsnb3B0aW9ucyddKSAuIFBIUF9FT0w7Cn0gZWxzZWlmICgkcmF3ICE9PSAnJyAmJiAkcmF3WzBdICE9PSAneycpIHsKICBlY2hvICcgIO2YleyLnTogU1FMaXRlIOuwlOydtOuEiOumrCcgLiBQSFBfRU9MOwogICRwZG8gPSBuZXcgUERPKCdzcWxpdGU6X2RiL3dvcmRwcmVzcy5kYicpOwogICR0YWJsZXMgPSAkcGRvLT5xdWVyeSgiU0VMRUNUIG5hbWUgRlJPTSBzcWxpdGVfbWFzdGVyIFdIRVJFIHR5cGU9J3RhYmxlJyIpLT5mZXRjaEFsbCgpOwogIGVjaG8gJyAg7YWM7J2067iUOiAnIC4gY291bnQoJHRhYmxlcykgLiBQSFBfRU9MOwp9Cg==' | base64 -d > /tmp/check_db.php
             php /tmp/check_db.php || true
           else
             echo "⚠️ _db/wordpress.db 없음"
@@ -1598,22 +1585,10 @@ PHPEOF
       - name: JSON 시드 → SQLite 병합 (선택)
         run: |
           if [ ! -f "_db/wordpress.db" ]; then exit 0; fi
-          cat > /tmp/merge_db.php << 'PHPEOF'
-<?php
-$raw = @file_get_contents('_db/wordpress.db');
-$data = json_decode($raw ?: '', true);
-if (!$data || empty($data['options'])) { echo 'JSON 시드 아님 — 건너뜀' . PHP_EOL; exit(0); }
-$pdo = new PDO('sqlite:_db/wordpress.sqlite');
-$pdo->exec('PRAGMA journal_mode=WAL');
-$pdo->exec('CREATE TABLE IF NOT EXISTS wp_options (option_id INTEGER PRIMARY KEY AUTOINCREMENT, option_name TEXT UNIQUE, option_value TEXT, autoload TEXT DEFAULT yes)');
-$st = $pdo->prepare('INSERT OR REPLACE INTO wp_options (option_name, option_value, autoload) VALUES (?,?,?)');
-foreach ($data['options'] ?? [] as $o) { $st->execute([$o['option_name'], $o['option_value'], $o['autoload'] ?? 'yes']); }
-echo '✅ wordpress.sqlite 병합 완료' . PHP_EOL;
-PHPEOF
+          echo 'PD9waHAKJHJhdyA9IEBmaWxlX2dldF9jb250ZW50cygnX2RiL3dvcmRwcmVzcy5kYicpOwokZGF0YSA9IGpzb25fZGVjb2RlKCRyYXcgPzogJycsIHRydWUpOwppZiAoISRkYXRhIHx8IGVtcHR5KCRkYXRhWydvcHRpb25zJ10pKSB7IGVjaG8gJ0pTT04g7Iuc65OcIOyVhOuLmCAtIOqxtOuEiOucgCcgLiBQSFBfRU9MOyBleGl0KDApOyB9CiRwZG8gPSBuZXcgUERPKCdzcWxpdGU6X2RiL3dvcmRwcmVzcy5zcWxpdGUnKTsKJHBkby0+ZXhlYygnUFJBR01BIGpvdXJuYWxfbW9kZT1XQUwnKTsKJHBkby0+ZXhlYygnQ1JFQVRFIFRBQkxFIElGIE5PVCBFWElTVFMgd3Bfb3B0aW9ucyAob3B0aW9uX2lkIElOVEVHRVIgUFJJTUFSWSBLRVkgQVVUT0lOQ1JFTUVOVCwgb3B0aW9uX25hbWUgVEVYVCBVTklRVUUsIG9wdGlvbl92YWx1ZSBURVhULCBhdXRvbG9hZCBURVhUIERFRkFVTFQgeWVzKScpOwokc3QgPSAkcGRvLT5wcmVwYXJlKCdJTlNFUlQgT1IgUkVQTEFDRSBJTlRPIHdwX29wdGlvbnMgKG9wdGlvbl9uYW1lLCBvcHRpb25fdmFsdWUsIGF1dG9sb2FkKSBWQUxVRVMgKD8sPyw/KScpOwpmb3JlYWNoICgkZGF0YVsnb3B0aW9ucyddID8/IFtdIGFzICRvKSB7ICRzdC0+ZXhlY3V0ZShbJG9bJ29wdGlvbl9uYW1lJ10sICRvWydvcHRpb25fdmFsdWUnXSwgJG9bJ2F1dG9sb2FkJ10gPz8gJ3llcyddKTsgfQplY2hvICfinIUgd29yZHByZXNzLnNxbGl0ZSDrs5Htlakg7JmE66OMJyAuIFBIUF9FT0w7Cg==' | base64 -d > /tmp/merge_db.php
           php /tmp/merge_db.php
 `;
 }
-
 // ─── wp-transform.ts 생성 ────────────────────────────────────────────────────
 // PHP 실시간 실행 브릿지 — WordPress 경로 매핑 · _cache 폴백 · db.php 연동
 function buildWpTransform({ siteName, siteUrl, siteId, owner, repoName }) {

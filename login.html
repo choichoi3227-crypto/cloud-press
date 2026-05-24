@@ -33,7 +33,7 @@
         <form id="loginForm" class="space-y-4">
             <div class="space-y-1">
                 <label class="text-xs text-gray-400 ml-1">이메일 주소</label>
-                <input type="email" id="email" placeholder="example@email.com" required
+                <input type="text" id="email" placeholder="example@email.com" autocomplete="email" inputmode="email"
                     class="w-full p-4 bg-white/5 border border-white/10 rounded-xl focus:border-blue-500 outline-none transition text-white">
             </div>
             <div class="space-y-1">
@@ -65,6 +65,21 @@
         form.onsubmit = async (e) => {
             e.preventDefault();
             errDiv.classList.add('hidden');
+
+            const emailVal = document.getElementById('email').value.trim();
+            const passVal  = document.getElementById('password').value;
+
+            // 이메일 형식 검증 (브라우저 기본 팝업 대신 커스텀 에러)
+            const emailRe = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+            if (!emailRe.test(emailVal)) {
+                showError('올바른 이메일 형식을 입력해주세요.');
+                return;
+            }
+            if (!passVal) {
+                showError('비밀번호를 입력해주세요.');
+                return;
+            }
+
             btn.textContent = '로그인 중...';
             btn.disabled = true;
 
@@ -72,10 +87,7 @@
                 const res = await fetch('/api/login', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        email: document.getElementById('email').value,
-                        password: document.getElementById('password').value
-                    })
+                    body: JSON.stringify({ email: emailVal, password: passVal })
                 });
 
                 const data = await res.json();

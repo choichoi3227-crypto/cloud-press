@@ -95,3 +95,61 @@ body.aws-theme{background:var(--aws-bg);color:var(--aws-text)}
 .aws-panel{background:var(--aws-surface);border:1px solid var(--aws-border);border-radius:12px}
 .aws-btn{background:var(--aws-accent);color:#111827;font-weight:700;border-radius:8px;padding:.6rem 1rem}
 .aws-btn-secondary{background:transparent;border:1px solid var(--aws-border);color:var(--aws-text);border-radius:8px;padding:.6rem 1rem}
+
+/* ── 공백 수정 + 모바일 전역 개선 ──────────────────────────────────────────── */
+/* 불필요한 여백 제거 */
+main { min-height: 0; }
+section:empty, div:empty { display: none; }
+
+/* 모바일 기본 패딩/마진 정규화 */
+@media (max-width: 768px) {
+  .max-w-2xl, .max-w-3xl, .max-w-4xl, .max-w-5xl, .max-w-6xl, .max-w-7xl {
+    max-width: 100% !important;
+  }
+  /* 대시보드 내 과도한 패딩 방지 */
+  main.flex-1 {
+    padding-left: 1rem !important;
+    padding-right: 1rem !important;
+    padding-top: 1.25rem !important;
+    padding-bottom: 2rem !important;
+  }
+  /* 섹션 카드 모바일 패딩 */
+  .section-card { padding: 16px !important; }
+  /* 그리드: 모바일에서 단일 컬럼 */
+  .grid.md\:grid-cols-2,
+  .grid.md\:grid-cols-3,
+  .grid.md\:grid-cols-4 {
+    grid-template-columns: 1fr !important;
+  }
+  /* 플렉스 모바일 wrap */
+  .flex.md\:items-center { flex-wrap: wrap; }
+  /* 테이블 가로 스크롤 */
+  table { display: block; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  /* 버튼 모바일 풀 너비 */
+  .flex.gap-3 > button,
+  .flex.gap-3 > a { flex: 1 1 auto; min-width: 120px; }
+  /* hosting-create 스텝 인디케이터 작은 텍스트 */
+  #step-indicators .flex-1 { padding: 8px 4px !important; font-size: 10px !important; }
+  /* 폼 입력 풀 너비 */
+  .cp-input { font-size: 16px !important; } /* iOS zoom 방지 */
+}
+
+/* md:col-span-2 모바일에서 단일 컬럼 */
+@media (max-width: 768px) {
+  .md\:col-span-2 { grid-column: span 1 !important; }
+}
+
+/* 공백 유발하는 hidden 처리 강화 */
+.hidden { display: none !important; }
+
+/* 호스팅 생성 페이지 헤더 공백 방지 */
+#step-indicators.hidden + * { margin-top: 0 !important; }
+
+/* admin-settings 모바일 overflow */
+@media (max-width: 768px) {
+  .font-mono.text-xs.break-all { word-break: break-all; overflow-wrap: anywhere; }
+  pre { white-space: pre-wrap; word-break: break-all; }
+}
+
+/* 프로필 드롭다운 z-index */
+#profile-dropdown { z-index: 1000; }

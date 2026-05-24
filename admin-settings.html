@@ -218,6 +218,44 @@
         </div>
     </div>
 
+    <!-- ── CP3 메인 스토리지 레포 설정 ── -->
+    <div class="p-6 bg-[#111] rounded-2xl border border-green-500/20 space-y-5">
+        <div class="flex items-center justify-between flex-wrap gap-2">
+            <h2 class="font-bold flex items-center gap-2">
+                <i class="fas fa-archive text-green-400 text-lg"></i>
+                CP3 메인 스토리지 레포 설정 (DB 서버)
+            </h2>
+            <span class="text-xs text-gray-500">호스팅 생성 시 사용자 DB 정보가 저장되는 레포</span>
+        </div>
+        <div class="p-4 bg-green-950/20 border border-green-500/20 rounded-xl text-xs text-green-300 space-y-1">
+            <p class="font-bold">📁 저장 구조</p>
+            <code class="block text-green-200/70 mt-1">{cp3_repo}/{user_id}/{site_id}/media/ · backup/ · logs/</code>
+            <p class="text-green-200/60 mt-2">호스팅 생성 시 이 레포에 사용자별·호스팅별 폴더가 자동으로 생성됩니다. 미설정 시 호스팅 레포 내부에 폴더가 생성됩니다.</p>
+        </div>
+        <div class="grid md:grid-cols-2 gap-4">
+            <div class="space-y-2">
+                <label class="text-xs text-gray-500 block font-bold">CP3 레포 Owner (GitHub 사용자명/조직)</label>
+                <input id="set-cp3-owner" type="text" placeholder="예: myorg"
+                    class="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-green-500 transition font-mono" />
+            </div>
+            <div class="space-y-2">
+                <label class="text-xs text-gray-500 block font-bold">CP3 레포 이름</label>
+                <input id="set-cp3-repo" type="text" placeholder="예: cloudpress-cp3-storage"
+                    class="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-green-500 transition font-mono" />
+            </div>
+        </div>
+        <div class="space-y-2">
+            <label class="text-xs text-gray-500 block font-bold">CP3 전용 GitHub 토큰 <span class="text-gray-600 font-normal">(비워두면 기본 GitHub 토큰 사용)</span></label>
+            <input id="set-cp3-token" type="password" placeholder="ghp_..."
+                class="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-green-500 transition font-mono" />
+        </div>
+        <div id="cp3-save-alert" class="hidden p-3 rounded-xl text-sm"></div>
+        <button onclick="saveCp3Settings()"
+            class="bg-green-700 hover:bg-green-600 text-white font-bold px-6 py-2.5 rounded-xl transition flex items-center gap-2">
+            <i class="fas fa-save"></i> CP3 스토리지 설정 저장
+        </button>
+    </div>
+
     <!-- ── CloudPressDB / CP3 서버 풀 (GitHub 레포 + DNS 플래너) ── -->
     <div class="p-6 bg-[#111] rounded-2xl border border-violet-500/20 space-y-5">
         <h2 class="font-bold flex items-center gap-2">
@@ -414,6 +452,84 @@
             class="bg-green-700 hover:bg-green-600 text-white font-bold px-6 py-2.5 rounded-xl transition flex items-center gap-2">
             <i class="fas fa-save"></i> 결제 설정 저장
         </button>
+    </div>
+
+    <!-- ── Google Drive 연동 설정 ── -->
+    <div class="p-6 bg-[#111] rounded-2xl border border-white/5 space-y-5">
+        <div class="flex items-center justify-between flex-wrap gap-2">
+            <h2 class="font-bold flex items-center gap-2">
+                <i class="fab fa-google-drive text-yellow-400 text-lg"></i>
+                Google Drive 스토리지 연동
+            </h2>
+            <span class="text-xs text-gray-500">미디어·백업 외부 스토리지로 활용</span>
+        </div>
+
+        <!-- 설정 가이드 -->
+        <div class="p-4 bg-blue-950/30 border border-blue-500/25 rounded-xl space-y-3 text-sm">
+            <p class="font-bold text-blue-300 flex items-center gap-2"><i class="fas fa-book-open"></i> Google Drive OAuth 설정 가이드</p>
+            <ol class="text-blue-200/75 text-xs space-y-2 list-decimal ml-4">
+                <li>
+                    <a href="https://console.cloud.google.com/" target="_blank" class="text-blue-400 hover:underline font-bold">Google Cloud Console</a>
+                    에서 프로젝트를 생성하거나 선택합니다.
+                </li>
+                <li><strong>API 및 서비스 → 라이브러리</strong>에서 <em>Google Drive API</em>를 검색해 사용 설정합니다.</li>
+                <li><strong>사용자 인증 정보 → OAuth 2.0 클라이언트 ID</strong>를 생성합니다.
+                    <ul class="list-disc ml-4 mt-1 space-y-1">
+                        <li>애플리케이션 유형: <em>웹 애플리케이션</em></li>
+                        <li>승인된 리디렉션 URI: <code class="bg-black/40 px-1 rounded">https://YOUR_DOMAIN/api/oauth/google/callback</code></li>
+                    </ul>
+                </li>
+                <li>발급된 <strong>클라이언트 ID</strong>와 <strong>클라이언트 보안 비밀번호</strong>를 아래에 입력합니다.</li>
+                <li>OAuth 동의 화면에서 <strong>google.drive.file</strong> 또는 <strong>drive</strong> 스코프를 추가합니다.</li>
+                <li>아래 "Google Drive 연결하기" 버튼으로 최초 인증을 완료합니다.</li>
+            </ol>
+            <div class="p-3 bg-yellow-900/20 border border-yellow-500/20 rounded-xl text-xs text-yellow-300">
+                <i class="fas fa-exclamation-triangle mr-1"></i>
+                Google OAuth 인증 중 <strong>"액세스 차단됨: 승인 오류"</strong>가 발생하면,
+                Google Cloud Console → OAuth 동의 화면 → <strong>테스트 사용자</strong>에 본인 Google 계정을 추가하거나,
+                앱을 <strong>프로덕션</strong>으로 전환하세요.
+            </div>
+        </div>
+
+        <div class="grid md:grid-cols-2 gap-4">
+            <div class="space-y-2">
+                <label class="text-xs text-gray-500 block font-bold">Client ID</label>
+                <input id="set-gdrive-client-id" type="text" placeholder="xxxxx.apps.googleusercontent.com"
+                    class="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-blue-500 transition font-mono" />
+                <p class="text-xs text-gray-600">Google Cloud Console → 사용자 인증 정보 → OAuth 2.0 클라이언트 ID</p>
+            </div>
+            <div class="space-y-2">
+                <label class="text-xs text-gray-500 block font-bold">Client Secret</label>
+                <input id="set-gdrive-client-secret" type="password" placeholder="GOCSPX-..."
+                    class="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-blue-500 transition font-mono" />
+                <p class="text-xs text-gray-600">OAuth 2.0 클라이언트 보안 비밀번호</p>
+            </div>
+        </div>
+
+        <div class="space-y-2">
+            <label class="text-xs text-gray-500 block font-bold">Refresh Token <span class="text-gray-600 font-normal">(아래 버튼으로 자동 발급 또는 직접 입력)</span></label>
+            <input id="set-gdrive-refresh-token" type="password" placeholder="1//0g..."
+                class="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-blue-500 transition font-mono" />
+            <p class="text-xs text-gray-600">OAuth 인증 완료 후 자동 입력됩니다. 또는 OAuth Playground에서 직접 발급 가능합니다.</p>
+        </div>
+
+        <!-- 연결 상태 표시 -->
+        <div id="gdrive-status-bar" class="hidden p-3 bg-white/5 border border-white/10 rounded-xl text-xs text-gray-400 flex items-center gap-2">
+            <i class="fas fa-circle text-gray-600" id="gdrive-status-ico"></i>
+            <span id="gdrive-status-text">연결 상태 확인 중...</span>
+        </div>
+
+        <div id="gdrive-save-alert" class="hidden p-3 rounded-xl text-sm"></div>
+        <div class="flex flex-wrap gap-3">
+            <button onclick="saveGdriveSettings()"
+                class="bg-yellow-600 hover:bg-yellow-500 text-white font-bold px-6 py-2.5 rounded-xl transition flex items-center gap-2">
+                <i class="fas fa-save"></i> 설정 저장
+            </button>
+            <button onclick="connectGdrive()"
+                class="bg-white/10 hover:bg-white/20 text-white font-bold px-6 py-2.5 rounded-xl transition flex items-center gap-2">
+                <i class="fab fa-google text-yellow-400"></i> Google Drive 연결하기
+            </button>
+        </div>
     </div>
 
     <!-- ── GitHub 사용 가이드 ── -->
@@ -1244,6 +1360,136 @@ async function deletePoolServer(id) {
   loadPoolServers();
 }
 loadPoolServers();
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// Google Drive 연동 설정
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+async function loadGdriveSettings() {
+    try {
+        const res  = await fetch('/api/admin/settings?keys=gdrive_client_id,gdrive_client_secret,gdrive_refresh_token', { headers: HEADERS() });
+        const data = await res.json();
+        if (!res.ok) return;
+        const s = data.settings || {};
+        if (s.gdrive_client_id)       document.getElementById('set-gdrive-client-id').value = s.gdrive_client_id;
+        if (s.gdrive_client_secret)   document.getElementById('set-gdrive-client-secret').value = s.gdrive_client_secret;
+        if (s.gdrive_refresh_token)   document.getElementById('set-gdrive-refresh-token').value = s.gdrive_refresh_token;
+
+        // 연결 상태 표시
+        const bar  = document.getElementById('gdrive-status-bar');
+        const ico  = document.getElementById('gdrive-status-ico');
+        const txt  = document.getElementById('gdrive-status-text');
+        bar.classList.remove('hidden');
+        if (s.gdrive_refresh_token) {
+            ico.className = 'fas fa-circle text-green-400';
+            txt.textContent = 'Google Drive 연결됨 (Refresh Token 있음)';
+        } else if (s.gdrive_client_id) {
+            ico.className = 'fas fa-circle text-yellow-400';
+            txt.textContent = 'Client ID/Secret 저장됨 — "Google Drive 연결하기"로 인증 완료 필요';
+        } else {
+            ico.className = 'fas fa-circle text-gray-600';
+            txt.textContent = '연결되지 않음 — Client ID와 Secret을 입력 후 설정 저장을 눌러주세요';
+        }
+    } catch (_) {}
+}
+
+async function saveGdriveSettings() {
+    const alertEl = document.getElementById('gdrive-save-alert');
+    const clientId     = document.getElementById('set-gdrive-client-id').value.trim();
+    const clientSecret = document.getElementById('set-gdrive-client-secret').value.trim();
+    const refreshToken = document.getElementById('set-gdrive-refresh-token').value.trim();
+
+    if (!clientId && !clientSecret && !refreshToken) {
+        showAlert(alertEl, '저장할 값을 입력해주세요.', 'warning'); return;
+    }
+    const payload = {};
+    if (clientId)     payload.gdrive_client_id     = clientId;
+    if (clientSecret) payload.gdrive_client_secret = clientSecret;
+    if (refreshToken) payload.gdrive_refresh_token = refreshToken;
+
+    try {
+        const res  = await fetch('/api/admin/settings', {
+            method: 'PUT', headers: HEADERS(),
+            body: JSON.stringify(payload),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || '저장 실패');
+        showAlert(alertEl, '✅ Google Drive 설정이 저장되었습니다.', 'success');
+        loadGdriveSettings();
+    } catch (e) {
+        showAlert(alertEl, e.message, 'error');
+    }
+}
+
+async function connectGdrive() {
+    const clientId     = document.getElementById('set-gdrive-client-id').value.trim();
+    const clientSecret = document.getElementById('set-gdrive-client-secret').value.trim();
+    if (!clientId || !clientSecret) {
+        alert('먼저 Client ID와 Client Secret을 입력하고 "설정 저장"을 눌러주세요.'); return;
+    }
+    // 설정 먼저 저장
+    await saveGdriveSettings();
+
+    // Google OAuth 인증창 열기
+    const redirectUri = encodeURIComponent(location.origin + '/api/oauth/google/callback');
+    const scope       = encodeURIComponent('https://www.googleapis.com/auth/drive.file');
+    const authUrl     = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${encodeURIComponent(clientId)}&redirect_uri=${redirectUri}&response_type=code&scope=${scope}&access_type=offline&prompt=consent&state=admin`;
+    const popup = window.open(authUrl, 'gdrive_oauth', 'width=600,height=700,scrollbars=yes');
+    if (!popup) { alert('팝업이 차단되었습니다. 팝업을 허용한 후 다시 시도해주세요.'); return; }
+
+    // 팝업 완료 감지
+    const timer = setInterval(() => {
+        if (popup.closed) {
+            clearInterval(timer);
+            loadGdriveSettings();
+        }
+    }, 800);
+}
+
+loadGdriveSettings();
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// CP3 메인 스토리지 레포 설정
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+async function loadCp3Settings() {
+    try {
+        const res  = await fetch('/api/admin/settings?keys=cp3_repo_owner,cp3_repo_name,cp3_github_token', { headers: HEADERS() });
+        const data = await res.json();
+        if (!res.ok) return;
+        const s = data.settings || {};
+        if (s.cp3_repo_owner) document.getElementById('set-cp3-owner').value = s.cp3_repo_owner;
+        if (s.cp3_repo_name)  document.getElementById('set-cp3-repo').value  = s.cp3_repo_name;
+        if (s.cp3_github_token) document.getElementById('set-cp3-token').value = s.cp3_github_token;
+    } catch (_) {}
+}
+
+async function saveCp3Settings() {
+    const alertEl = document.getElementById('cp3-save-alert');
+    const owner = document.getElementById('set-cp3-owner').value.trim();
+    const repo  = document.getElementById('set-cp3-repo').value.trim();
+    const token = document.getElementById('set-cp3-token').value.trim();
+
+    if (!owner && !repo) { showAlert(alertEl, '레포 Owner와 이름을 입력해주세요.', 'warning'); return; }
+    const payload = {};
+    if (owner) payload.cp3_repo_owner    = owner;
+    if (repo)  payload.cp3_repo_name     = repo;
+    if (token) payload.cp3_github_token  = token;
+
+    try {
+        const res  = await fetch('/api/admin/settings', {
+            method: 'PUT', headers: HEADERS(),
+            body: JSON.stringify(payload),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || '저장 실패');
+        showAlert(alertEl, `✅ CP3 스토리지 설정이 저장되었습니다. (${owner}/${repo})`, 'success');
+    } catch (e) {
+        showAlert(alertEl, e.message, 'error');
+    }
+}
+
+loadCp3Settings();
 </script>
 </body>
 </html>

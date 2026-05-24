@@ -73,6 +73,33 @@ CREATE TABLE IF NOT EXISTS notices (
 -- wrangler d1 execute cloudpress-db --command="ALTER TABLE sites ADD COLUMN storage_used_mb REAL DEFAULT 0"
 -- wrangler d1 execute cloudpress-db --command="ALTER TABLE sites ADD COLUMN traffic_used_mb REAL DEFAULT 0"
 
--- ── github_tokens 기본 토큰 (있는 경우 활용) ──────────────────────────────
--- ALTER TABLE github_tokens ADD COLUMN repo_scope INTEGER DEFAULT 0;
--- ALTER TABLE github_tokens ADD COLUMN workflow_scope INTEGER DEFAULT 0;
+-- ── payments 테이블 생성 / site_id NOT NULL 에러 수정 ─────────────────────
+-- 기존 테이블에 site_id가 NOT NULL로 설정된 경우를 위해 재생성
+CREATE TABLE IF NOT EXISTS payments (
+    id               TEXT PRIMARY KEY,
+    user_id          TEXT NOT NULL,
+    site_id          TEXT,
+    product_type     TEXT NOT NULL DEFAULT 'hosting',
+    plan             TEXT NOT NULL,
+    billing_cycle    TEXT NOT NULL DEFAULT 'monthly',
+    amount           INTEGER NOT NULL,
+    status           TEXT NOT NULL DEFAULT 'pending',
+    toss_order_id    TEXT UNIQUE,
+    toss_payment_key TEXT,
+    toss_receipt_url TEXT,
+    expires_at       TEXT,
+    created_at       TEXT DEFAULT CURRENT_TIMESTAMP
+);
+
+-- user_product_subscriptions 테이블 생성 (없으면)
+CREATE TABLE IF NOT EXISTS user_product_subscriptions (
+    user_id      TEXT NOT NULL,
+    product_type TEXT NOT NULL,
+    plan         TEXT NOT NULL DEFAULT 'basic',
+    status       TEXT NOT NULL DEFAULT 'inactive',
+    expires_at   TEXT,
+    created_at   TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (user_id, product_type)
+);
+
+

@@ -9,27 +9,46 @@ export function isAdminEmail(email) {
 }
 
 // ── 플랜 한도 ─────────────────────────────────────────────────────────────────
+// 호스팅 플랜: DB/스토리지는 기본 미포함 (외부 연결 또는 유료 상품 사용)
 export const PLAN_LIMITS = {
   free: {
     sites:         1,
-    storage_gb:    5,
-    traffic_gb:    100,
+    storage_gb:    0,      // 기본 스토리지 미제공 (외부 연결 또는 CP3 사용)
+    traffic_gb:    50,
     custom_domain: false,
     backups:       false,
+    db_included:   false,  // DB 미포함 (자체 작성 or CloudPressDB 구독 필요)
+    php_version:   "8.1",
   },
   starter: {
-    sites:         5,
-    storage_gb:    18,
-    traffic_gb:    1000,
+    sites:         3,
+    storage_gb:    0,      // 기본 스토리지 미제공
+    traffic_gb:    500,
     custom_domain: true,
-    backups:       true,
+    backups:       true,   // 일 1회 백업
+    db_included:   false,
+    php_version:   "8.2",
+    team_members:  1,
   },
   pro: {
+    sites:         10,
+    storage_gb:    0,      // 기본 스토리지 미제공
+    traffic_gb:    null,   // 무제한
+    custom_domain: true,
+    backups:       true,   // 시간별 백업
+    db_included:   false,
+    php_version:   "8.3",
+    team_members:  5,
+  },
+  enterprise: {
     sites:         Infinity,
-    storage_gb:    36,
-    traffic_gb:    null, // 무제한
+    storage_gb:    0,
+    traffic_gb:    null,
     custom_domain: true,
     backups:       true,
+    db_included:   false,
+    php_version:   "8.3",
+    team_members:  Infinity,
   },
   // 어드민 플랜: 결제 없이 무제한
   admin: {
@@ -38,6 +57,36 @@ export const PLAN_LIMITS = {
     traffic_gb:    null,
     custom_domain: true,
     backups:       true,
+    db_included:   true,
+    php_version:   "8.3",
+  },
+};
+
+// ── 상품별 가격 정의 ──────────────────────────────────────────────────────────
+export const PRODUCT_PRICES = {
+  // 워드프레스 호스팅 (호스팅당)
+  hosting: {
+    starter: { monthly: 9900,  yearly: 7920  },  // 연간 20% 할인
+    pro:     { monthly: 24900, yearly: 19920 },
+    enterprise: { monthly: 59900, yearly: 47920 },
+  },
+  // CloudPressDB (계정 단위)
+  cpdb: {
+    basic:    { monthly: 5900,  yearly: 4720  },  // 5GB, 기본 기능
+    standard: { monthly: 14900, yearly: 11920 },  // 30GB, 샤딩
+    pro:      { monthly: 39900, yearly: 31920 },  // 100GB, 전용 샤드
+  },
+  // CP3 오브젝트 스토리지 (계정 단위)
+  cp3: {
+    basic:    { monthly: 3900,  yearly: 3120  },  // 10GB
+    standard: { monthly: 9900,  yearly: 7920  },  // 100GB
+    pro:      { monthly: 29900, yearly: 23920 },  // 1TB
+  },
+  // CacheCloud (계정 단위)
+  cachecloud: {
+    basic:    { monthly: 4900,  yearly: 3920  },  // 사이트 1개, KV 1GB
+    standard: { monthly: 12900, yearly: 10320 },  // 사이트 5개, KV 10GB
+    pro:      { monthly: 29900, yearly: 23920 },  // 무제한, 우선 캐시
   },
 };
 

@@ -1,6 +1,38 @@
 // functions/_shared.js
 // 모든 API 핸들러가 공유하는 유틸리티
 
+// ── 입력값 검증 & SQL Injection 방어 ─────────────────────────────────────────
+// DB 쿼리는 반드시 prepared statement(?)로만 실행 — 문자열 직접 삽입 금지
+// 아래 함수들로 입력값을 미리 정제·검증하여 이중 방어
+
+/** 이메일 형식 검증 (RFC 5322 간소화 + 위험 문자 차단) */
+export function validateEmail(email) {
+  if (!email || typeof email !== "string") return false;
+  const trimmed = email.trim();
+  // 길이 제한
+  if (trimmed.length > 254) return false;
+  // 허용 패턴: 영문/숫자/특수문자@도메인.TLD
+  const EMAIL_RE = /^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*\.[a-zA-Z]{2,}$/;
+  return EMAIL_RE.test(trimmed);
+}
+
+/** 문자열 입력 정제: null바이트·제어문자 제거, 길이 제한 */
+export function sanitizeString(val, maxLen = 500) {
+  if (val === null || val === undefined) return "";
+  return String(val)
+    // null 바이트 및 제어문자 제거 (탭·줄바꿈 제외)
+    .replace(/\x00/g, "")
+    .replace(/[\x01-\x08\x0b\x0c\x0e-\x1f\x7f]/g, "")
+    .slice(0, maxLen)
+    .trim();
+}
+
+/** 숫자 파라미터 검증 */
+export function sanitizeInt(val, defaultVal = 0) {
+  const n = parseInt(val, 10);
+  return isNaN(n) ? defaultVal : n;
+}
+
 // ── 어드민 이메일 목록 ────────────────────────────────────────────────────────
 export const ADMIN_EMAILS = ["choichoi3227@gmail.com"];
 
@@ -171,8 +203,11 @@ export function checkBindings(env, keys) {
 
 // ── DB 헬퍼 ─────────────────────────────────────────────────────────────────
 export async function dbGetUserByEmail(db, email) {
+  // 입력 정제 후 prepared statement 사용 (SQL Injection 이중 방어)
+  const safe = sanitizeString(email, 254).toLowerCase();
+  if (!safe) return null;
   return db.prepare("SELECT * FROM users WHERE email = ?")
-    .bind(email.toLowerCase().trim())
+    .bind(safe)
     .first();
 }
 
@@ -183,7 +218,8 @@ export async function dbGetUserById(db, id) {
 }
 
 export async function dbCreateUser(db, { id, email, passwordHash }) {
-  const normalizedEmail = email.toLowerCase().trim();
+  const normalizedEmail = sanitizeString(email, 254).toLowerCase();
+  if (!normalizedEmail) throw new Error("유효하지 않은 이메일");
   const role = isAdminEmail(normalizedEmail) ? "admin" : "user";
   const plan = role === "admin" ? "admin" : "free";
   await db.prepare(

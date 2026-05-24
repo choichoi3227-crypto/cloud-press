@@ -121,7 +121,7 @@ export async function onRequestGet(context) {
       const settings = {};
       const sensitive = [
         "toss_secret_key", "smtp_password", "supabase_service_key",
-        "gdrive_client_secret", "gdrive_refresh_token",
+        "gdrive_client_secret", "gdrive_refresh_token", "gdrive_service_account_json",
         "cp3_github_token",
       ];
       for (const row of (rows.results || [])) {
@@ -131,6 +131,45 @@ export async function onRequestGet(context) {
           : row.value;
       }
       return jsonOk({ success: true, settings });
+    }
+
+    // ── Google Drive 서비스 계정 연결 테스트 ──────────────────────────────
+    if (path === "gdrive-test") {
+      const row = await env.DB.prepare(
+        "SELECT value FROM admin_settings WHERE key = 'gdrive_service_account_json'"
+      ).first().catch(() => null);
+      if (!row?.value) return jsonErr("서비스 계정 JSON이 설정되지 않았습니다.", 400);
+
+      let sa;
+      try { sa = JSON.parse(row.value); } catch { return jsonErr("서비스 계정 JSON 파싱 실패", 400); }
+
+      // JWT 생성 → access token 발급 테스트
+      try {
+        const now   = Math.floor(Date.now() / 1000);
+        const claim = { iss: sa.client_email, scope: "https://www.googleapis.com/auth/drive", aud: "https://oauth2.googleapis.com/token", exp: now + 3600, iat: now };
+        const header  = btoa(JSON.stringify({ alg: "RS256", typ: "JWT" })).replace(/=/g,"").replace(/\+/g,"-").replace(/\//g,"_");
+        const payload2 = btoa(JSON.stringify(claim)).replace(/=/g,"").replace(/\+/g,"-").replace(/\//g,"_");
+
+        // RS256 서명 (Web Crypto API)
+        const pemBody = sa.private_key.replace(/-----BEGIN PRIVATE KEY-----|-----END PRIVATE KEY-----|
+/g, "");
+        const keyData = Uint8Array.from(atob(pemBody), c => c.charCodeAt(0));
+        const cryptoKey = await crypto.subtle.importKey("pkcs8", keyData.buffer, { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" }, false, ["sign"]);
+        const sig = await crypto.subtle.sign("RSASSA-PKCS1-v1_5", cryptoKey, new TextEncoder().encode(`${header}.${payload2}`));
+        const sigB64 = btoa(String.fromCharCode(...new Uint8Array(sig))).replace(/=/g,"").replace(/\+/g,"-").replace(/\//g,"_");
+        const jwt = `${header}.${payload2}.${sigB64}`;
+
+        const tokenRes = await fetch("https://oauth2.googleapis.com/token", {
+          method: "POST",
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+          body: new URLSearchParams({ grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer", assertion: jwt }),
+        });
+        const tokenData = await tokenRes.json();
+        if (!tokenRes.ok || !tokenData.access_token) throw new Error(tokenData.error_description || tokenData.error || "토큰 발급 실패");
+        return jsonOk({ success: true, email: sa.client_email, message: "서비스 계정 연결 성공" });
+      } catch (e) {
+        return jsonErr("연결 테스트 실패: " + e.message, 500);
+      }
     }
 
     // ── 스토리지 할당량 통계 ─────────────────────────────────────────────
@@ -256,8 +295,9 @@ export async function onRequestPut(context) {
         "supabase_url", "supabase_service_key",
         "toss_client_key", "toss_secret_key",
         "site_name", "support_email", "platform_domain",
-        // Google Drive OAuth
+        // Google Drive (서비스 계정 방식)
         "gdrive_client_id", "gdrive_client_secret", "gdrive_refresh_token",
+        "gdrive_service_account_json", "gdrive_root_folder_id",
         // CP3 스토리지 레포
         "cp3_repo_owner", "cp3_repo_name", "cp3_github_token",
         // CloudPressDB 레포 (호스팅 생성 시 DB 폴더 구조용)

@@ -81,7 +81,14 @@
 const TOKEN   = localStorage.getItem('admin_token');
 const HEADERS = { Authorization: `Bearer ${TOKEN}`, 'Content-Type': 'application/json' };
 
-const planNames = { starter: '스타터 플랜', pro: '프로 플랜' };
+const planNames = {
+    starter: '스타터 플랜', pro: '프로 플랜', enterprise: '엔터프라이즈 플랜',
+    basic: '베이직 플랜', standard: '스탠다드 플랜',
+};
+const productNames = {
+    hosting: 'WordPress 호스팅', cpdb: 'CloudPressDB', cp3: 'CP3', cachecloud: 'CacheCloud',
+};
+const productType = params.get('product_type') || 'hosting';
 
 (async () => {
     const params = new URLSearchParams(location.search);
@@ -174,17 +181,25 @@ const planNames = { starter: '스타터 플랜', pro: '프로 플랜' };
         document.getElementById('state-success').classList.remove('hidden');
 
         document.getElementById('success-msg').textContent =
-            `${planNames[data.plan] || data.plan}이 활성화되었습니다!`;
+            `${productNames[data.product_type] || productNames[productType] || ''} ${planNames[data.plan] || data.plan}이 활성화되었습니다!`;
 
         const expDate = data.expires_at ? new Date(data.expires_at) : null;
         document.getElementById('success-expire').textContent = expDate
             ? `유효 기간: ${expDate.toLocaleDateString('ko-KR')}까지`
             : '';
 
-        document.getElementById('info-plan').textContent   = planNames[data.plan] || data.plan;
+        document.getElementById('info-plan').textContent   = `${productNames[data.product_type] || ''} ${planNames[data.plan] || data.plan}`;
         document.getElementById('info-amount').textContent = `₩${parseInt(amount).toLocaleString()}`;
         document.getElementById('info-expire').textContent = expDate
             ? expDate.toLocaleDateString('ko-KR') : '-';
+
+        // 상품 타입에 따라 콘솔 링크 변경
+        const consoleLink = document.getElementById('link-console');
+        const consoleDest = {
+            hosting: '/hosting', cpdb: '/product-cloudpressdb',
+            cp3: '/product-cp3', cachecloud: '/product-cachecloud',
+        };
+        consoleLink.href = consoleDest[data.product_type || productType] || '/services';
 
         if (data.receipt_url) {
             const rLink = document.getElementById('link-receipt');

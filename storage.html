@@ -110,7 +110,7 @@
                 <p class="text-xs text-gray-400">S3 호환 API. Access Key와 Secret Key로 연결. 국내 데이터센터.</p>
             </div>
 
-            <!-- 구글 드라이브 -->
+            <!-- 구글 드라이브 (서비스 계정) -->
             <div class="provider-card p-5 bg-[#111] border border-white/10 rounded-2xl" id="card-gdrive" onclick="connectGoogleDrive()">
                 <div class="flex items-center gap-3 mb-3">
                     <div class="w-10 h-10 rounded-xl bg-yellow-900/30 border border-yellow-500/20 flex items-center justify-center text-yellow-400">
@@ -118,13 +118,13 @@
                     </div>
                     <div>
                         <div class="font-bold">구글 드라이브</div>
-                        <div class="text-xs text-gray-500">Google Drive as Storage</div>
+                        <div class="text-xs text-gray-500">개인 폴더 자동 분리</div>
                     </div>
                     <span id="badge-gdrive" class="ml-auto hidden text-xs px-2 py-1 rounded-full bg-green-900/30 border border-green-500/30 text-green-400">연결됨</span>
                 </div>
-                <p class="text-xs text-gray-400">Google OAuth 인증 후 드라이브 폴더를 스토리지로 사용. 15GB 무료 제공.</p>
-                <div class="mt-2 flex items-center gap-1 text-xs text-yellow-400/80">
-                    <i class="fas fa-shield-alt"></i> Google 계정 인증 및 동의 필요
+                <p class="text-xs text-gray-400">관리자가 설정한 서비스 계정으로 개인 폴더에 자동 저장됩니다. 별도 로그인 불필요.</p>
+                <div class="mt-2 flex items-center gap-1 text-xs text-green-400/80">
+                    <i class="fas fa-check-circle"></i> 별도 인증 없이 즉시 연결
                 </div>
             </div>
 
@@ -187,39 +187,6 @@
     </div>
 </div>
 
-<!-- 구글 드라이브 OAuth 모달 -->
-<div id="gdrive-modal" style="display:none;position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.85);backdrop-filter:blur(6px);align-items:center;justify-content:center;">
-    <div style="animation:fadeIn .2s ease;" class="w-full max-w-md mx-4 bg-[#0f0f0f] border border-white/10 rounded-2xl overflow-hidden shadow-2xl">
-        <div class="p-6 border-b border-white/5 flex justify-between items-center">
-            <h2 class="text-lg font-bold flex items-center gap-2"><i class="fab fa-google-drive text-yellow-400"></i> 구글 드라이브 연결</h2>
-            <button onclick="document.getElementById('gdrive-modal').style.display='none'" class="text-gray-500 hover:text-white p-1"><i class="fas fa-times"></i></button>
-        </div>
-        <div class="p-6 space-y-5">
-            <div class="space-y-3 text-sm text-gray-300">
-                <div class="flex items-start gap-3 p-3 bg-white/3 rounded-xl border border-white/5">
-                    <i class="fas fa-shield-alt text-green-400 mt-0.5"></i>
-                    <div>
-                        <div class="font-bold text-white mb-1">Google 인증 및 동의</div>
-                        <p class="text-gray-400 text-xs">아래 버튼을 클릭하면 Google 로그인 페이지로 이동합니다. CloudPress가 구글 드라이브에 파일을 저장·읽기 위한 권한에 동의해야 합니다.</p>
-                    </div>
-                </div>
-                <div class="p-3 bg-amber-900/15 border border-amber-500/20 rounded-xl text-xs text-amber-200">
-                    <i class="fas fa-exclamation-triangle mr-1"></i>
-                    <strong>연결 후 동의 사항:</strong> CloudPress는 지정된 폴더에만 접근합니다. 다른 파일에는 접근하지 않습니다. 언제든지 Google 계정 설정에서 권한을 철회할 수 있습니다.
-                </div>
-            </div>
-            <div class="space-y-3">
-                <label class="cp-label">연결할 드라이브 폴더명 (선택)</label>
-                <input id="gdrive-folder" type="text" class="cp-input" placeholder="cloudpress-storage (기본값)">
-            </div>
-            <button onclick="startGoogleOAuth()" class="w-full flex items-center justify-center gap-3 py-3.5 rounded-xl font-bold bg-white text-gray-900 hover:bg-gray-100 transition">
-                <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" class="w-5 h-5">
-                Google 계정으로 연결하기
-            </button>
-            <p class="text-xs text-gray-600 text-center">OAuth 2.0 보안 인증. CloudPress는 비밀번호를 저장하지 않습니다.</p>
-        </div>
-    </div>
-</div>
 
 <script src="/src/sidebar.js"></script>
 <script>
@@ -364,55 +331,46 @@ async function connectCp3() {
     renderConnectionStatus();
 }
 
-function connectGoogleDrive() {
-    document.getElementById('gdrive-modal').style.display = 'flex';
-}
-
-function startGoogleOAuth() {
-    const folder = document.getElementById('gdrive-folder').value.trim() || 'cloudpress-storage';
-
-    // Google OAuth 2.0 설정 (실제 클라이언트 ID 필요)
-    const clientId = window.GOOGLE_CLIENT_ID || 'YOUR_GOOGLE_CLIENT_ID';
-    const scope = encodeURIComponent('https://www.googleapis.com/auth/drive.file');
-    const redirectUri = encodeURIComponent(window.location.origin + '/storage?oauth=gdrive');
-    const state = encodeURIComponent(JSON.stringify({ folder, provider: 'gdrive' }));
-
-    // state를 localStorage에 저장 (OAuth 완료 후 복원용)
-    localStorage.setItem('cp_oauth_state', JSON.stringify({ folder, provider: 'gdrive' }));
-
-    const oauthUrl = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${clientId}&redirect_uri=${redirectUri}&response_type=code&scope=${scope}&access_type=offline&state=${state}&prompt=consent`;
-
-    window.location.href = oauthUrl;
-}
-
-// OAuth 리다이렉트 처리
-function handleOAuthCallback() {
-    const params = new URLSearchParams(window.location.search);
-    const oauthType = params.get('oauth');
-    const code = params.get('code');
-    const error = params.get('error');
-
-    if (!oauthType) return;
-
-    if (error || !code) {
-        showAlert('Google 인증이 취소되었거나 실패했습니다.', 'error');
-        history.replaceState({}, '', '/storage');
+async function connectGoogleDrive() {
+    // 서버에 서비스 계정이 설정되었는지 확인
+    try {
+        const res  = await fetch('/api/admin/settings?keys=gdrive_service_account_json', { headers: H() });
+        const data = await res.json();
+        const hasSA = !!(data.settings || {})['gdrive_service_account_json'];
+        if (!hasSA) {
+            showAlert('관리자가 Google Drive 서비스 계정을 아직 설정하지 않았습니다. 관리자에게 문의하세요.', 'error');
+            return;
+        }
+    } catch (e) {
+        showAlert('서버 연결 오류: ' + e.message, 'error');
         return;
     }
+    // 서비스 계정 확인됨 → 사용자 개인 폴더로 즉시 연결
+    const userId = getUserId();
+    connections['gdrive'] = {
+        mode: 'service_account',
+        user_folder: 'cloudpress-storage/' + userId,
+        connected_at: new Date().toISOString(),
+    };
+    localStorage.setItem('cp_storage_connections', JSON.stringify(connections));
+    showAlert('구글 드라이브가 연결되었습니다. 파일은 cloudpress-storage/' + userId + ' 폴더에 저장됩니다.', 'success');
+    renderConnectionStatus();
+}
 
-    if (oauthType === 'gdrive' && code) {
-        const savedState = JSON.parse(localStorage.getItem('cp_oauth_state') || '{}');
-        // 실제로는 서버에서 code를 access_token으로 교환해야 함
-        // 여기서는 연결 정보를 로컬에 저장 (데모)
-        connections['gdrive'] = {
-            auth_code: code,
-            folder: savedState.folder || 'cloudpress-storage',
-            connected_at: new Date().toISOString(),
-        };
-        localStorage.setItem('cp_storage_connections', JSON.stringify(connections));
-        localStorage.removeItem('cp_oauth_state');
-        showAlert('구글 드라이브가 성공적으로 연결되었습니다!', 'success');
-        renderConnectionStatus();
+function getUserId() {
+    try {
+        const parts = (TOKEN || '').split('.');
+        if (parts.length < 2) return 'unknown';
+        const payload = JSON.parse(atob(parts[1].replace(/-/g, '+').replace(/_/g, '/')));
+        return payload.sub || payload.id || payload.userId || 'unknown';
+    } catch { return 'unknown'; }
+}
+
+// OAuth 콜백 (서비스 계정 방식에서는 사용 안 함 — 레거시 호환용)
+function handleOAuthCallback() {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('error')) {
+        showAlert('Google 오류: ' + params.get('error'), 'error');
         history.replaceState({}, '', '/storage');
     }
 }

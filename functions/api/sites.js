@@ -11,7 +11,7 @@
 //   - KV: 세션/캐시
 //   - Cloudflare API: Pages 프로젝트 생성 + GitHub 연동 (미러링)
 
-import { jsonOk, jsonErr, requireAuth, PLAN_LIMITS } from "../_shared.js";
+import { jsonOk, jsonErr, requireAuth, PLAN_LIMITS, getAdminCfCredentials } from "../_shared.js";
 import { provisionCloudflarePagesHosting } from "./cf-pages-hosting.js";
 import { pickGithubToken, ghReq } from "./github-storage.js";
 
@@ -245,15 +245,12 @@ export async function onRequestPost(context) {
 
   // ── 로그 헬퍼 ────────────────────────────────────────────────────────────
   // ── 프로비저닝 직접 실행 (waitUntil 백그라운드) ────────────────────────
-  // DB에서 CF 자격증명 조회
-  const u = await env.DB.prepare(
-    "SELECT cf_global_api_key, cf_account_id, cf_email FROM users WHERE id = ?"
-  ).bind(payload.id).first().catch(() => null);
-
-  const cfToken     = u?.cf_global_api_key || env.CF_API_TOKEN  || null;
-  const cfAccountId = u?.cf_account_id     || env.CF_ACCOUNT_ID || null;
-  const cfEmail     = u?.cf_email          || null;
-  const planLimits  = PLAN_LIMITS[plan]    || PLAN_LIMITS.free;
+  // 관리자 CF 자격증명 조회 (플랫폼 차원에서 관리)
+  const adminCf     = await getAdminCfCredentials(env.DB).catch(() => ({}));
+  const cfToken     = adminCf.apiKey    || env.CF_API_TOKEN  || null;
+  const cfAccountId = adminCf.accountId || env.CF_ACCOUNT_ID || null;
+  const cfEmail     = adminCf.email     || null;
+  const planLimits  = PLAN_LIMITS[plan] || PLAN_LIMITS.free;
 
   const log = async (msg, level = "info") => {
     console.log(`[Provision][${level}] ${msg}`);
@@ -270,8 +267,8 @@ export async function onRequestPost(context) {
 
   const run = async () => {
     await log("▶ 프로비저닝 시작");
-    await log(`CF Token     : ${cfToken     ? "✅ " + String(cfToken).slice(0,8)     + "..." : "❌ 없음 - 내 정보에서 Cloudflare API 등록 필요"}`);
-    await log(`CF AccountId : ${cfAccountId ? "✅ " + String(cfAccountId).slice(0,8) + "..." : "❌ 없음 - 내 정보에서 Cloudflare API 등록 필요"}`);
+    await log(`CF Token     : ${cfToken     ? "✅ " + String(cfToken).slice(0,8)     + "..." : "❌ 없음 - 관리자 설정에서 Cloudflare API 등록 필요"}`);
+    await log(`CF AccountId : ${cfAccountId ? "✅ " + String(cfAccountId).slice(0,8) + "..." : "❌ 없음 - 관리자 설정에서 Cloudflare API 등록 필요"}`);
     const ghToken = await pickGithubToken(env).catch(() => null);
     await log(`GitHub Token : ${ghToken ? "✅ 있음" : "❌ 없음 - 관리자 패널에서 GitHub 토큰 등록 필요"}`);
     await log(`Plan         : ${plan}`);
@@ -461,13 +458,11 @@ export async function onRequestDelete(context) {
   if (site.user_id !== payload.id && payload.role !== "admin")
     return jsonErr("권한이 없습니다.", 403);
 
-  // CF 자격증명 조회
-  const u = await env.DB.prepare(
-    "SELECT cf_global_api_key, cf_account_id, cf_email FROM users WHERE id = ?"
-  ).bind(payload.id).first().catch(() => null);
-  const cfToken     = u?.cf_global_api_key || env.CF_API_TOKEN  || null;
-  const cfAccountId = u?.cf_account_id     || env.CF_ACCOUNT_ID || null;
-  const cfEmail     = u?.cf_email          || null;
+  // 관리자 CF 자격증명 조회
+  const adminCfDel  = await getAdminCfCredentials(env.DB).catch(() => ({}));
+  const cfToken     = adminCfDel.apiKey    || env.CF_API_TOKEN  || null;
+  const cfAccountId = adminCfDel.accountId || env.CF_ACCOUNT_ID || null;
+  const cfEmail     = adminCfDel.email     || null;
 
   const ghToken = await pickGithubToken(env).catch(() => null);
 

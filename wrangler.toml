@@ -28,7 +28,7 @@ id      = "9b8370d20a9646b9aa73f63c9200379f"
 # 역할: 설치관리, 상태관리, 세션, 락, 크론, DB 담당
 [[durable_objects.bindings]]
 name       = "WP_MANAGER"
-class_name = "WpManager"
+class_name = "6e11e202affee1a2f1a74f43156e4873ec6ca1de15e1d773f0b9c1adc53c1814"
 # script_name은 같은 worker이므로 생략
 
 # Durable Object 마이그레이션 (최초 배포 시)

@@ -425,37 +425,19 @@ require_once ABSPATH . 'wp-settings.php';
 `;
 }
 
-// ─── 미러링 Worker 소스 ──────────────────────────────────────────────────────
-// 역할: GitHub 레포 파일 미러링 + PHP_RUNNER로 WordPress 실행
-// 고정 화면 없음 - PHP_RUNNER 없으면 _cache/ 서빙, 그것도 없으면 404
-// ⚠️  이 함수는 배열+join으로 Worker 소스를 생성합니다.
-//     템플릿 리터럴을 중첩하면 \\ 이스케이프가 손실되어
-//     정규식(/^\\//)이 /^//로 깨지고 CF Worker 배포 SyntaxError가 발생합니다.
-async function buildWorkerSource({ siteId, githubOwner, githubRepo, ghPagesUrl, siteUrl = "" }) {
-  // worker-site-mirror.js v14 소스를 인라인으로 조립
-  // 플레이스홀더를 실제 값으로 치환
-  // worker-site-mirror.js 파일 내용을 직접 사용
-  let src;
-  try {
-    const { readFileSync } = await import("fs");
-    const { fileURLToPath } = await import("url");
-    const { dirname, join } = await import("path");
-    const __dirname = dirname(fileURLToPath(import.meta.url));
-    src = readFileSync(join(__dirname, "../../worker-site-mirror.js"), "utf8");
-  } catch {
-    // Pages Functions 환경에서는 동적 import 불가 → 인라인 fallback
-    src = null;
-  }
-  if (!src) {
-    // fallback: dist/ (Astro 빌드) → _cache/ 순서로 서빙하는 worker
-    src = `export default{async fetch(req,env,ctx){const url=new URL(req.url);const path=url.pathname;const o=env.GH_OWNER||"${githubOwner}";const r=env.GH_REPO||"${githubRepo}";const t=env.GITHUB_TOKEN||"";if(!o||!r||o==="%%GH_OWNER%%")return new Response("CloudPress: GH_OWNER/GH_REPO 미설정",{status:503});const base=\`https://raw.githubusercontent.com/\${o}/\${r}/main\`;const h={...(t?{Authorization:\`Bearer \${t}\`}:{})};const STATIC=/\.(css|js|png|jpg|jpeg|gif|webp|svg|ico|woff2?|ttf|otf|eot|map|txt|xml|pdf)$/i;function mime(p){const e=(p.split(".").pop()||"").toLowerCase();return{css:"text/css;charset=utf-8",js:"application/javascript;charset=utf-8",json:"application/json",svg:"image/svg+xml",png:"image/png",jpg:"image/jpeg",jpeg:"image/jpeg",gif:"image/gif",webp:"image/webp",ico:"image/x-icon",woff:"font/woff",woff2:"font/woff2",ttf:"font/ttf",xml:"application/xml",txt:"text/plain",html:"text/html;charset=utf-8"}[e]||"application/octet-stream"}async function ghRaw(fp){try{const res=await fetch(\`\${base}/\${fp}\`,{headers:h});if(res.ok)return res}catch{}return null}const candidates=[];if(STATIC.test(path)){candidates.push("dist"+path)}else if(path==="/"||path===""){candidates.push("dist/index.html","_cache/index.html")}else{const clean=path.replace(/\/$/,"");candidates.push(\`dist\${clean}/index.html\`,\`dist\${clean}.html\`,\`_cache\${clean}/index.html\`,\`_cache\${clean}.html\`)}for(const fp of candidates){const res=await ghRaw(fp);if(res){const ct=mime(fp);return new Response(res.body,{status:200,headers:{"Content-Type":ct,"Cache-Control":STATIC.test(fp)?"public,max-age=86400":"no-cache"}})}}const nf=await ghRaw("dist/404.html")||await ghRaw("_cache/404.html");if(nf)return new Response(nf.body,{status:404,headers:{"Content-Type":"text/html;charset=utf-8"}});return new Response("<html><body><h1>404</h1><p>페이지를 찾을 수 없습니다. WordPress 설치 후 Astro 빌드가 필요합니다.</p></body></html>",{status:404,headers:{"Content-Type":"text/html;charset=utf-8"}})}};`;
-  }
+// ─── 미러링 Worker 소스 (worker-site-mirror.js v15.2 인라인) ─────────────────
+// Cloudflare Pages Functions 환경에서는 fs.readFileSync를 사용할 수 없으므로
+// worker-site-mirror.js 전체 내용을 상수로 인라인합니다.
+const _WORKER_SITE_MIRROR_SRC = "/**\n * CloudPress \u2014 worker-site-mirror.js v15.2\n * \u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\n * \uc0ac\uc774\ud2b8\ubcc4 Cloudflare Worker\n *\n * \ucc98\ub9ac \uc21c\uc11c:\n *   1. PHP Runner Service Binding\n *   2. KV \uce90\uc2dc HIT (\uc815\uc801 \uc790\uc0b0)\n *   3. WordPress \ud575\uc2ec \ub514\ub809\ud130\ub9ac \uc815\uc801 \uc790\uc0b0 \u2192 GitHub raw\n *   4. dist/ (Astro \ube4c\ub4dc \uacb0\uacfc) \uc815\uc801 HTML \u2192 GitHub raw\n *   4b. Astro \uc815\uc801 \uc790\uc0b0 (dist/_assets/)\n *   5. _cache/ \uc815\uc801 HTML \u2192 GitHub raw (\ub808\uac70\uc2dc \ud3f4\ubc31)\n *   6. \uc77c\ubc18 \uc815\uc801 \uc790\uc0b0 \u2192 GitHub raw\n *   7. GitHub Pages \ud3f4\ubc31\n *   \ucd5c\uc885: 404 \ud398\uc774\uc9c0\n */\n\nconst GH_BRANCH  = \"main\";\nconst STATIC_EXT = /\\.(css|js|jpg|jpeg|png|gif|webp|avif|svg|ico|woff2?|ttf|eot|otf|map|txt|xml|pdf|zip|mp4|mp3|ogg|wav|webm)$/i;\nconst WP_PHP_PATHS = /^\\/wp-(admin|login\\.php|cron\\.php|json|comments|signup|activate|trackback|xmlrpc\\.php|mail\\.php|blog-header\\.php|load\\.php|settings\\.php|app\\.php)(\\/|$|\\?)/;\nconst WP_PHP_FILES = /^\\/wp-(login|cron|xmlrpc|mail|blog-header|load|settings|app)\\.php(\\?|$)/;\n\nconst WP_PHP_ROUTES = {\n  \"/\":            \"/index.php\",\n  \"/wp-login\":    \"/wp-login.php\",\n  \"/wp-admin\":    \"/wp-admin/index.php\",\n  \"/wp-admin/\":   \"/wp-admin/index.php\",\n  \"/wp-json\":     \"/index.php\",\n  \"/feed\":        \"/index.php\",\n  \"/sitemap.xml\": \"/index.php\",\n  \"/robots.txt\":  \"/robots.txt\",\n};\n\nfunction resolvePhpFile(path) {\n  const clean = path.replace(/\\/$/, \"\") || \"/\";\n  if (WP_PHP_ROUTES[clean]) return WP_PHP_ROUTES[clean];\n  if (path.endsWith(\".php\")) return path;\n  if (path.startsWith(\"/wp-admin\")) {\n    return path.endsWith(\"/\") ? path + \"index.php\" : path + \"/index.php\";\n  }\n  if (!path.includes(\".\") || path.endsWith(\"/\")) return \"/index.php\";\n  return \"/index.php\";\n}\n\nconst SEC = {\n  \"X-Content-Type-Options\": \"nosniff\",\n  \"X-Frame-Options\":        \"SAMEORIGIN\",\n  \"Referrer-Policy\":        \"strict-origin-when-cross-origin\",\n};\n\nconst ghOwner = (e) => e.GH_OWNER       || \"%%GH_OWNER%%\";\nconst ghRepo  = (e) => e.GH_REPO        || \"%%GH_REPO%%\";\nconst ghToken = (e) => e.GITHUB_TOKEN   || \"\";\nconst ghPages = (e) => e.GH_PAGES_URL   || \"%%GH_PAGES_URL%%\";\n\nconst kvGet = async (e, k)    => { try { return await e.CACHE?.get(k, \"arrayBuffer\"); } catch { return null; } };\nconst kvPut = async (e, k, v) => { try { await e.CACHE?.put(k, v, { expirationTtl: 86400 }); } catch {} };\n\nfunction mime(p) {\n  const ext = (p.split(\".\").pop() || \"\").toLowerCase();\n  return ({\n    css:\"text/css;charset=utf-8\",       js:\"application/javascript;charset=utf-8\",\n    json:\"application/json;charset=utf-8\", xml:\"application/xml;charset=utf-8\",\n    svg:\"image/svg+xml\",   png:\"image/png\",     jpg:\"image/jpeg\",   jpeg:\"image/jpeg\",\n    gif:\"image/gif\",       webp:\"image/webp\",   avif:\"image/avif\",  ico:\"image/x-icon\",\n    woff:\"font/woff\",      woff2:\"font/woff2\",  ttf:\"font/ttf\",\n    eot:\"application/vnd.ms-fontobject\",        otf:\"font/otf\",\n    pdf:\"application/pdf\", zip:\"application/zip\",\n    mp4:\"video/mp4\",       mp3:\"audio/mpeg\",\n    txt:\"text/plain;charset=utf-8\",\n    html:\"text/html;charset=utf-8\",\n    php:\"text/html;charset=utf-8\",\n  })[ext] || \"application/octet-stream\";\n}\n\nasync function ghRaw(env, filePath, ttl = 300) {\n  const o = ghOwner(env), r = ghRepo(env), t = ghToken(env);\n  if (!o || !r || o === \"%%GH_OWNER%%\" || r === \"%%GH_REPO%%\") return null;\n  try {\n    const res = await fetch(\n      `https://raw.githubusercontent.com/${o}/${r}/${GH_BRANCH}/${filePath}`,\n      {\n        headers: { ...(t ? { Authorization: `Bearer ${t}` } : {}), \"User-Agent\": \"CloudPress/15\" },\n        cf: { cacheEverything: true, cacheTtl: ttl },\n      }\n    );\n    return res.ok ? res : null;\n  } catch { return null; }\n}\n\n/**\n * PHP Runner \uc751\ub2f5\uc758 Content-Type\uc5d0 charset=utf-8\uc744 \uac15\uc81c\ub85c \uc8fc\uc785\ud569\ub2c8\ub2e4.\n * WordPress\uac00 \ub0b4\ubcf4\ub0b4\ub294 HTML\uc5d0 <meta charset=\"UTF-8\">\uc774 \uc788\uc5b4\ub3c4\n * HTTP \ud5e4\ub354 \ub808\ubca8\uc5d0\uc11c charset\uc774 \uc5c6\uc73c\uba74 \ube0c\ub77c\uc6b0\uc800\uac00 \uc798\ubabb\ub41c \uc778\ucf54\ub529\uc73c\ub85c \ub80c\ub354\ub9c1\ud569\ub2c8\ub2e4.\n */\nfunction fixCharset(res) {\n  const ct = res.headers.get(\"Content-Type\") || \"\";\n  // \uc774\ubbf8 charset \uc788\uac70\ub098 HTML\uc774 \uc544\ub2c8\uba74 \uadf8\ub300\ub85c \ubc18\ud658\n  if (ct.includes(\"charset\") || (!ct.includes(\"text/html\") && !ct.includes(\"text/plain\"))) {\n    return res;\n  }\n  // charset=utf-8 \uc8fc\uc785\n  const newHeaders = new Headers(res.headers);\n  newHeaders.set(\"Content-Type\", ct.replace(/;\\s*$/, \"\") + \";charset=utf-8\");\n  return new Response(res.body, {\n    status:     res.status,\n    statusText: res.statusText,\n    headers:    newHeaders,\n  });\n}\n\n/**\n * HTML \ubb38\uc790\uc5f4\uc5d0 <meta charset=\"UTF-8\">\uc774 \uc5c6\uc73c\uba74 <head> \ubc14\ub85c \ub4a4\uc5d0 \uc0bd\uc785\ud569\ub2c8\ub2e4.\n */\nfunction ensureCharsetMeta(html) {\n  if (/charset/i.test(html.slice(0, 2000))) return html;\n  // <head> \ud0dc\uadf8 \ub4a4\uc5d0 \uc0bd\uc785\n  return html.replace(/<head([^>]*)>/i, '<head$1>\\n<meta charset=\"UTF-8\">');\n}\n\n// WordPress \uc2a4\ud0c0\uc77c 404 \ud398\uc774\uc9c0\nfunction wp404(siteTitle = \"WordPress\") {\n  const html = `<!DOCTYPE html>\n<html lang=\"ko\">\n<head>\n<meta charset=\"UTF-8\">\n<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">\n<title>\ud398\uc774\uc9c0\ub97c \ucc3e\uc744 \uc218 \uc5c6\uc2b5\ub2c8\ub2e4 \u2014 ${siteTitle}</title>\n<style>\n  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,\"Segoe UI\",sans-serif;\n       background:#fff;color:#1e293b;padding:2rem;display:flex;\n       align-items:center;justify-content:center;min-height:100vh}\n  .wrap{max-width:500px;text-align:center}\n  h1{font-size:6rem;font-weight:900;color:#e2e8f0;margin:0;line-height:1}\n  h2{font-size:1.5rem;font-weight:700;margin:.5rem 0 1rem}\n  p{color:#64748b;margin-bottom:1.5rem}\n  a{color:#6366f1;text-decoration:none;font-weight:600}\n  a:hover{text-decoration:underline}\n</style>\n</head>\n<body>\n  <div class=\"wrap\">\n    <h1>404</h1>\n    <h2>\ud398\uc774\uc9c0\ub97c \ucc3e\uc744 \uc218 \uc5c6\uc2b5\ub2c8\ub2e4</h2>\n    <p>\ucc3e\uc73c\uc2dc\ub294 \ud398\uc774\uc9c0\uac00 \uc5c6\uac70\ub098 \uc774\ub3d9\ub418\uc5c8\uc2b5\ub2c8\ub2e4.</p>\n    <a href=\"/\">\u2190 \ud648\uc73c\ub85c \ub3cc\uc544\uac00\uae30</a>\n  </div>\n</body>\n</html>`;\n  return new Response(html, {\n    status: 404,\n    headers: { ...SEC, \"Content-Type\": \"text/html;charset=utf-8\" },\n  });\n}\n\n\nexport default {\n  async fetch(req, env, ctx) {\n    const url   = new URL(req.url);\n    const path  = url.pathname;\n    const isGet = req.method === \"GET\" || req.method === \"HEAD\";\n\n    // \u2500\u2500 1\ucc28: PHP Runner Service Binding \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n    if (env.PHP_RUNNER) {\n      try {\n        let body = \"\";\n        if (req.method !== \"GET\" && req.method !== \"HEAD\") {\n          body = await req.clone().text().catch(() => \"\");\n        }\n        const phpFile = resolvePhpFile(path);\n        const siteUrl = `${url.protocol}//${url.host}`;\n        const [wpCfgRes, dbPhpRes] = await Promise.all([\n          ghRaw(env, \"wordpress/wp-config.php\", 120),\n          ghRaw(env, \"wordpress/wp-content/db.php\", 120),\n        ]);\n        const wpConfig = wpCfgRes ? await wpCfgRes.text() : \"\";\n        const dbPhp    = dbPhpRes ? await dbPhpRes.text() : \"\";\n\n        const payload = {\n          phpFile,\n          phpEnv: {\n            WP_HOME:              siteUrl,\n            WP_SITEURL:           siteUrl,\n            REQUEST_URI:          path + url.search,\n            REQUEST_METHOD:       req.method,\n            HTTP_HOST:            url.host,\n            SERVER_NAME:          url.host,\n            HTTPS:                url.protocol === \"https:\" ? \"on\" : \"\",\n            DOCUMENT_ROOT:        \"/wordpress\",\n            SCRIPT_FILENAME:      `/wordpress${phpFile}`,\n            SCRIPT_NAME:          phpFile,\n            PHP_SELF:             phpFile,\n            HTTP_COOKIE:          req.headers.get(\"Cookie\")           || \"\",\n            HTTP_USER_AGENT:      req.headers.get(\"User-Agent\")       || \"\",\n            HTTP_ACCEPT:          req.headers.get(\"Accept\")           || \"*/*\",\n            HTTP_ACCEPT_LANGUAGE: req.headers.get(\"Accept-Language\")  || \"ko-KR,ko;q=0.9\",\n            HTTP_ACCEPT_ENCODING: req.headers.get(\"Accept-Encoding\")  || \"\",\n            HTTP_REFERER:         req.headers.get(\"Referer\")          || \"\",\n            HTTP_AUTHORIZATION:   req.headers.get(\"Authorization\")    || \"\",\n            CONTENT_TYPE:         req.headers.get(\"Content-Type\")     || \"\",\n            CONTENT_LENGTH:       String(body.length),\n            QUERY_STRING:         url.search.replace(/^\\?/, \"\"),\n            GITHUB_OWNER:         ghOwner(env),\n            GITHUB_REPO:          ghRepo(env),\n            GITHUB_TOKEN:         ghToken(env),\n          },\n          stdin:      body,\n          skipCache:  false,\n          files: {\n            \"/wordpress/wp-config.php\":     wpConfig,\n            \"/wordpress/wp-content/db.php\": dbPhp,\n          },\n          siteConfig: {\n            githubOwner: ghOwner(env),\n            githubRepo:  ghRepo(env),\n            ghPagesUrl:  ghPages(env),\n          },\n        };\n\n        const phpRes = await env.PHP_RUNNER.fetch(\n          new Request(\"https://php-runner/run-wordpress\", {\n            method:  \"POST\",\n            headers: { \"Content-Type\": \"application/json\" },\n            body:    JSON.stringify(payload),\n          })\n        );\n        // charset \ubcf4\uc815 \ud6c4 \ubc18\ud658 (500 \uc774\uc0c1\uc740 \ub2e4\uc74c \ub2e8\uacc4\ub85c)\n        if (phpRes.status < 500) return fixCharset(phpRes);\n      } catch { /* PHP Runner \uc624\ud504\ub77c\uc778 \u2192 \ub2e4\uc74c \ub2e8\uacc4\ub85c */ }\n    }\n\n    // \u2500\u2500 2\ucc28: KV \uce90\uc2dc HIT (\uc815\uc801 \uc790\uc0b0) \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n    if (isGet && STATIC_EXT.test(path)) {\n      const cacheKey = `v15:${ghOwner(env)}/${ghRepo(env)}:${path}`;\n      const cached = await kvGet(env, cacheKey);\n      if (cached) {\n        return new Response(cached, {\n          headers: { \"Content-Type\": mime(path), \"Cache-Control\": \"public,max-age=604800,immutable\", ...SEC },\n        });\n      }\n    }\n\n    // \u2500\u2500 3\ucc28: WordPress \ud575\uc2ec \ub514\ub809\ud130\ub9ac \uc815\uc801 \uc790\uc0b0 \u2192 GitHub raw \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n    if (isGet && STATIC_EXT.test(path) &&\n        (path.startsWith(\"/wp-content/\") || path.startsWith(\"/wp-includes/\") || path.startsWith(\"/wp-admin/\"))) {\n      const res = await ghRaw(env, \"wordpress\" + path, 86400);\n      if (res) {\n        const body = await res.arrayBuffer();\n        const cacheKey = `v15:${ghOwner(env)}/${ghRepo(env)}:${path}`;\n        ctx.waitUntil(kvPut(env, cacheKey, body));\n        return new Response(body, {\n          headers: { \"Content-Type\": mime(path), \"Cache-Control\": \"public,max-age=604800,immutable\", ...SEC },\n        });\n      }\n    }\n\n    // \u2500\u2500 4\ucc28: dist/ (Astro \ube4c\ub4dc \uacb0\uacfc) \uc815\uc801 HTML \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n    if (isGet && !STATIC_EXT.test(path) && !WP_PHP_PATHS.test(path) && !WP_PHP_FILES.test(path)) {\n      const clean = path.replace(/\\/$/, \"\") || \"/\";\n      const distCandidates = [\n        `dist${clean}/index.html`,\n        `dist${clean}.html`,\n      ];\n      if (path === \"/\" || path === \"\") distCandidates.unshift(\"dist/index.html\");\n\n      for (const dp of distCandidates) {\n        const res = await ghRaw(env, dp, 60);\n        if (res) {\n          const raw  = await res.text();\n          const html = ensureCharsetMeta(raw);\n          return new Response(html, {\n            headers: {\n              \"Content-Type\":  \"text/html;charset=utf-8\",\n              \"Cache-Control\": \"public,max-age=60,s-maxage=300\",\n              ...SEC,\n            },\n          });\n        }\n      }\n    }\n\n    // \u2500\u2500 4-b\ucc28: Astro \uc815\uc801 \uc790\uc0b0 (dist/_assets/) \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n    if (isGet && STATIC_EXT.test(path)) {\n      const distAsset = await ghRaw(env, \"dist\" + path, 86400);\n      if (distAsset) {\n        const body = await distAsset.arrayBuffer();\n        return new Response(body, {\n          headers: { \"Content-Type\": mime(path), \"Cache-Control\": \"public,max-age=86400,immutable\", ...SEC },\n        });\n      }\n    }\n\n    // \u2500\u2500 5\ucc28: _cache/ \uc815\uc801 HTML \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n    if (isGet && !STATIC_EXT.test(path) && !WP_PHP_PATHS.test(path) && !WP_PHP_FILES.test(path)) {\n      let cp = \"_cache\" + path;\n      if (cp.endsWith(\"/\")) cp += \"index.html\";\n      else if (!cp.includes(\".\")) cp += \"/index.html\";\n\n      let res = await ghRaw(env, cp, 60);\n      if (!res) res = await ghRaw(env, \"_cache\" + path + \".html\", 60);\n\n      if (res) {\n        const raw  = await res.text();\n        const html = ensureCharsetMeta(raw);\n        return new Response(html, {\n          headers: {\n            \"Content-Type\":  \"text/html;charset=utf-8\",\n            \"Cache-Control\": \"public,max-age=60,s-maxage=300\",\n            ...SEC,\n          },\n        });\n      }\n    }\n\n    // \u2500\u2500 6\ucc28: GitHub Pages \ud3f4\ubc31 \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n    const pagesBase = ghPages(env);\n    if (pagesBase && pagesBase !== \"%%GH_PAGES_URL%%\") {\n      try {\n        const r = await fetch(pagesBase + path + url.search);\n        if (r.ok) return fixCharset(r);\n      } catch {}\n    }\n\n    // \u2500\u2500 \ucd5c\uc885: WordPress \uc2a4\ud0c0\uc77c 404 \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n    return wp404(env.SITE_NAME || \"WordPress\");\n  },\n};\n";
+
+function buildWorkerSource({ siteId, githubOwner, githubRepo, ghPagesUrl, siteUrl = "" }) {
+  const src = _WORKER_SITE_MIRROR_SRC;
   return src
-    .replace(/%%GH_OWNER%%/g, (githubOwner || "").replace(/\\/g, "\\\\"))
-    .replace(/%%GH_REPO%%/g,  (githubRepo  || "").replace(/\\/g, "\\\\"))
-    .replace(/%%GH_PAGES_URL%%/g, (ghPagesUrl || "").replace(/\\/g, "\\\\"))
-    .replace(/%%SITE_URL%%/g, (siteUrl    || "").replace(/\\/g, "\\\\"))
-    .replace(/%%SITE_ID%%/g,  (siteId     || "").replace(/\\/g, "\\\\"));
+    .replace(/%%GH_OWNER%%/g,    (githubOwner || ""))
+    .replace(/%%GH_REPO%%/g,     (githubRepo  || ""))
+    .replace(/%%GH_PAGES_URL%%/g,(ghPagesUrl  || ""))
+    .replace(/%%SITE_URL%%/g,    (siteUrl     || ""))
+    .replace(/%%SITE_ID%%/g,     (siteId      || ""));
 }
 
 // ─── wrangler.toml ────────────────────────────────────────────────────────────
@@ -2819,12 +2801,8 @@ async function resolveStorageConfig({ env, userId, siteId, ghToken, owner, log }
 // ─── 프로비저닝 품질 검증 (1% 에러도 용납 불가, 최소 10분 보장) ──────────────
 async function verifyAndEnsureQuality({ ghToken, owner, repoName, workerDomain, log, retryFn }) {
   const MAX_RETRIES    = 3;
-  const INITIAL_WAIT   = 30000;  // 30초 초기 대기
-  const RETRY_WAIT     = 20000;  // 20초 재시도 대기
 
-  await log("━━━ 품질 검증 시작 (1% 에러 용납 불가) ━━━");
-  await log("  초기 안정화 대기 중 (30초)...");
-  await delay(INITIAL_WAIT);
+  await log("━━━ 품질 검증 시작 ━━━");
 
   const checks = {
     repo:        false,
@@ -2879,8 +2857,7 @@ async function verifyAndEnsureQuality({ ghToken, owner, repoName, workerDomain, 
         await log(`  🔄 실패 항목 재시도 중: ${failed.join(", ")}`);
         await retryFn(failed).catch(() => {});
       }
-      await log(`  재검증 대기 중 (${RETRY_WAIT / 1000}초)...`);
-      await delay(RETRY_WAIT);
+      // waitUntil 타임아웃 방지: 재시도 delay 제거 (즉시 재검증)
     }
   }
 
@@ -3167,7 +3144,7 @@ export async function provisionCloudflarePagesHosting({
   const siteUrl    = initialDomain ? `https://${initialDomain}` : realWorkerUrl;
   const ghPagesUrl = owner ? `https://${owner}.github.io/${repoName}` : "";
 
-  const workerSource = await buildWorkerSource({ siteId, githubOwner: owner || "", githubRepo: repoName, ghPagesUrl, siteUrl });
+  const workerSource = buildWorkerSource({ siteId, githubOwner: owner || "", githubRepo: repoName, ghPagesUrl, siteUrl });
 
   let workerDomain = null;
   if (cfToken && cfAccountId) {
@@ -3380,8 +3357,7 @@ export async function provisionCloudflarePagesHosting({
           }
         }
 
-        // WordPress 설치 Action 트리거
-        await delay(3000);
+        // WordPress 설치 Action 트리거 (레포 생성 직후 실행 - delay 불필요)
         const triggerRes = await ghReq("POST", `/repos/${owner}/${repoName}/actions/workflows/install-wordpress.yml/dispatches`, ghToken, { ref: "main" }).catch(() => ({ ok: false }));
         if (triggerRes.ok || triggerRes.status === 204) {
           await log("  🚀 WordPress 설치 Action 트리거 완료");
@@ -3390,7 +3366,6 @@ export async function provisionCloudflarePagesHosting({
         }
 
         // Astro 빌드 Action 트리거
-        await delay(2000);
         const astroBuildTrigger = await ghReq("POST", `/repos/${owner}/${repoName}/actions/workflows/astro-build.yml/dispatches`, ghToken, { ref: "main" }).catch(() => ({ ok: false }));
         if (astroBuildTrigger.ok || astroBuildTrigger.status === 204) {
           await log("  🏗️ Astro 빌드 Action 트리거 완료 (PHP→Astro / JS→TS 변환 검증)");
@@ -3399,21 +3374,19 @@ export async function provisionCloudflarePagesHosting({
         // GitHub Pages 활성화
         await ghReq("POST", `/repos/${owner}/${repoName}/pages`, ghToken, { build_type: "workflow" }).catch(() => {});
 
-        // ── [신규] 프로비저닝 품질 검증 (1% 에러 용납 불가) ─────────────────
-        await log("▶ [6/6] 품질 검증 및 최소 10분 보장 중...");
-        const verifyResult = await verifyAndEnsureQuality({
+        // ── 프로비저닝 품질 검증 (비동기 - waitUntil 타임아웃 방지) ───────────
+        await log("▶ [6/6] 파일 업로드 검증 중...");
+        // 검증은 결과를 기다리지 않고 실행 (waitUntil 시간 초과 방지)
+        verifyAndEnsureQuality({
           ghToken, owner, repoName, workerDomain, log,
           retryFn: async (failedKeys) => {
-            // 실패한 항목별 재시도 로직
             if (failedKeys.includes("frontendLayout") || failedKeys.includes("wpApiTs")) {
-              // Astro/TS 파일 누락 시 재push
               await log("  🔄 Astro/TS 파일 재push 시도...");
               const astroFiles = Object.entries(convertPhpJsToAstroTs({ siteName, siteUrl, siteId }))
                 .map(([path, content]) => ({ path, content }));
               await ghBatchPush(ghToken, owner, repoName, astroFiles, "retry: Astro/TS 파일 재업로드").catch(() => {});
             }
             if (failedKeys.includes("wpConfig") || failedKeys.includes("dbPhp")) {
-              // WordPress 핵심 파일 누락 시 재push
               await log("  🔄 WordPress 핵심 파일 재push 시도...");
               const coreFiles = [
                 { path: "wordpress/wp-config.php", content: buildWpConfig({ siteId, siteUrl, dbPrefix, authKey, secureAuthKey, loggedInKey, nonceKey, authSalt, secureAuthSalt, loggedInSalt, nonceSalt }) },
@@ -3422,12 +3395,9 @@ export async function provisionCloudflarePagesHosting({
               await ghBatchPush(ghToken, owner, repoName, coreFiles, "retry: WordPress 핵심 파일 재업로드").catch(() => {});
             }
           },
-        });
-
-        if (!verifyResult.verified) {
-          await log(`  ⚠️ 일부 검증 항목 미통과: ${(verifyResult.failedKeys || []).join(", ")}`, "warn");
-          await log("  → 사이트는 생성됐으나 일부 파일이 누락됐을 수 있습니다. 호스팅 상세 페이지에서 재시도하세요.");
-        }
+        }).then(r => {
+          if (!r.verified) log(`  ⚠️ 일부 검증 항목 미통과: ${(r.failedKeys||[]).join(", ")}`, "warn").catch(()=>{});
+        }).catch(() => {});
       } else {
         await log("⚠️ GitHub push 실패", "warn");
       }

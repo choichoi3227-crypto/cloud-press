@@ -7,7 +7,7 @@
 // DELETE /api/account-domains?id=         → 계정 도메인 삭제
 // GET    /api/account-domains?id=&verify=1 → 네임서버 전환 확인
 
-import { jsonOk, jsonErr, requireAuth } from "../_shared.js";
+import { jsonOk, jsonErr, requireAuth, getAdminCfCredentials } from "../_shared.js";
 import {
   setupGithubPagesDns,
   configureGithubPagesCustomDomainWithToken,
@@ -204,12 +204,10 @@ export async function onRequestGet(context) {
 
       // 연결된 호스팅이 있으면 GitHub Pages DNS 레코드 자동 설정
       if (ud.site_id && ud.cf_zone_id) {
-        const user = await env.DB.prepare(
-          "SELECT cf_global_api_key, cf_email FROM users WHERE id = ?"
-        ).bind(payload.id).first();
-        if (user?.cf_global_api_key && user?.cf_email) {
+        const adminCf = await getAdminCfCredentials(env.DB);
+        if (adminCf.apiKey && adminCf.email) {
           await setupGithubPagesDnsRecords(
-            user.cf_global_api_key, user.cf_email, ud.cf_zone_id, ud.domain
+            adminCf.apiKey, adminCf.email, ud.cf_zone_id, ud.domain
           ).catch(e => console.warn("[account-domains/verify] dns:", e.message));
         }
       }
@@ -278,10 +276,8 @@ export async function onRequestPost(context) {
     return jsonErr("이 도메인은 다른 계정에서 사용 중입니다.", 409);
   }
 
-  // Cloudflare API 키 확인
-  const user = await env.DB.prepare(
-    "SELECT cf_global_api_key, cf_email FROM users WHERE id = ?"
-  ).bind(payload.id).first();
+  // 관리자 Cloudflare API 키 사용 (사용자 개별 키 불필요)
+  const adminCf = await getAdminCfCredentials(env.DB);
 
   let nameservers = [];
   let zoneId      = null;
@@ -289,10 +285,10 @@ export async function onRequestPost(context) {
   let alreadyOnCf = false;
   let zoneError   = null;
 
-  if (user?.cf_global_api_key && user?.cf_email) {
+  if (adminCf.apiKey && adminCf.email) {
     try {
       const zoneResult = await getOrCreateCfZone(
-        user.cf_global_api_key, user.cf_email, domainClean
+        adminCf.apiKey, adminCf.email, domainClean
       );
       if (zoneResult.error) {
         zoneError = zoneResult.error;
@@ -322,9 +318,9 @@ export async function onRequestPost(context) {
   }
 
   // 이미 활성이면 GitHub Pages DNS 자동 설정
-  if (initialStatus === "active" && zoneId && user?.cf_global_api_key) {
+  if (initialStatus === "active" && zoneId && adminCf.apiKey) {
     await setupGithubPagesDnsRecords(
-      user.cf_global_api_key, user.cf_email, zoneId, domainClean
+      adminCf.apiKey, adminCf.email, zoneId, domainClean
     ).catch(e => console.warn("[account-domains/post] dns:", e.message));
   }
 
@@ -332,10 +328,10 @@ export async function onRequestPost(context) {
   let message, instructions;
   if (zoneError) {
     message = `도메인이 등록되었습니다. (Cloudflare Zone 생성 실패: ${zoneError})`;
-    instructions = ["Cloudflare API 키를 확인하거나 대시보드에서 직접 Zone을 추가해주세요."];
-  } else if (!user?.cf_global_api_key) {
-    message = "도메인이 등록되었습니다. Cloudflare API 키를 계정 설정에서 등록하면 자동 DNS 설정이 가능합니다.";
-    instructions = ["계정 설정 → Cloudflare API 키 등록 후 도메인을 다시 설정해주세요."];
+    instructions = ["관리자에게 문의하거나 Cloudflare 대시보드에서 직접 Zone을 추가해주세요."];
+  } else if (!adminCf.apiKey) {
+    message = "도메인이 등록되었습니다. 관리자가 Cloudflare API 키를 설정하면 자동 DNS 설정이 가능합니다.";
+    instructions = ["관리자에게 시스템 설정의 Cloudflare API 키 등록을 요청해주세요."];
   } else if (alreadyOnCf || initialStatus === "active") {
     message = "✅ 도메인이 즉시 활성화되었습니다. GitHub Pages DNS 레코드가 자동 설정되었습니다.";
     instructions = ["이제 호스팅 연결 탭에서 이 도메인을 특정 호스팅에 연결할 수 있습니다."];
@@ -410,14 +406,11 @@ export async function onRequestPut(context) {
       }
 
       // GitHub Pages DNS + 커스텀 도메인 설정
-      const user = await env.DB.prepare(
-        "SELECT cf_global_api_key, cf_email FROM users WHERE id = ?"
-      ).bind(payload.id).first();
-
-      if (user?.cf_global_api_key && user?.cf_email && ud.cf_zone_id) {
+      const adminCf = await getAdminCfCredentials(env.DB);
+      if (adminCf.apiKey && adminCf.email && ud.cf_zone_id) {
         await setupGithubPagesDns({
-          cfApiKey: user.cf_global_api_key,
-          cfEmail:  user.cf_email,
+          cfApiKey: adminCf.apiKey,
+          cfEmail:  adminCf.email,
           zoneId:   ud.cf_zone_id,
           domain:   ud.domain,
           owner:    site.github_repo_owner || '',

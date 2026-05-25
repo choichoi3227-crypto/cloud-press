@@ -44,6 +44,11 @@ import {
   onRequestPost as pluginsPost,
 } from "./plugins.js";
 
+import {
+  onRequestGet  as workerDeployGet,
+  onRequestPost as workerDeployPost,
+} from "./worker-deploy.js";
+
 // sub-path 추출 헬퍼
 function subPath(context) {
   if (context.params?.path) {
@@ -79,6 +84,7 @@ export async function onRequestGet(context) {
   if (sub === "cms-settings") return cmsGet(context);
   if (sub === "notices")      return noticesGet(context);
   if (sub === "plugins")      return pluginsGet(context);
+  if (sub === "worker-deploy") return workerDeployGet(context);
   // stats, users, sites, settings, quota-stats → admin.js
   return adminGet(context);
 }
@@ -89,7 +95,8 @@ export async function onRequestPost(context) {
   if (sub === "ai-settings")  return aiPost(context);
   if (sub === "cms-settings") return cmsPost(context);
   if (sub === "notices")      return noticesPost(context);
-  if (sub === "plugins")      return pluginsPost(context);
+  if (sub === "plugins")       return pluginsPost(context);
+  if (sub === "worker-deploy") return workerDeployPost(context);
   if (typeof adminPost === "function") return adminPost(context);
   return new Response(JSON.stringify({ error: "Method Not Allowed" }), {
     status: 405,

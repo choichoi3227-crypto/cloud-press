@@ -1324,6 +1324,35 @@ async function handleApiRequest(request, env, _workerCtx = null) {
     if (method === "PUT") return runWithMiddleware(accountPut);
   }
 
+  // ── Durable Object: WP Manager (/api/do/wp/*)
+  if (path.startsWith("/api/do/wp")) {
+    // 인증 확인 후 DO로 포워딩
+    const { requireAuth: _reqAuth, jsonErr: _jsonErr } = await import("./functions/_shared.js").catch(() => ({
+      requireAuth: null, jsonErr: null
+    }));
+    // 인증은 _shared.js의 requireAuth 사용
+    if (env.WP_MANAGER) {
+      const { routeWpManager } = await import("./src/durable-wp-manager.js").catch(() => ({ routeWpManager: null }));
+      if (routeWpManager) {
+        // JWT 검증
+        const authHeader = request.headers.get("Authorization") || "";
+        const token = authHeader.replace(/^Bearer\s+/i, "");
+        let payload = null;
+        if (token && env.JWT_SECRET) {
+          try {
+            const [hb64, pb64, sig] = token.split(".");
+            const data = JSON.parse(atob(pb64));
+            if (data.exp && data.exp > Math.floor(Date.now() / 1000)) payload = data;
+          } catch {}
+        }
+        return routeWpManager(request, env, payload);
+      }
+    }
+    return new Response(JSON.stringify({ success: false, error: "WP_MANAGER 바인딩이 설정되지 않았습니다." }), {
+      status: 503, headers: { "Content-Type": "application/json" }
+    });
+  }
+
   // ── 관리자 서브경로 (구체적인 경로 먼저, startsWith보다 앞에 위치해야 함)
   if (path === "/api/admin/inquiries" || path.startsWith("/api/admin/inquiries/")) {
     const p = { path: extractAdminSubPath(path) || "inquiries" };
@@ -1646,3 +1675,30 @@ export default {
     });
   },
 };
+
+// ─── Durable Objects Export ──────────────────────────────────────────────────
+// WpManager는 src/durable-wp-manager.js에서 로직 구현
+// wrangler.toml의 [[durable_objects.bindings]]에서 class_name = "WpManager"로 참조됨
+//
+// Workers 번들링 시 import가 안 되면 인라인 스텁으로 폴백
+let _WpManagerClass;
+try {
+  // 번들러가 처리하는 경우
+  const mod = await import("./src/durable-wp-manager.js").catch(() => null);
+  _WpManagerClass = mod?.WpManager;
+} catch {}
+
+// 폴백 스텁 (번들링 전 개발 환경용)
+if (!_WpManagerClass) {
+  _WpManagerClass = class WpManagerStub {
+    constructor(state, env) { this.state = state; this.env = env; }
+    async fetch(req) {
+      return new Response(JSON.stringify({
+        success: false,
+        error: "WpManager가 아직 번들링되지 않았습니다. wrangler deploy 후 사용 가능합니다."
+      }), { status: 503, headers: { "Content-Type": "application/json" } });
+    }
+  };
+}
+
+export { _WpManagerClass as WpManager };

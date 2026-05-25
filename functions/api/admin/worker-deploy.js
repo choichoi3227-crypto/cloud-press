@@ -10,8 +10,15 @@ import { jsonOk, jsonErr, requireAuth } from "../../_shared.js";
 
 async function requireAdmin(request, env) {
   const payload = await requireAuth(request, env);
-  if (!payload || payload.role !== "admin") return null;
-  return payload;
+  if (!payload) return null;
+  // role 필드가 있으면 우선 사용, 없으면 ADMIN_EMAILS 목록으로 체크
+  if (payload.role === "admin") return payload;
+  if (!payload.role && payload.email) {
+    const adminEmails = (env.ADMIN_EMAILS || "choichoi3227@gmail.com")
+      .split(",").map(e => e.trim().toLowerCase());
+    if (adminEmails.includes(payload.email.toLowerCase())) return payload;
+  }
+  return null;
 }
 
 async function ensureTables(env) {

@@ -1,1926 +1,1648 @@
-<!DOCTYPE html>
+/**
+ * CloudPress WordPress Worker v4.0
+ * WordPress 코어: WordPress/WordPress 공식 GitHub 레포지토리
+ * 사용자 데이터: 호스팅 생성 시 만들어진 개인 GitHub 레포지토리
+ */
+
+const WP_CORE_OWNER  = "WordPress";
+const WP_CORE_REPO   = "WordPress";
+const WP_CORE_BRANCH = "master";
+
+// ─── GitHub Storage ────────────────────────────────────────────────────────
+
+class GitHubStorage {
+  constructor(token, owner, repo, branch = "main") {
+    this.token  = token;
+    this.owner  = owner;
+    this.repo   = repo;
+    this.branch = branch;
+    this.base   = "https://api.github.com";
+  }
+
+  _headers(extra = {}) {
+    const h = {
+      Accept: "application/vnd.github+json",
+      "X-GitHub-Api-Version": "2022-11-28",
+      "User-Agent": "CloudPress-Worker/4.0",
+      ...extra,
+    };
+    if (this.token) h.Authorization = `Bearer ${this.token}`;
+    return h;
+  }
+
+  rawUrl(path) {
+    return `https://raw.githubusercontent.com/${this.owner}/${this.repo}/${this.branch}/${path}`;
+  }
+
+  async fetchRaw(path) {
+    const res = await fetch(this.rawUrl(path), { headers: this._headers() });
+    if (!res.ok) return null;
+    return res;
+  }
+
+  async getFile(path) {
+    const res = await fetch(
+      `${this.base}/repos/${this.owner}/${this.repo}/contents/${path}?ref=${this.branch}`,
+      { headers: this._headers() }
+    );
+    if (!res.ok) return null;
+    const data = await res.json();
+    if (data?.content) {
+      const decoded = atob(data.content.replace(/\n/g, ""));
+      return { text: decoded, sha: data.sha };
+    }
+    return null;
+  }
+
+  async putFile(path, content, message, sha) {
+    const encoded = btoa(unescape(encodeURIComponent(content)));
+    const body = { message, content: encoded, branch: this.branch };
+    if (sha) body.sha = sha;
+    const res = await fetch(
+      `${this.base}/repos/${this.owner}/${this.repo}/contents/${path}`,
+      {
+        method: "PUT",
+        headers: this._headers({ "Content-Type": "application/json" }),
+        body: JSON.stringify(body),
+      }
+    );
+    return res.ok;
+  }
+
+  async exists(path) {
+    const res = await fetch(
+      `${this.base}/repos/${this.owner}/${this.repo}/contents/${path}?ref=${this.branch}`,
+      { method: "HEAD", headers: this._headers() }
+    );
+    return res.ok;
+  }
+
+  async createRepo(name, isPrivate = true) {
+    const res = await fetch(`${this.base}/user/repos`, {
+      method: "POST",
+      headers: this._headers({ "Content-Type": "application/json" }),
+      body: JSON.stringify({
+        name,
+        private: isPrivate,
+        description: "CloudPress WordPress site data",
+        auto_init: true,
+      }),
+    });
+    return res.ok ? await res.json() : null;
+  }
+}
+
+class WPCoreStorage extends GitHubStorage {
+  constructor() {
+    super(null, WP_CORE_OWNER, WP_CORE_REPO, WP_CORE_BRANCH);
+  }
+}
+
+// ─── 유틸리티 ──────────────────────────────────────────────────────────────
+
+function jsonOk(data, status = 200) {
+  return new Response(JSON.stringify(data), {
+    status,
+    headers: {
+      "Content-Type": "application/json",
+      "Access-Control-Allow-Origin": "*",
+      "Access-Control-Allow-Methods": "GET,POST,PUT,DELETE,OPTIONS",
+      "Access-Control-Allow-Headers": "Content-Type,Authorization",
+    },
+  });
+}
+function jsonErr(msg, status = 400) { return jsonOk({ error: msg }, status); }
+
+// ─── D1 헬퍼 ──────────────────────────────────────────────────────────────
+
+async function d1Run(db, sql, params = []) {
+  try {
+    const stmt = params.length ? db.prepare(sql).bind(...params) : db.prepare(sql);
+    await stmt.run();
+    return { ok: true };
+  } catch (e) { return { ok: false, error: e.message }; }
+}
+
+async function d1Query(db, sql, params = []) {
+  try {
+    const stmt = params.length ? db.prepare(sql).bind(...params) : db.prepare(sql);
+    const r = await stmt.all();
+    return { ok: true, results: r.results || [] };
+  } catch (e) { return { ok: false, error: e.message }; }
+}
+
+// ─── KV ────────────────────────────────────────────────────────────────────
+
+async function getCached(kv, key) {
+  if (!kv) return null;
+  try { return await kv.get(key); } catch { return null; }
+}
+async function setCached(kv, key, value, ttl = 3600) {
+  if (!kv) return;
+  try { await kv.put(key, value, { expirationTtl: ttl }); } catch {}
+}
+
+// ─── WordPress 설치 확인 ───────────────────────────────────────────────────
+
+async function checkInstalled(db, kv) {
+  if (await getCached(kv, "wp:installed") === "1") return true;
+  if (db) {
+    const r = await d1Query(db, "SELECT name FROM sqlite_master WHERE type='table' AND name='wp_options' LIMIT 1");
+    if (r.ok && r.results.length > 0) {
+      await setCached(kv, "wp:installed", "1", 86400);
+      return true;
+    }
+  }
+  return false;
+}
+
+// ─── WordPress DB 초기화 ───────────────────────────────────────────────────
+
+async function phpassHash(password) {
+  function md5(input) {
+    const buf = typeof input === "string" ? new TextEncoder().encode(input) : input;
+    const u8  = buf instanceof Uint8Array ? buf : new Uint8Array(buf);
+    function safeAdd(x,y){const l=(x&0xffff)+(y&0xffff);return(((x>>16)+(y>>16)+(l>>16))<<16)|(l&0xffff)}
+    function rol(n,c){return(n<<c)|(n>>>(32-c))}
+    function cmn(q,a,b,x,s,t){return safeAdd(rol(safeAdd(safeAdd(a,q),safeAdd(x,t)),s),b)}
+    function ff(a,b,c,d,x,s,t){return cmn((b&c)|((~b)&d),a,b,x,s,t)}
+    function gg(a,b,c,d,x,s,t){return cmn((b&d)|(c&(~d)),a,b,x,s,t)}
+    function hh(a,b,c,d,x,s,t){return cmn(b^c^d,a,b,x,s,t)}
+    function ii(a,b,c,d,x,s,t){return cmn(c^(b|(~d)),a,b,x,s,t)}
+    const n=u8.length,l=Math.ceil((n+9)/64)*16,m=new Int32Array(l);
+    for(let i=0;i<n;i++)m[i>>2]|=(u8[i]<<((i%4)*8));
+    m[n>>2]|=(0x80<<((n%4)*8));m[l-2]=n*8;
+    let a=1732584193,b=-271733879,c=-1732584194,d=271733878;
+    for(let i=0;i<l;i+=16){
+      const[oa,ob,oc,od]=[a,b,c,d];
+      a=ff(a,b,c,d,m[i],7,-680876936);d=ff(d,a,b,c,m[i+1],12,-389564586);c=ff(c,d,a,b,m[i+2],17,606105819);b=ff(b,c,d,a,m[i+3],22,-1044525330);
+      a=ff(a,b,c,d,m[i+4],7,-176418897);d=ff(d,a,b,c,m[i+5],12,1200080426);c=ff(c,d,a,b,m[i+6],17,-1473231341);b=ff(b,c,d,a,m[i+7],22,-45705983);
+      a=ff(a,b,c,d,m[i+8],7,1770035416);d=ff(d,a,b,c,m[i+9],12,-1958414417);c=ff(c,d,a,b,m[i+10],17,-42063);b=ff(b,c,d,a,m[i+11],22,-1990404162);
+      a=ff(a,b,c,d,m[i+12],7,1804603682);d=ff(d,a,b,c,m[i+13],12,-40341101);c=ff(c,d,a,b,m[i+14],17,-1502002290);b=ff(b,c,d,a,m[i+15],22,1236535329);
+      a=gg(a,b,c,d,m[i+1],5,-165796510);d=gg(d,a,b,c,m[i+6],9,-1069501632);c=gg(c,d,a,b,m[i+11],14,643717713);b=gg(b,c,d,a,m[i],20,-373897302);
+      a=gg(a,b,c,d,m[i+5],5,-701558691);d=gg(d,a,b,c,m[i+10],9,38016083);c=gg(c,d,a,b,m[i+15],14,-660478335);b=gg(b,c,d,a,m[i+4],20,-405537848);
+      a=gg(a,b,c,d,m[i+9],5,568446438);d=gg(d,a,b,c,m[i+14],9,-1019803690);c=gg(c,d,a,b,m[i+3],14,-187363961);b=gg(b,c,d,a,m[i+8],20,1163531501);
+      a=gg(a,b,c,d,m[i+13],5,-1444681467);d=gg(d,a,b,c,m[i+2],9,-51403784);c=gg(c,d,a,b,m[i+7],14,1735328473);b=gg(b,c,d,a,m[i+12],20,-1926607734);
+      a=hh(a,b,c,d,m[i+5],4,-378558);d=hh(d,a,b,c,m[i+8],11,-2022574463);c=hh(c,d,a,b,m[i+11],16,1839030562);b=hh(b,c,d,a,m[i+14],23,-35309556);
+      a=hh(a,b,c,d,m[i+1],4,-1530992060);d=hh(d,a,b,c,m[i+4],11,1272893353);c=hh(c,d,a,b,m[i+7],16,-155497632);b=hh(b,c,d,a,m[i+10],23,-1094730640);
+      a=hh(a,b,c,d,m[i+13],4,681279174);d=hh(d,a,b,c,m[i],11,-358537222);c=hh(c,d,a,b,m[i+3],16,-722521979);b=hh(b,c,d,a,m[i+6],23,76029189);
+      a=hh(a,b,c,d,m[i+9],4,-640364487);d=hh(d,a,b,c,m[i+12],11,-421815835);c=hh(c,d,a,b,m[i+15],16,530742520);b=hh(b,c,d,a,m[i+2],23,-995338651);
+      a=ii(a,b,c,d,m[i],6,-198630844);d=ii(d,a,b,c,m[i+7],10,1126891415);c=ii(c,d,a,b,m[i+14],15,-1416354905);b=ii(b,c,d,a,m[i+5],21,-57434055);
+      a=ii(a,b,c,d,m[i+12],6,1700485571);d=ii(d,a,b,c,m[i+3],10,-1894986606);c=ii(c,d,a,b,m[i+10],15,-1051523);b=ii(b,c,d,a,m[i+1],21,-2054922799);
+      a=ii(a,b,c,d,m[i+8],6,1873313359);d=ii(d,a,b,c,m[i+15],10,-30611744);c=ii(c,d,a,b,m[i+6],15,-1560198380);b=ii(b,c,d,a,m[i+13],21,1309151649);
+      a=ii(a,b,c,d,m[i+4],6,-145523070);d=ii(d,a,b,c,m[i+11],10,-1120210379);c=ii(c,d,a,b,m[i+2],15,718787259);b=ii(b,c,d,a,m[i+9],21,-343485551);
+      a=safeAdd(a,oa);b=safeAdd(b,ob);c=safeAdd(c,oc);d=safeAdd(d,od);
+    }
+    const r=new Uint8Array(16),v=new DataView(r.buffer);
+    v.setInt32(0,a,true);v.setInt32(4,b,true);v.setInt32(8,c,true);v.setInt32(12,d,true);
+    return r;
+  }
+  const ITOA64="./0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+  function encode64(h,count){
+    let o="",i=0;
+    do{let v=h[i++];o+=ITOA64[v&0x3f];if(i<count)v|=h[i]<<8;o+=ITOA64[(v>>6)&0x3f];if(i++>=count)break;if(i<count)v|=h[i]<<16;o+=ITOA64[(v>>12)&0x3f];if(i++>=count)break;o+=ITOA64[(v>>18)&0x3f];}while(i<count);
+    return o;
+  }
+  const rnd=new Uint8Array(6); crypto.getRandomValues(rnd);
+  let salt=""; for(const b of rnd) salt+=ITOA64[b&63];
+  const prefix=`$P$${ITOA64[8]}${salt}`;
+  let count=256;
+  const pb=new TextEncoder().encode(password);
+  const sb=new TextEncoder().encode(salt);
+  const init=new Uint8Array(sb.length+pb.length); init.set(sb); init.set(pb,sb.length);
+  let h=md5(init);
+  while(count--){const c=new Uint8Array(h.length+pb.length);c.set(h);c.set(pb,h.length);h=md5(c);}
+  return prefix+encode64(Array.from(h),16);
+}
+
+async function initWordPressDB(db, siteUrl, adminUser, adminPass, adminEmail, blogname) {
+  if (!db) return false;
+  blogname = blogname || "WordPress 사이트";
+  const now = new Date().toISOString().slice(0, 19).replace("T", " ");
+  const hashedPass = await phpassHash(adminPass);
+  const blognameSafe = blogname.replace(/'/g, "''");
+  const sqls = [
+    `CREATE TABLE IF NOT EXISTS wp_options (option_id INTEGER PRIMARY KEY AUTOINCREMENT, option_name TEXT UNIQUE NOT NULL, option_value TEXT NOT NULL DEFAULT '', autoload TEXT NOT NULL DEFAULT 'yes')`,
+    `CREATE TABLE IF NOT EXISTS wp_users (ID INTEGER PRIMARY KEY AUTOINCREMENT, user_login TEXT NOT NULL DEFAULT '', user_pass TEXT NOT NULL DEFAULT '', user_nicename TEXT NOT NULL DEFAULT '', user_email TEXT NOT NULL DEFAULT '', user_url TEXT NOT NULL DEFAULT '', user_registered TEXT NOT NULL DEFAULT '', user_status INTEGER NOT NULL DEFAULT 0, display_name TEXT NOT NULL DEFAULT '')`,
+    `CREATE TABLE IF NOT EXISTS wp_usermeta (umeta_id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL DEFAULT 0, meta_key TEXT, meta_value TEXT)`,
+    `CREATE TABLE IF NOT EXISTS wp_posts (ID INTEGER PRIMARY KEY AUTOINCREMENT, post_author INTEGER NOT NULL DEFAULT 0, post_date TEXT NOT NULL DEFAULT '', post_content TEXT NOT NULL DEFAULT '', post_title TEXT NOT NULL DEFAULT '', post_excerpt TEXT NOT NULL DEFAULT '', post_status TEXT NOT NULL DEFAULT 'publish', comment_status TEXT NOT NULL DEFAULT 'open', ping_status TEXT NOT NULL DEFAULT 'open', post_name TEXT NOT NULL DEFAULT '', post_type TEXT NOT NULL DEFAULT 'post', post_modified TEXT NOT NULL DEFAULT '', guid TEXT NOT NULL DEFAULT '', menu_order INTEGER NOT NULL DEFAULT 0, comment_count INTEGER NOT NULL DEFAULT 0)`,
+    `CREATE TABLE IF NOT EXISTS wp_postmeta (meta_id INTEGER PRIMARY KEY AUTOINCREMENT, post_id INTEGER NOT NULL DEFAULT 0, meta_key TEXT, meta_value TEXT)`,
+    `CREATE TABLE IF NOT EXISTS wp_terms (term_id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL DEFAULT '', slug TEXT NOT NULL DEFAULT '', term_group INTEGER NOT NULL DEFAULT 0)`,
+    `CREATE TABLE IF NOT EXISTS wp_term_taxonomy (term_taxonomy_id INTEGER PRIMARY KEY AUTOINCREMENT, term_id INTEGER NOT NULL DEFAULT 0, taxonomy TEXT NOT NULL DEFAULT '', description TEXT NOT NULL DEFAULT '', parent INTEGER NOT NULL DEFAULT 0, count INTEGER NOT NULL DEFAULT 0)`,
+    `CREATE TABLE IF NOT EXISTS wp_term_relationships (object_id INTEGER NOT NULL DEFAULT 0, term_taxonomy_id INTEGER NOT NULL DEFAULT 0, term_order INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (object_id, term_taxonomy_id))`,
+    `CREATE TABLE IF NOT EXISTS wp_comments (comment_ID INTEGER PRIMARY KEY AUTOINCREMENT, comment_post_ID INTEGER NOT NULL DEFAULT 0, comment_author TEXT NOT NULL DEFAULT '', comment_author_email TEXT NOT NULL DEFAULT '', comment_author_url TEXT NOT NULL DEFAULT '', comment_author_IP TEXT NOT NULL DEFAULT '', comment_date TEXT NOT NULL DEFAULT '', comment_content TEXT NOT NULL DEFAULT '', comment_approved TEXT NOT NULL DEFAULT '1', comment_type TEXT NOT NULL DEFAULT 'comment', comment_parent INTEGER NOT NULL DEFAULT 0, user_id INTEGER NOT NULL DEFAULT 0)`,
+    `CREATE TABLE IF NOT EXISTS wp_commentmeta (meta_id INTEGER PRIMARY KEY AUTOINCREMENT, comment_id INTEGER NOT NULL DEFAULT 0, meta_key TEXT, meta_value TEXT)`,
+    `INSERT OR IGNORE INTO wp_options (option_name, option_value, autoload) VALUES ('siteurl','${siteUrl}','yes'),('home','${siteUrl}','yes'),('blogname','${blognameSafe}','yes'),('blogdescription','','yes'),('admin_email','${adminEmail}','yes'),('permalink_structure','/%postname%/','yes'),('template','twentytwentyfour','yes'),('stylesheet','twentytwentyfour','yes'),('current_theme','Twenty Twenty-Four','yes'),('active_plugins','a:0:{}','yes'),('blogpublic','1','yes'),('db_version','57155','yes'),('cp_installed_at','${now}','yes')`,
+    `INSERT OR IGNORE INTO wp_terms (term_id,name,slug,term_group) VALUES (1,'미분류','uncategorized',0)`,
+    `INSERT OR IGNORE INTO wp_term_taxonomy (term_taxonomy_id,term_id,taxonomy,description,parent,count) VALUES (1,1,'category','',0,1)`,
+    `INSERT OR IGNORE INTO wp_users (user_login,user_pass,user_nicename,user_email,user_url,user_registered,display_name) VALUES ('${adminUser}','${hashedPass}','${adminUser}','${adminEmail}','${siteUrl}','${now}','${adminUser}')`,
+    `INSERT OR IGNORE INTO wp_usermeta (user_id,meta_key,meta_value) VALUES (1,'wp_capabilities','a:1:{s:13:"administrator";b:1;}')`,
+    `INSERT OR IGNORE INTO wp_usermeta (user_id,meta_key,meta_value) VALUES (1,'wp_user_level','10')`,
+    `INSERT OR IGNORE INTO wp_usermeta (user_id,meta_key,meta_value) VALUES (1,'admin_color','fresh')`,
+    `INSERT OR IGNORE INTO wp_posts (post_author,post_date,post_content,post_title,post_status,post_name,post_type,post_modified,guid,comment_status,ping_status) VALUES (1,'${now}','WordPress에 오신 것을 환영합니다!','안녕하세요!','publish','hello-world','post','${now}','${siteUrl}/?p=1','open','open')`,
+  ];
+  for (const sql of sqls) {
+    const r = await d1Run(db, sql);
+    if (!r.ok) console.warn("[d1-init]", r.error, sql.slice(0, 80));
+  }
+  return true;
+}
+
+
+function buildInstallPage(siteUrl, opts) {
+  opts = opts || {};
+  const error      = opts.error      || "";
+  const title      = opts.weblog_title || opts.blogname || "";
+  const admin_user = opts.user_login  || "admin";
+  const admin_email= opts.admin_email || "";
+  return `<!DOCTYPE html>
 <html lang="ko">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>시스템 설정 — CloudPress Admin</title>
-    <link rel="stylesheet" href="/style.css">
-    <script src="https://cdn.tailwindcss.com"></script>
-    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>WordPress 설치</title>
+<link rel="stylesheet" href="/wp-admin/css/install.min.css">
+<style>
+html{background:#f0f0f1}
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;font-size:14px;color:#3c434a;margin:0}
+#wpwrap{display:flex;justify-content:center;padding:40px 16px 60px}
+#wpinstall{width:100%;max-width:600px}
+h1.wp-logo{text-align:center;margin:0 0 28px}
+h1.wp-logo a{display:inline-block;background:url('/wp-admin/images/wordpress-logo.svg') no-repeat center;background-size:contain;width:84px;height:84px;text-indent:-9999px;overflow:hidden}
+.setup-install-steps{background:#fff;border:1px solid #c3c4c7;border-radius:3px;padding:26px 30px;box-shadow:0 1px 1px rgba(0,0,0,.04)}
+.setup-install-steps h1{font-size:23px;font-weight:400;margin:0 0 18px;padding:0 0 14px;border-bottom:1px solid #dcdcde}
+.form-table{width:100%;border-collapse:collapse;margin-bottom:16px}
+.form-table th{width:160px;padding:14px 4px 14px 0;font-weight:600;vertical-align:top;text-align:left}
+.form-table td{padding:10px 0}
+.form-table input[type=text],
+.form-table input[type=email],
+.form-table input[type=password]{width:100%;max-width:340px;padding:7px 10px;border:1px solid #8c8f94;border-radius:3px;font-size:14px;box-sizing:border-box}
+.form-table input:focus{border-color:#2271b1;outline:2px solid #2271b1;outline-offset:0}
+.form-table p.description{font-size:13px;color:#646970;margin:4px 0 0}
+.wp-pwd{display:flex;gap:8px;align-items:center;max-width:340px}
+.wp-pwd input{flex:1;min-width:0}
+.button-hero{background:#2271b1;border:1px solid #2271b1;color:#fff;padding:10px 24px;font-size:14px;font-weight:600;border-radius:3px;cursor:pointer}
+.button-hero:hover{background:#135e96;border-color:#135e96}
+.notice-error{background:#fff;border-left:4px solid #d63638;border-radius:0 3px 3px 0;padding:12px 16px;margin:0 0 18px;font-size:14px}
+hr{border:none;border-top:1px solid #dcdcde;margin:18px 0}
+#pass-strength{font-size:13px;margin-top:4px;min-height:18px}
+.strong{color:#00a32a;font-weight:600}.good{color:#72aee6;font-weight:600}.weak{color:#dba617;font-weight:600}.bad{color:#d63638;font-weight:600}
+#loading-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9999;align-items:center;justify-content:center}
+#loading-overlay.show{display:flex}
+.spinner-wrap{background:#fff;border-radius:8px;padding:32px 40px;text-align:center;min-width:260px}
+.spinner{width:36px;height:36px;border:4px solid #e0e0e0;border-top-color:#2271b1;border-radius:50%;animation:spin .8s linear infinite;margin:0 auto 14px}
+@keyframes spin{to{transform:rotate(360deg)}}
+.spinner-wrap p{color:#3c434a;font-size:14px;margin:0}
+</style>
 </head>
-<body class="bg-[#050505] text-white md:flex md:h-screen">
+<body>
+<div id="wpwrap"><div id="wpinstall">
+  <h1 class="wp-logo"><a href="https://wordpress.org/">WordPress</a></h1>
+  <div class="setup-install-steps">
+    <h1>WordPress에 오신 것을 환영합니다</h1>
+    <p style="margin:0 0 16px;color:#646970">아래 정보를 입력하여 WordPress를 설치하세요. 시작하기 전에 데이터베이스 설정이 완료되어 있어야 합니다.</p>
+    ${error ? '<div class="notice-error"><strong>오류:</strong> ' + error + '</div>' : ""}
+    <form id="setup-form">
+      <table class="form-table">
+        <tr>
+          <th><label for="weblog_title">사이트 제목</label></th>
+          <td><input name="weblog_title" id="weblog_title" type="text" value="${title}" autocomplete="off" required></td>
+        </tr>
+        <tr>
+          <th><label for="user_login">사용자명</label></th>
+          <td>
+            <input name="user_login" id="user_login" type="text" value="${admin_user}" autocomplete="off" required>
+            <p class="description">영문자, 숫자, 밑줄(_), 붙임표(-), 마침표(.), @만 사용 가능합니다.</p>
+          </td>
+        </tr>
+        <tr>
+          <th><label for="admin_password">비밀번호</label></th>
+          <td>
+            <div class="wp-pwd">
+              <input name="admin_password" id="admin_password" type="password" autocomplete="new-password" required>
+              <button type="button" id="toggle-pw" style="padding:7px 10px;background:#f0f0f1;border:1px solid #8c8f94;border-radius:3px;cursor:pointer;font-size:13px;white-space:nowrap">보기</button>
+            </div>
+            <div id="pass-strength"></div>
+            <p class="description">강력한 비밀번호를 사용하세요.</p>
+          </td>
+        </tr>
+        <tr>
+          <th><label for="admin_email">이메일 주소</label></th>
+          <td>
+            <input name="admin_email" id="admin_email" type="email" value="${admin_email}" required>
+            <p class="description">이메일 주소를 정확히 입력해 주세요.</p>
+          </td>
+        </tr>
+      </table>
+      <hr>
+      <p><button type="submit" class="button-hero" id="submit-btn">WordPress 설치</button></p>
+    </form>
+  </div>
+</div></div>
+<div id="loading-overlay">
+  <div class="spinner-wrap">
+    <div class="spinner"></div>
+    <p id="loading-msg">WordPress를 설치하는 중입니다...<br>잠시만 기다려 주세요.</p>
+  </div>
+</div>
 <script>
-    const _at = localStorage.getItem('admin_token');
-    if (!_at) window.location.href = '/login';
-</script>
-
-<!-- 모바일 헤더 -->
-<header class="md:hidden sticky top-0 z-50 bg-[#050505]/95 backdrop-blur-lg border-b border-white/10">
-    <div class="flex justify-between items-center px-4 py-3">
-        <span class="text-xl font-black text-blue-500">CP <span class="text-white">ADMIN</span></span>
-        <button id="mobileMenuBtn" class="text-gray-400 hover:text-white p-2"><i class="fas fa-bars text-xl"></i></button>
-    </div>
-    <div id="mobileMenu" class="hidden border-t border-white/10 py-2 px-2 space-y-1">
-        <a href="/admin"          class="flex items-center gap-3 px-4 py-3 rounded-xl hover:bg-white/5 transition text-gray-400"><i class="fas fa-chart-line w-5"></i> 개요</a>
-        <a href="/admin-users"    class="flex items-center gap-3 px-4 py-3 rounded-xl hover:bg-white/5 transition text-gray-400"><i class="fas fa-users w-5"></i> 사용자 관리</a>
-        <a href="/admin-sites"    class="flex items-center gap-3 px-4 py-3 rounded-xl hover:bg-white/5 transition text-gray-400"><i class="fas fa-globe w-5"></i> 사이트 관리</a>
-        <a href="/admin-settings" class="flex items-center gap-3 px-4 py-3 rounded-xl bg-white/10 font-bold"><i class="fas fa-cog w-5"></i> 시스템 설정</a>
-        <div class="border-t border-white/10 mt-2 pt-2">
-            <button onclick="logout()" class="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-red-400 hover:bg-red-900/20 transition"><i class="fas fa-sign-out-alt w-5"></i> 로그아웃</button>
-        </div>
-    </div>
-</header>
-<script>document.getElementById('mobileMenuBtn').addEventListener('click',()=>document.getElementById('mobileMenu').classList.toggle('hidden'));</script>
-
-<!-- 사이드바 -->
-<aside class="w-64 border-r border-white/10 p-6 flex flex-col hidden md:flex flex-shrink-0">
-    <div class="text-2xl font-black text-blue-500 mb-10">CP <span class="text-white">ADMIN</span></div>
-    <nav class="flex-1 space-y-1">
-        <a href="/admin"          class="flex items-center gap-3 p-3 rounded-xl hover:bg-white/5 transition text-gray-400 text-sm"><i class="fas fa-chart-line w-5 text-center"></i> 개요</a>
-        <a href="/admin-users"    class="flex items-center gap-3 p-3 rounded-xl hover:bg-white/5 transition text-gray-400 text-sm"><i class="fas fa-users w-5 text-center"></i> 사용자 관리</a>
-        <a href="/admin-sites"    class="flex items-center gap-3 p-3 rounded-xl hover:bg-white/5 transition text-gray-400 text-sm"><i class="fas fa-globe w-5 text-center"></i> 사이트 관리</a>
-        <a href="/admin-inquiries" class="flex items-center gap-3 p-3 rounded-xl hover:bg-white/5 transition text-gray-400 text-sm"><i class="fas fa-comments w-5 text-center"></i> 문의 관리</a>
-        <a href="/admin-notices"  class="flex items-center gap-3 p-3 rounded-xl hover:bg-white/5 transition text-gray-400 text-sm"><i class="fas fa-bullhorn w-5 text-center"></i> 공지 관리</a>
-        <a href="/admin-settings" class="flex items-center gap-3 p-3 rounded-xl bg-white/10 font-bold text-sm"><i class="fas fa-cog w-5 text-center"></i> 시스템 설정</a>
-    </nav>
-    <button onclick="logout()" class="mt-auto w-full bg-red-600/20 border border-red-500/30 text-red-400 py-3 rounded-xl font-bold hover:bg-red-600/30 transition text-sm">
-        <i class="fas fa-sign-out-alt mr-2"></i> 로그아웃
-    </button>
-</aside>
-
-<main class="flex-1 w-full overflow-y-auto p-6 md:p-10 space-y-8">
-    <h1 class="text-2xl font-bold mb-2">시스템 설정</h1>
-    <p class="text-sm text-gray-400 mb-6">CloudPress 플랫폼 전역 설정을 관리합니다.</p>
-
-    <!-- ── CloudPress CMS 배포 설정 ── -->
-    <div class="p-6 bg-[#111] rounded-2xl border border-white/5 space-y-5">
-        <div class="flex items-center justify-between">
-            <h2 class="font-bold flex items-center gap-2">
-                <i class="fas fa-cloud-upload-alt text-indigo-400 text-lg"></i>
-                CloudPress CMS 배포 설정
-            </h2>
-            <span id="cms-status-badge" class="text-xs bg-white/10 text-gray-300 px-3 py-1 rounded-full">미설정</span>
-        </div>
-        <p class="text-sm text-gray-400">
-            CMS zip 파일을 업로드하고 GitHub 레포를 지정하면, 호스팅 생성 시
-            <strong class="text-indigo-300">CMS 파일이 자동으로 레포에 업로드</strong>되고
-            <strong class="text-indigo-300">Cloudflare Workers에 즉시 배포</strong>됩니다.<br>
-            업로드된 CMS는 각 호스팅의 WordPress 관리자 패널로 동작합니다.
-        </p>
-
-        <!-- CMS zip 업로드 -->
-        <div class="p-4 bg-black/30 rounded-xl space-y-3">
-            <div class="text-xs text-gray-500 font-bold uppercase tracking-wider mb-2">CMS 파일 업로드 (zip)</div>
-            <p class="text-xs text-gray-600">
-                <code class="bg-white/10 px-1 rounded">cloudpress-cms-main.zip</code>을 업로드하세요.
-                파일은 D1에 base64로 저장되며, 호스팅 생성 시 GitHub 레포에 자동 전개됩니다.
-            </p>
-            <div id="cms-zip-drop-area"
-                class="border-2 border-dashed border-white/20 rounded-xl p-6 text-center cursor-pointer hover:border-indigo-500 hover:bg-indigo-900/10 transition"
-                onclick="document.getElementById('cms-zip-input').click()"
-                ondragover="event.preventDefault(); this.classList.add('border-indigo-500','bg-indigo-900/10')"
-                ondragleave="this.classList.remove('border-indigo-500','bg-indigo-900/10')"
-                ondrop="handleCmsZipDrop(event)">
-                <i class="fas fa-file-archive text-3xl text-gray-600 mb-2"></i>
-                <p class="text-sm text-gray-500" id="cms-zip-label">클릭하거나 zip 파일을 드래그하세요</p>
-                <p class="text-xs text-gray-700 mt-1">최대 50MB · .zip만 허용</p>
-            </div>
-            <input id="cms-zip-input" type="file" accept=".zip" class="hidden" onchange="onCmsZipSelected(this)">
-            <div id="cms-zip-alert" class="hidden p-3 rounded-xl text-sm"></div>
-            <button onclick="uploadCmsZip()"
-                id="cms-zip-upload-btn"
-                class="bg-indigo-600 hover:bg-indigo-500 text-white font-bold px-6 py-2.5 rounded-xl transition flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
-                disabled>
-                <i class="fas fa-upload"></i> CMS zip 업로드
-            </button>
-        </div>
-
-        <!-- GitHub 레포 + GitHub Personal Access Token 입력 -->
-        <div class="p-4 bg-black/30 rounded-xl space-y-4">
-            <div class="text-xs text-gray-500 font-bold uppercase tracking-wider">CMS GitHub 레포 & 배포 토큰</div>
-            <p class="text-xs text-gray-600">
-                CMS 파일이 올라갈 GitHub 레포를 지정합니다. 레포가 없으면 자동 생성됩니다.
-                여기서 입력하는 토큰은 <strong class="text-gray-400">CMS 배포 전용</strong>으로,
-                사이트별 파일 토큰과 별도로 관리됩니다.
-            </p>
-            <div class="grid md:grid-cols-2 gap-3">
-                <div class="space-y-1">
-                    <label class="text-xs text-gray-500 block font-bold">GitHub 레포 (owner/repo)</label>
-                    <input id="cms-github-repo" type="text"
-                        placeholder="your-org/cloudpress-cms"
-                        class="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-sm font-mono focus:outline-none focus:border-indigo-500 transition" />
-                    <p class="text-xs text-gray-700">예: <code class="bg-white/10 px-1 rounded">myorg/my-cloudpress-cms</code></p>
-                </div>
-                <div class="space-y-1">
-                    <label class="text-xs text-gray-500 block font-bold">GitHub Personal Access Token</label>
-                    <input id="cms-github-token" type="password"
-                        placeholder="ghp_xxxxxxxxxxxxxxxxxxxx"
-                        class="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-sm font-mono focus:outline-none focus:border-indigo-500 transition"
-                        autocomplete="off" />
-                    <p class="text-xs text-gray-700">
-                        권한: <code class="bg-white/10 px-1 rounded">repo</code>
-                        <a href="https://github.com/settings/tokens/new" target="_blank" class="text-indigo-400 hover:underline ml-2">
-                            <i class="fas fa-external-link-alt mr-1"></i>토큰 발급
-                        </a>
-                    </p>
-                </div>
-            </div>
-            <div id="cms-repo-alert" class="hidden p-3 rounded-xl text-sm"></div>
-            <button onclick="saveCmsSettings()"
-                class="bg-indigo-600 hover:bg-indigo-500 text-white font-bold px-6 py-2.5 rounded-xl transition flex items-center gap-2">
-                <i class="fas fa-save"></i> CMS 설정 저장
-            </button>
-        </div>
-
-        <!-- 현재 CMS 상태 -->
-        <div class="grid md:grid-cols-3 gap-3 text-sm">
-            <div class="p-3 bg-white/5 rounded-xl">
-                <div class="text-xs text-gray-500 mb-1">업로드된 CMS</div>
-                <div id="cms-info-name" class="font-bold text-indigo-300 truncate">-</div>
-                <div id="cms-info-size" class="text-xs text-gray-600 mt-0.5">-</div>
-            </div>
-            <div class="p-3 bg-white/5 rounded-xl">
-                <div class="text-xs text-gray-500 mb-1">연결된 레포</div>
-                <div id="cms-info-repo" class="font-bold text-indigo-300 truncate">-</div>
-                <div id="cms-info-updated" class="text-xs text-gray-600 mt-0.5">-</div>
-            </div>
-            <div class="p-3 bg-white/5 rounded-xl">
-                <div class="text-xs text-gray-500 mb-1">마지막 배포</div>
-                <div id="cms-info-deploy" class="font-bold text-indigo-300">-</div>
-                <div id="cms-info-sites" class="text-xs text-gray-600 mt-0.5">-</div>
-            </div>
-        </div>
-
-        <div class="p-3 bg-indigo-900/20 border border-indigo-500/20 rounded-xl text-xs text-indigo-300">
-            <i class="fas fa-info-circle mr-2"></i>
-            호스팅 생성 시 동작 순서:
-            <strong>① CMS zip 압축 해제</strong> →
-            <strong>② GitHub 레포에 파일 업로드</strong> →
-            <strong>③ Cloudflare Workers에 CMS 자동 배포</strong> →
-            <strong>④ 사이트별 Worker와 바인딩</strong>
-        </div>
-    </div>
-
-    <!-- ── GitHub Storage 설정 ── -->
-    <div class="p-6 bg-[#111] rounded-2xl border border-white/5 space-y-5">
-        <div class="flex items-center justify-between">
-            <h2 class="font-bold flex items-center gap-2">
-                <i class="fab fa-github text-white text-lg"></i>
-                GitHub 스토리지 토큰 관리
-            </h2>
-            <span id="token-count-badge" class="text-xs bg-white/10 text-gray-300 px-3 py-1 rounded-full">로딩 중...</span>
-        </div>
-        <p class="text-sm text-gray-400">
-            WordPress 코어 파일, 미디어, 테마, 플러그인을 GitHub Private Repository에 저장합니다.<br>
-            여러 개의 토큰을 추가하면 API rate limit을 자동으로 분산합니다. <span class="text-blue-400">토큰은 무제한으로 추가 가능합니다.</span>
-        </p>
-
-        <!-- 토큰 추가 폼 -->
-        <div class="p-4 bg-black/30 rounded-xl space-y-3">
-            <div class="text-xs text-gray-500 font-bold uppercase tracking-wider mb-2">새 토큰 추가</div>
-            <div class="flex flex-col md:flex-row gap-3">
-                <div class="flex-1">
-                    <label class="text-xs text-gray-500 mb-1 block">Personal Access Token</label>
-                    <input id="gh-token-input" type="password"
-                        placeholder="ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
-                        class="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-sm font-mono focus:outline-none focus:border-blue-500 transition"
-                        autocomplete="off" />
-                    <p class="text-xs text-gray-600 mt-1">
-                        <a href="https://github.com/settings/tokens/new" target="_blank" class="text-blue-400 hover:underline">
-                            <i class="fas fa-external-link-alt mr-1"></i>GitHub → Settings → Developer settings → Personal access tokens
-                        </a>
-                        에서 발급. 권한: <code class="bg-white/10 px-1 rounded">repo</code> (private repos 접근)
-                    </p>
-                </div>
-                <div class="md:w-40">
-                    <label class="text-xs text-gray-500 mb-1 block">레이블 (선택)</label>
-                    <input id="gh-token-label" type="text"
-                        placeholder="내 토큰 1"
-                        class="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-blue-500 transition" />
-                </div>
-            </div>
-            <div id="gh-add-alert" class="hidden p-3 rounded-xl text-sm"></div>
-            <button onclick="addGithubToken()"
-                class="bg-blue-600 hover:bg-blue-500 text-white font-bold px-6 py-2.5 rounded-xl transition flex items-center gap-2">
-                <i class="fas fa-plus"></i>
-                API 추가
-            </button>
-        </div>
-
-        <!-- 등록된 토큰 목록 -->
-        <div>
-            <div class="text-xs text-gray-500 font-bold uppercase tracking-wider mb-3">등록된 토큰</div>
-            <div id="github-token-list" class="space-y-2">
-                <div class="text-sm text-gray-500 text-center py-6">
-                    <i class="fas fa-spinner fa-spin mr-2"></i>로딩 중...
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- ── CP3 메인 스토리지 레포 설정 ── -->
-    <div class="p-6 bg-[#111] rounded-2xl border border-green-500/20 space-y-5">
-        <div class="flex items-center justify-between flex-wrap gap-2">
-            <h2 class="font-bold flex items-center gap-2">
-                <i class="fas fa-archive text-green-400 text-lg"></i>
-                CP3 메인 스토리지 레포 설정 (DB 서버)
-            </h2>
-            <span class="text-xs text-gray-500">호스팅 생성 시 사용자 DB 정보가 저장되는 레포</span>
-        </div>
-        <div class="p-4 bg-green-950/20 border border-green-500/20 rounded-xl text-xs text-green-300 space-y-1">
-            <p class="font-bold">📁 저장 구조</p>
-            <code class="block text-green-200/70 mt-1">{cp3_repo}/{user_id}/{site_id}/media/ · backup/ · logs/</code>
-            <p class="text-green-200/60 mt-2">호스팅 생성 시 이 레포에 사용자별·호스팅별 폴더가 자동으로 생성됩니다. 미설정 시 호스팅 레포 내부에 폴더가 생성됩니다.</p>
-        </div>
-        <div class="grid md:grid-cols-2 gap-4">
-            <div class="space-y-2">
-                <label class="text-xs text-gray-500 block font-bold">CP3 레포 Owner (GitHub 사용자명/조직)</label>
-                <input id="set-cp3-owner" type="text" placeholder="예: myorg"
-                    class="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-green-500 transition font-mono" />
-            </div>
-            <div class="space-y-2">
-                <label class="text-xs text-gray-500 block font-bold">CP3 레포 이름</label>
-                <input id="set-cp3-repo" type="text" placeholder="예: cloudpress-cp3-storage"
-                    class="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-green-500 transition font-mono" />
-            </div>
-        </div>
-        <div class="space-y-2">
-            <label class="text-xs text-gray-500 block font-bold">CP3 전용 GitHub 토큰 <span class="text-gray-600 font-normal">(비워두면 기본 GitHub 토큰 사용)</span></label>
-            <input id="set-cp3-token" type="password" placeholder="ghp_..."
-                class="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-green-500 transition font-mono" />
-        </div>
-        <div id="cp3-save-alert" class="hidden p-3 rounded-xl text-sm"></div>
-        <button onclick="saveCp3Settings()"
-            class="bg-green-700 hover:bg-green-600 text-white font-bold px-6 py-2.5 rounded-xl transition flex items-center gap-2">
-            <i class="fas fa-save"></i> CP3 스토리지 설정 저장
-        </button>
-    </div>
-
-    <!-- ── CloudPressDB 레포 설정 ── -->
-    <div class="p-6 bg-[#111] rounded-2xl border border-blue-500/20 space-y-5">
-        <div class="flex items-center justify-between flex-wrap gap-2">
-            <h2 class="font-bold flex items-center gap-2">
-                <i class="fas fa-database text-blue-400 text-lg"></i>
-                CloudPressDB 레포 설정
-            </h2>
-            <span class="text-xs text-gray-500">호스팅 생성 시 DB 파일이 저장되는 전용 레포</span>
-        </div>
-        <div class="p-4 bg-blue-950/20 border border-blue-500/20 rounded-xl text-xs text-blue-300 space-y-1">
-            <p class="font-bold">🗄️ DB 저장 구조</p>
-            <code class="block text-blue-200/70 mt-1">{db_repo}/{user_id}/{site_id}/  ← 호스팅별 독립 DB 폴더</code>
-            <p class="text-blue-200/60 mt-2">호스팅 생성 시 이 레포에 사용자별·호스팅별 폴더가 자동으로 생성됩니다. 미설정 시 호스팅 레포 내 _db/ 폴더 사용.</p>
-        </div>
-        <div class="grid md:grid-cols-2 gap-4">
-            <div class="space-y-2">
-                <label class="text-xs text-gray-500 block font-bold">DB 레포 Owner (GitHub 사용자명/조직)</label>
-                <input id="set-db-owner" type="text" placeholder="예: myorg"
-                    class="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-blue-500 transition font-mono" />
-            </div>
-            <div class="space-y-2">
-                <label class="text-xs text-gray-500 block font-bold">DB 레포 이름</label>
-                <input id="set-db-repo" type="text" placeholder="예: cloudpress-db"
-                    class="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-blue-500 transition font-mono" />
-            </div>
-        </div>
-        <div class="space-y-2">
-            <label class="text-xs text-gray-500 block font-bold">DB 레포 전용 GitHub 토큰 <span class="text-gray-600 font-normal">(비워두면 기본 GitHub 토큰 사용)</span></label>
-            <input id="set-db-token" type="password" placeholder="ghp_..."
-                class="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-blue-500 transition font-mono" />
-        </div>
-        <div class="p-4 bg-orange-950/20 border border-orange-500/20 rounded-xl text-xs text-orange-300 space-y-1">
-            <p class="font-bold">📦 외부 스토리지 설정 (CP3 미구독 사용자용 대체 스토리지)</p>
-            <p class="text-orange-200/60">CP3 구독 중인 사용자는 위 CP3 레포를 자동 사용합니다. CP3 미구독 사용자의 미디어 파일 저장에 사용됩니다.</p>
-        </div>
-        <div class="grid md:grid-cols-3 gap-4">
-            <div class="space-y-2">
-                <label class="text-xs text-gray-500 block font-bold">외부 스토리지 타입</label>
-                <select id="set-ext-storage-type"
-                    class="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-blue-500 transition">
-                    <option value="">없음 (호스팅 레포 내 저장)</option>
-                    <option value="r2">Cloudflare R2</option>
-                    <option value="s3">AWS S3</option>
-                    <option value="b2">Backblaze B2</option>
-                </select>
-            </div>
-            <div class="space-y-2">
-                <label class="text-xs text-gray-500 block font-bold">버킷 이름</label>
-                <input id="set-ext-storage-bucket" type="text" placeholder="예: my-media-bucket"
-                    class="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-blue-500 transition font-mono" />
-            </div>
-            <div class="space-y-2">
-                <label class="text-xs text-gray-500 block font-bold">스토리지 액세스 토큰</label>
-                <input id="set-ext-storage-token" type="password" placeholder="토큰/시크릿 키"
-                    class="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-blue-500 transition font-mono" />
-            </div>
-        </div>
-        <div id="db-save-alert" class="hidden p-3 rounded-xl text-sm"></div>
-        <button onclick="saveDbRepoSettings()"
-            class="bg-blue-700 hover:bg-blue-600 text-white font-bold px-6 py-2.5 rounded-xl transition flex items-center gap-2">
-            <i class="fas fa-save"></i> DB 레포 · 스토리지 설정 저장
-        </button>
-    </div>
-
-    <!-- ── CP3 워커 관리 (멀티사이트 / 총괄 워커 생성) ── -->
-    <div class="p-6 bg-[#111] rounded-2xl border border-orange-500/20 space-y-5" id="worker-deploy-section">
-        <h2 class="font-bold flex items-center gap-2">
-            <i class="fas fa-rocket text-orange-400 text-lg"></i>
-            CP3 워커 관리
-        </h2>
-        <p class="text-sm text-gray-400">
-            CP3 플랫폼용 Cloudflare Workers를 자동 생성합니다. 총괄 워커(Master Worker)와 멀티사이트 워커(Pool Worker)를
-            아래에서 바로 생성할 수 있습니다. 생성된 워커는 관리자가 입력한 Cloudflare API로 관리됩니다.
-        </p>
-
-        <!-- CF API 키 입력란 -->
-        <div class="space-y-4">
-            <div class="text-xs text-gray-500 font-bold uppercase tracking-wider">워커 생성 Cloudflare API</div>
-
-            <!-- 저장된 상태 표시 -->
-            <div id="worker-cf-saved" class="hidden p-3 bg-green-900/30 border border-green-500/30 rounded-xl text-green-400 text-sm flex items-center justify-between gap-2">
-                <div class="flex items-center gap-2">
-                    <i class="fas fa-check-circle"></i>
-                    <span>Cloudflare API 키가 연동되어 있습니다.</span>
-                    <span id="worker-cf-account-id" class="text-green-300/70 text-xs ml-1"></span>
-                </div>
-                <button onclick="showWorkerCfForm()" class="text-xs text-orange-300 hover:text-orange-200 underline flex-shrink-0">
-                    키 변경
-                </button>
-            </div>
-
-            <!-- CF API 입력 폼 -->
-            <div id="worker-cf-form" class="space-y-3">
-                <div class="grid md:grid-cols-2 gap-3">
-                    <div class="space-y-1">
-                        <label class="text-xs text-gray-500 font-bold">Cloudflare API Token <span class="text-red-400">*</span></label>
-                        <input id="worker-cf-api-key" type="password"
-                            class="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-2.5 text-sm outline-none focus:border-orange-400 transition"
-                            placeholder="Bearer API Token (권장)">
-                    </div>
-                    <div class="space-y-1">
-                        <label class="text-xs text-gray-500 font-bold">Cloudflare 이메일 <span class="text-gray-600 font-normal">(Global Key 방식만 필요)</span></label>
-                        <input id="worker-cf-email" type="email"
-                            class="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-2.5 text-sm outline-none focus:border-orange-400 transition"
-                            placeholder="cloudflare@example.com">
-                    </div>
-                </div>
-                <div class="flex gap-3">
-                    <button onclick="saveWorkerCfApi()" id="worker-cf-save-btn"
-                        class="bg-orange-600 hover:bg-orange-500 px-6 py-2.5 rounded-xl text-sm font-bold transition flex items-center gap-2">
-                        <i class="fas fa-shield-check"></i> 검증 후 저장
-                    </button>
-                    <div id="worker-cf-status" class="hidden flex items-center gap-2 text-sm px-3 py-2 rounded-xl"></div>
-                </div>
-            </div>
-        </div>
-
-        <!-- GitHub Owner (워커용 레포 생성 시) -->
-        <div class="space-y-2 pt-2 border-t border-white/5">
-            <div class="text-xs text-gray-500 font-bold uppercase tracking-wider">워커용 GitHub 설정 <span class="text-gray-600 font-normal">(선택 – 레포 자동 생성 시)</span></div>
-            <div class="grid md:grid-cols-2 gap-3">
-                <div class="space-y-1">
-                    <label class="text-xs text-gray-500">GitHub Owner (사용자명 또는 조직명)</label>
-                    <input id="worker-gh-owner" type="text"
-                        class="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-2.5 text-sm outline-none focus:border-orange-400 transition"
-                        placeholder="예: myorg 또는 myusername">
-                </div>
-                <div class="space-y-1">
-                    <label class="text-xs text-gray-500">GitHub Token <span class="text-gray-600 font-normal">(비워두면 스토리지 토큰 사용)</span></label>
-                    <input id="worker-gh-token" type="password"
-                        class="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-2.5 text-sm outline-none focus:border-orange-400 transition"
-                        placeholder="ghp_...">
-                </div>
-            </div>
-        </div>
-
-        <!-- 총괄 워커 생성 -->
-        <div class="space-y-3 pt-2 border-t border-white/5">
-            <div class="text-xs text-gray-500 font-bold uppercase tracking-wider">총괄 워커 (Master Worker)</div>
-            <p class="text-xs text-gray-500">CP3 컨트롤 플레인 역할을 하는 마스터 워커를 생성합니다. 배포 엔진, 테넌트 라우팅, 풀 매니저가 포함됩니다.</p>
-            <div class="flex flex-wrap gap-3 items-center">
-                <div class="space-y-1 flex-1 min-w-[180px]">
-                    <label class="text-xs text-gray-500">스크립트 이름</label>
-                    <input id="master-worker-name" type="text" value="cp3-master-worker"
-                        class="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-2 text-sm outline-none focus:border-orange-400 transition">
-                </div>
-                <div class="space-y-1 flex-1 min-w-[180px]">
-                    <label class="text-xs text-gray-500">GitHub 레포명 <span class="text-gray-600">(선택)</span></label>
-                    <input id="master-github-repo" type="text" value="cp3-master-worker"
-                        class="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-2 text-sm outline-none focus:border-orange-400 transition">
-                </div>
-                <div class="self-end">
-                    <button onclick="createMasterWorker()" id="master-worker-btn"
-                        class="bg-gradient-to-r from-orange-600 to-red-600 hover:from-orange-500 hover:to-red-500 px-6 py-2.5 rounded-xl font-bold text-sm transition flex items-center gap-2 whitespace-nowrap">
-                        <i class="fas fa-crown"></i> 총괄 워커 생성하기
-                    </button>
-                </div>
-            </div>
-            <div id="master-worker-result" class="hidden p-3 rounded-xl text-sm"></div>
-        </div>
-
-        <!-- 멀티사이트 워커 생성 -->
-        <div class="space-y-3 pt-2 border-t border-white/5">
-            <div class="text-xs text-gray-500 font-bold uppercase tracking-wider">멀티사이트 워커 (Pool Workers)</div>
-            <p class="text-xs text-gray-500">여러 사이트를 처리하는 풀 워커들을 생성합니다. 각 워커는 독립적인 Pool로 동작하며 요청 라우팅 및 SSR을 담당합니다.</p>
-            <div class="flex flex-wrap gap-3 items-center">
-                <div class="space-y-1 flex-1 min-w-[140px]">
-                    <label class="text-xs text-gray-500">이름 접두사</label>
-                    <input id="pool-worker-prefix" type="text" value="cp3-pool"
-                        class="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-2 text-sm outline-none focus:border-orange-400 transition">
-                </div>
-                <div class="space-y-1 w-24">
-                    <label class="text-xs text-gray-500">생성 개수</label>
-                    <input id="pool-worker-count" type="number" value="3" min="1" max="10"
-                        class="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-2 text-sm outline-none focus:border-orange-400 transition text-center">
-                </div>
-                <div class="space-y-1 flex-1 min-w-[160px]">
-                    <label class="text-xs text-gray-500">GitHub 레포 접두사 <span class="text-gray-600">(선택)</span></label>
-                    <input id="pool-github-prefix" type="text" value="cp3-pool"
-                        class="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-2 text-sm outline-none focus:border-orange-400 transition">
-                </div>
-                <div class="self-end">
-                    <button onclick="createMultisiteWorkers()" id="multisite-worker-btn"
-                        class="bg-gradient-to-r from-violet-600 to-purple-600 hover:from-violet-500 hover:to-purple-500 px-6 py-2.5 rounded-xl font-bold text-sm transition flex items-center gap-2 whitespace-nowrap">
-                        <i class="fas fa-layer-group"></i> 멀티사이트 워커 생성하기
-                    </button>
-                </div>
-            </div>
-            <div id="multisite-worker-result" class="hidden p-3 rounded-xl text-sm"></div>
-        </div>
-
-        <!-- 생성된 워커 목록 -->
-        <div class="space-y-2 pt-2 border-t border-white/5">
-            <div class="flex items-center justify-between">
-                <div class="text-xs text-gray-500 font-bold uppercase tracking-wider">생성된 워커 목록</div>
-                <button onclick="loadWorkers()" class="text-xs text-gray-500 hover:text-white transition">
-                    <i class="fas fa-refresh mr-1"></i>새로고침
-                </button>
-            </div>
-            <div id="worker-list" class="space-y-2 text-sm text-gray-500">로딩 중...</div>
-        </div>
-    </div>
-
-    <!-- ── CloudPressDB / CP3 서버 풀 (GitHub 레포 + DNS 플래너) ── -->
-    <div class="p-6 bg-[#111] rounded-2xl border border-violet-500/20 space-y-5">
-        <h2 class="font-bold flex items-center gap-2">
-            <i class="fas fa-network-wired text-violet-400"></i>
-            CloudPressDB · CP3 서버 풀 (Route53 스타일 DNS 플래너)
-        </h2>
-        <p class="text-sm text-gray-400">
-            GitHub 레포를 DB/스토리지 노드로 등록합니다. 헬스체크 후 가중치 비율에 따라 사용자 호스팅이 자동 할당됩니다.
-        </p>
-        <div class="flex gap-2 flex-wrap">
-            <button type="button" onclick="setPoolType('cpdb')" id="pool-tab-cpdb" class="px-4 py-2 rounded-lg text-sm font-bold bg-violet-600">CloudPressDB</button>
-            <button type="button" onclick="setPoolType('cp3')" id="pool-tab-cp3" class="px-4 py-2 rounded-lg text-sm font-bold bg-white/5 text-gray-400">CP3</button>
-            <button type="button" onclick="runPoolHealthCheck()" class="px-4 py-2 rounded-lg text-sm border border-white/10 hover:bg-white/5">
-                <i class="fas fa-heartbeat mr-1"></i> 헬스체크 + DNS 플랜 재생성
-            </button>
-        </div>
-        <div class="grid md:grid-cols-2 gap-4">
-            <input id="pool-name" placeholder="서버 이름" class="bg-black/40 border border-white/10 rounded-xl px-4 py-2 text-sm">
-            <input id="pool-repo" placeholder="GitHub 레포명 (owner/repo 또는 repo만)" class="bg-black/40 border border-white/10 rounded-xl px-4 py-2 text-sm">
-            <input id="pool-token" type="password" placeholder="GitHub 토큰 (레포 push 권한)" class="bg-black/40 border border-white/10 rounded-xl px-4 py-2 text-sm md:col-span-2">
-            <input id="pool-weight" type="number" placeholder="가중치 (예: 30)" value="100" class="bg-black/40 border border-white/10 rounded-xl px-4 py-2 text-sm">
-            <button type="button" onclick="addPoolServer()" class="bg-violet-600 hover:bg-violet-500 py-2 rounded-xl font-bold text-sm">서버 등록</button>
-        </div>
-        <div id="pool-servers-list" class="text-sm text-gray-500">로딩 중...</div>
-        <pre id="pool-dns-plan" class="text-xs bg-black/40 p-4 rounded-xl overflow-x-auto text-violet-200/80 max-h-48"></pre>
-    </div>
-
-    <!-- ── Cloudflare 환경변수 가이드 ── -->
-    <div class="p-6 bg-[#111] rounded-2xl border border-white/5 space-y-4">
-        <h2 class="font-bold flex items-center gap-2"><i class="fas fa-key text-yellow-400"></i> 필수 환경변수 (Wrangler Secrets)</h2>
-        <p class="text-sm text-gray-400">아래 환경변수를 <code class="bg-white/10 px-1 rounded text-xs">wrangler secret put</code> 명령으로 설정하세요.</p>
-        <div class="space-y-2 text-sm">
-            <div class="flex flex-col md:flex-row md:items-center gap-2 p-3 bg-white/5 rounded-xl">
-                <code class="text-yellow-300 w-48 flex-shrink-0">JWT_SECRET</code>
-                <span class="text-gray-400">JWT 토큰 서명 비밀키 (필수)</span>
-                <span id="jwt-status" class="ml-auto text-xs text-gray-500">-</span>
-            </div>
-            <div class="flex flex-col md:flex-row md:items-center gap-2 p-3 bg-white/5 rounded-xl">
-                <code class="text-yellow-300 w-48 flex-shrink-0">CF_ACCOUNT_ID</code>
-                <span class="text-gray-400">Cloudflare 계정 ID (Worker/D1/KV 생성용)</span>
-            </div>
-            <div class="flex flex-col md:flex-row md:items-center gap-2 p-3 bg-white/5 rounded-xl">
-                <code class="text-yellow-300 w-48 flex-shrink-0">GITHUB_TOKEN</code>
-                <span class="text-gray-400">기본 GitHub 토큰 (위 UI에서 추가하는 것 권장)</span>
-            </div>
-            <div class="flex flex-col md:flex-row md:items-center gap-2 p-3 bg-white/5 rounded-xl">
-                <code class="text-yellow-300 w-48 flex-shrink-0">DEFAULT_DB_HOST</code>
-                <span class="text-gray-400">WordPress DB 호스트 (기본: 127.0.0.1)</span>
-            </div>
-        </div>
-        <div class="p-4 bg-black/30 rounded-xl font-mono text-xs text-green-400 space-y-1">
-            <p class="text-gray-500"># Wrangler CLI로 비밀 값 설정 예시</p>
-            <p>wrangler secret put JWT_SECRET</p>
-            <p>wrangler secret put CF_ACCOUNT_ID</p>
-            <p>wrangler secret put GITHUB_TOKEN</p>
-        </div>
-    </div>
-
-    <!-- ── DB 상태 ── -->
-    <div class="p-6 bg-[#111] rounded-2xl border border-white/5 space-y-4">
-        <h2 class="font-bold flex items-center gap-2"><i class="fas fa-database text-green-400"></i> D1 데이터베이스 상태</h2>
-        <div id="db-stats" class="grid grid-cols-2 md:grid-cols-4 gap-4">
-            <div class="p-4 bg-white/5 rounded-xl text-center">
-                <div class="text-xs text-gray-500 mb-1">사용자</div>
-                <div class="text-2xl font-bold" id="db-users"><i class="fas fa-spinner fa-spin text-gray-600 text-lg"></i></div>
-            </div>
-            <div class="p-4 bg-white/5 rounded-xl text-center">
-                <div class="text-xs text-gray-500 mb-1">사이트</div>
-                <div class="text-2xl font-bold" id="db-sites">-</div>
-            </div>
-            <div class="p-4 bg-white/5 rounded-xl text-center">
-                <div class="text-xs text-gray-500 mb-1">도메인</div>
-                <div class="text-2xl font-bold" id="db-domains">-</div>
-            </div>
-            <div class="p-4 bg-white/5 rounded-xl text-center">
-                <div class="text-xs text-gray-500 mb-1">GitHub 토큰</div>
-                <div class="text-2xl font-bold" id="db-gh-tokens">-</div>
-            </div>
-        </div>
-    </div>
-
-    <!-- ── 이메일 발송 설정 ── -->
-    <div class="p-6 bg-[#111] rounded-2xl border border-white/5 space-y-5">
-        <div class="flex items-center justify-between">
-            <h2 class="font-bold flex items-center gap-2">
-                <i class="fas fa-envelope text-blue-400 text-lg"></i>
-                이메일 발송 설정
-            </h2>
-            <span class="text-xs text-gray-500">호스팅 생성 완료 알림에 사용됩니다</span>
-        </div>
-        <p class="text-sm text-gray-400">
-            Supabase Edge Function을 통해 이메일을 발송합니다. Supabase 프로젝트에
-            <code class="bg-white/10 px-1 rounded text-xs">send-email</code> Edge Function을 배포해주세요.
-        </p>
-
-        <div class="grid md:grid-cols-2 gap-4">
-            <div class="space-y-2">
-                <label class="text-xs text-gray-500 block font-bold">Supabase Project URL</label>
-                <input id="set-supabase-url" type="url" placeholder="https://xxxx.supabase.co"
-                    class="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-blue-500 transition font-mono" />
-            </div>
-            <div class="space-y-2">
-                <label class="text-xs text-gray-500 block font-bold">Supabase Service Role Key</label>
-                <input id="set-supabase-key" type="password" placeholder="eyJhbGciOi..."
-                    class="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-blue-500 transition font-mono" />
-                <p class="text-xs text-gray-600">Supabase → Settings → API → service_role 키</p>
-            </div>
-            <div class="space-y-2">
-                <label class="text-xs text-gray-500 block font-bold">발송자 이메일</label>
-                <input id="set-smtp-from" type="email" placeholder="noreply@cloudpress.app"
-                    class="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-blue-500 transition" />
-            </div>
-            <div class="space-y-2">
-                <label class="text-xs text-gray-500 block font-bold">플랫폼 도메인</label>
-                <input id="set-platform-domain" type="text" placeholder="cloudpress.app"
-                    class="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-blue-500 transition font-mono" />
-                <p class="text-xs text-gray-600">이메일 내 콘솔 링크 생성에 사용</p>
-            </div>
-        </div>
-
-        <div id="email-save-alert" class="hidden p-3 rounded-xl text-sm"></div>
-        <button onclick="saveEmailSettings()"
-            class="bg-blue-600 hover:bg-blue-500 text-white font-bold px-6 py-2.5 rounded-xl transition flex items-center gap-2">
-            <i class="fas fa-save"></i> 이메일 설정 저장
-        </button>
-    </div>
-
-    <!-- ── 토스 페이먼츠 설정 ── -->
-    <div class="p-6 bg-[#111] rounded-2xl border border-white/5 space-y-5">
-        <div class="flex items-center justify-between">
-            <h2 class="font-bold flex items-center gap-2">
-                <i class="fas fa-credit-card text-green-400 text-lg"></i>
-                토스 페이먼츠 결제 설정
-            </h2>
-            <span class="text-xs text-gray-500">요금제 페이지에서 스타터·프로 플랜 결제에 사용</span>
-        </div>
-        <p class="text-sm text-gray-400">
-            호스팅 단위 요금제 결제에 사용됩니다. 무료 플랜은 결제가 필요 없으며,
-            스타터·프로 플랜만 실제 결제가 진행됩니다.
-        </p>
-
-        <div class="p-3 bg-yellow-900/20 border border-yellow-500/20 rounded-xl text-xs text-yellow-300 flex items-start gap-2">
-            <i class="fas fa-exclamation-triangle mt-0.5 flex-shrink-0"></i>
-            <div>
-                <strong>보안 주의:</strong> Secret Key는 절대 클라이언트(브라우저)에 노출되어서는 안 됩니다.
-                Client Key만 프론트엔드에서 사용하고, Secret Key는 서버사이드에서만 사용합니다.
-            </div>
-        </div>
-
-        <div class="grid md:grid-cols-2 gap-4">
-            <div class="space-y-2">
-                <label class="text-xs text-gray-500 block font-bold">
-                    Client Key <span class="text-blue-400">(프론트엔드 공개키)</span>
-                </label>
-                <input id="set-toss-client" type="text" placeholder="test_ck_... 또는 live_ck_..."
-                    class="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-blue-500 transition font-mono" />
-                <p class="text-xs text-gray-600">토스페이먼츠 → 내 상점 → API 키 → Client Key</p>
-            </div>
-            <div class="space-y-2">
-                <label class="text-xs text-gray-500 block font-bold">
-                    Secret Key <span class="text-red-400">(서버사이드 비밀키)</span>
-                </label>
-                <input id="set-toss-secret" type="password" placeholder="test_sk_... 또는 live_sk_..."
-                    class="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-blue-500 transition font-mono" />
-                <p class="text-xs text-gray-600">토스페이먼츠 → 내 상점 → API 키 → Secret Key</p>
-            </div>
-        </div>
-
-        <div class="p-4 bg-white/3 rounded-xl text-sm space-y-2 text-gray-400">
-            <p class="font-bold text-gray-300 text-xs uppercase tracking-wider mb-2">결제 흐름</p>
-            <div class="grid md:grid-cols-3 gap-3 text-xs">
-                <div class="p-3 bg-white/5 rounded-lg">
-                    <div class="text-green-400 font-bold mb-1">무료 플랜</div>
-                    <div>별도 결제 없음<br>즉시 활성화</div>
-                </div>
-                <div class="p-3 bg-white/5 rounded-lg">
-                    <div class="text-blue-400 font-bold mb-1">스타터 플랜</div>
-                    <div>토스 페이먼츠 결제<br>호스팅 단위 적용</div>
-                </div>
-                <div class="p-3 bg-white/5 rounded-lg">
-                    <div class="text-purple-400 font-bold mb-1">프로 플랜</div>
-                    <div>토스 페이먼츠 결제<br>호스팅 단위 적용</div>
-                </div>
-            </div>
-            <p class="text-xs text-gray-600 mt-2">
-                <i class="fas fa-info-circle mr-1"></i>
-                요금제는 계정 단위가 아닌 <strong class="text-gray-400">호스팅 단위</strong>로 적용됩니다.
-                사용자는 <a href="/pricing" class="text-blue-400 hover:underline">요금제 페이지</a>에서 결제를 진행합니다.
-            </p>
-        </div>
-
-        <div id="toss-save-alert" class="hidden p-3 rounded-xl text-sm"></div>
-        <button onclick="saveTossSettings()"
-            class="bg-green-700 hover:bg-green-600 text-white font-bold px-6 py-2.5 rounded-xl transition flex items-center gap-2">
-            <i class="fas fa-save"></i> 결제 설정 저장
-        </button>
-    </div>
-
-    <!-- ── Google Drive 서비스 계정 설정 ── -->
-    <div class="p-6 bg-[#111] rounded-2xl border border-white/5 space-y-5">
-        <div class="flex items-center justify-between flex-wrap gap-2">
-            <h2 class="font-bold flex items-center gap-2">
-                <i class="fab fa-google-drive text-yellow-400 text-lg"></i>
-                Google Drive 스토리지 (서비스 계정)
-            </h2>
-            <span class="text-xs text-gray-500">사용자별 개인 폴더 자동 분리</span>
-        </div>
-
-        <!-- 안내 -->
-        <div class="p-4 bg-blue-950/30 border border-blue-500/25 rounded-xl space-y-3 text-sm">
-            <p class="font-bold text-blue-300 flex items-center gap-2"><i class="fas fa-book-open"></i> 서비스 계정 설정 가이드</p>
-            <ol class="text-blue-200/75 text-xs space-y-2 list-decimal ml-4">
-                <li><a href="https://console.cloud.google.com/" target="_blank" class="text-blue-400 hover:underline font-bold">Google Cloud Console</a>에서 프로젝트를 선택합니다.</li>
-                <li><strong>API 및 서비스 → 라이브러리</strong>에서 <em>Google Drive API</em>를 사용 설정합니다.</li>
-                <li><strong>IAM 및 관리자 → 서비스 계정</strong>에서 서비스 계정을 생성합니다.</li>
-                <li>서비스 계정 → <strong>키 → 키 추가 → JSON</strong>으로 키 파일을 다운로드합니다.</li>
-                <li>다운로드한 JSON 파일 전체 내용을 아래에 붙여넣습니다.</li>
-                <li>(선택) 특정 드라이브 폴더를 루트로 지정하려면 폴더 ID를 입력합니다. 비워두면 내 드라이브 루트에 자동 생성됩니다.</li>
-            </ol>
-            <div class="p-3 bg-green-900/20 border border-green-500/20 rounded-xl text-xs text-green-300">
-                <i class="fas fa-info-circle mr-1"></i>
-                사용자는 별도 로그인 없이 <strong>cloudpress-storage/{user_id}/</strong> 폴더에 자동으로 파일이 저장됩니다.
-            </div>
-        </div>
-
-        <!-- 서비스 계정 JSON -->
-        <div class="space-y-2">
-            <label class="text-xs text-gray-500 block font-bold">서비스 계정 JSON 키</label>
-            <textarea id="set-gdrive-sa-json" rows="6" placeholder='{"type":"service_account","project_id":"...","private_key_id":"...","private_key":"-----BEGIN PRIVATE KEY-----\n...","client_email":"...@....iam.gserviceaccount.com",...}'
-                class="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-xs font-mono focus:outline-none focus:border-yellow-500 transition resize-none"></textarea>
-            <p class="text-xs text-gray-600">Google Cloud Console에서 다운로드한 서비스 계정 JSON 파일 전체 내용</p>
-        </div>
-
-        <!-- 루트 폴더 ID (선택) -->
-        <div class="space-y-2">
-            <label class="text-xs text-gray-500 block font-bold">루트 폴더 ID <span class="font-normal text-gray-600">(선택 — 비우면 내 드라이브 루트)</span></label>
-            <input id="set-gdrive-root-folder" type="text" placeholder="1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs"
-                class="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-sm font-mono focus:outline-none focus:border-yellow-500 transition" />
-            <p class="text-xs text-gray-600">구글 드라이브 폴더 URL의 마지막 경로 값 (예: drive.google.com/drive/folders/<strong>여기</strong>)</p>
-        </div>
-
-        <!-- 연결 상태 -->
-        <div id="gdrive-status-bar" class="hidden p-3 bg-white/5 border border-white/10 rounded-xl text-xs text-gray-400 flex items-center gap-2">
-            <i class="fas fa-circle text-gray-600" id="gdrive-status-ico"></i>
-            <span id="gdrive-status-text">연결 상태 확인 중...</span>
-        </div>
-
-        <div id="gdrive-save-alert" class="hidden p-3 rounded-xl text-sm"></div>
-        <div class="flex flex-wrap gap-3">
-            <button onclick="saveGdriveSettings()"
-                class="bg-yellow-600 hover:bg-yellow-500 text-white font-bold px-6 py-2.5 rounded-xl transition flex items-center gap-2">
-                <i class="fas fa-save"></i> 설정 저장
-            </button>
-            <button onclick="testGdriveConnection()"
-                class="bg-white/10 hover:bg-white/20 text-white font-bold px-6 py-2.5 rounded-xl transition flex items-center gap-2">
-                <i class="fas fa-plug text-yellow-400"></i> 연결 테스트
-            </button>
-        </div>
-    </div>
-
-    <!-- ── GitHub 사용 가이드 ── -->
-    <div class="p-6 bg-[#111] rounded-2xl border border-white/5 space-y-4">
-        <h2 class="font-bold flex items-center gap-2"><i class="fab fa-github text-white"></i> GitHub 스토리지 구조</h2>
-        <div class="grid md:grid-cols-2 gap-4 text-sm">
-            <div class="p-4 bg-white/5 rounded-xl space-y-2">
-                <p class="font-bold text-blue-300"><i class="fas fa-folder mr-2"></i>저장소 구조</p>
-                <div class="font-mono text-xs text-gray-400 space-y-1">
-                    <p>cloudpress-site-{8자ID}/</p>
-                    <p>&nbsp;&nbsp;├── uploads/&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;← 미디어 파일</p>
-                    <p>&nbsp;&nbsp;├── wp-content/themes/&nbsp;← 테마</p>
-                    <p>&nbsp;&nbsp;├── wp-content/plugins/ ← 플러그인</p>
-                    <p>&nbsp;&nbsp;├── wp-core/&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;← WP 코어 파일</p>
-                    <p>&nbsp;&nbsp;└── README.md</p>
-                </div>
-            </div>
-            <div class="p-4 bg-white/5 rounded-xl space-y-2">
-                <p class="font-bold text-green-300"><i class="fas fa-shield-alt mr-2"></i>보안 & 성능</p>
-                <ul class="text-xs text-gray-400 space-y-1.5">
-                    <li>• Private repository로 자동 생성</li>
-                    <li>• 여러 토큰으로 API rate limit 자동 분산</li>
-                    <li>• 대용량 파일은 청크 분할 업로드</li>
-                    <li>• Cloudflare Worker에서 GitHub Raw로 직접 서빙</li>
-                    <li>• 호스팅 삭제 시 repo는 보존 (데이터 보호)</li>
-                </ul>
-            </div>
-        </div>
-        <div class="p-3 bg-blue-900/20 border border-blue-500/20 rounded-xl text-xs text-blue-300">
-            <i class="fas fa-info-circle mr-2"></i>
-            GitHub Free 계획은 Private repo 용량 제한 없음. Actions 분당 500MB 전송 제한.
-            대용량 사이트는 여러 토큰을 추가하여 분산하세요.
-        </div>
-    </div>
-
-    <!-- ── Gemini AI 챗봇 설정 ── -->
-    <div class="p-6 bg-[#111] rounded-2xl border border-white/5 space-y-5">
-        <div class="flex items-center justify-between">
-            <h2 class="font-bold flex items-center gap-2">
-                <span class="text-purple-400 text-lg">✦</span>
-                Gemini AI 챗봇 설정
-            </h2>
-            <span id="gemini-count-badge" class="text-xs bg-white/10 text-gray-300 px-3 py-1 rounded-full">로딩 중...</span>
-        </div>
-        <p class="text-sm text-gray-400">
-            챗봇이 스크립트로 처리하지 못하는 문의를 Cloudflare AI → Gemini 순으로 처리합니다.<br>
-            여러 API 키를 추가하면 자동으로 부하를 분산합니다. <span class="text-purple-400">API 키는 무제한으로 추가 가능합니다.</span>
-        </p>
-
-        <!-- 모델 설정 -->
-        <div class="p-4 bg-black/30 rounded-xl space-y-3">
-            <div class="text-xs text-gray-500 font-bold uppercase tracking-wider">사용 모델 (텍스트로 직접 입력)</div>
-            <div class="flex gap-3">
-                <input id="gemini-model-input" type="text"
-                    placeholder="gemini-2.5-flash-lite-preview-06-17"
-                    class="flex-1 bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-sm font-mono focus:outline-none focus:border-purple-500 transition" />
-                <button onclick="saveGeminiModel()"
-                    class="bg-purple-600 hover:bg-purple-500 text-white font-bold px-5 py-2.5 rounded-xl transition text-sm">
-                    저장
-                </button>
-            </div>
-            <p class="text-xs text-gray-600">기본값: <code class="bg-white/10 px-1 rounded">gemini-2.5-flash-lite-preview-06-17</code> — 직접 모델명을 입력하세요.</p>
-            <div id="gemini-model-alert" class="hidden p-3 rounded-xl text-sm"></div>
-        </div>
-
-        <!-- API 키 추가 -->
-        <div class="p-4 bg-black/30 rounded-xl space-y-3">
-            <div class="text-xs text-gray-500 font-bold uppercase tracking-wider">새 API 키 추가</div>
-            <div class="flex flex-col md:flex-row gap-3">
-                <div class="flex-1">
-                    <label class="text-xs text-gray-500 mb-1 block">Gemini API Key</label>
-                    <input id="gemini-key-input" type="password"
-                        placeholder="AIzaSy..."
-                        class="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-sm font-mono focus:outline-none focus:border-purple-500 transition"
-                        autocomplete="off" />
-                    <p class="text-xs text-gray-600 mt-1">
-                        <a href="https://aistudio.google.com/apikey" target="_blank" class="text-purple-400 hover:underline">
-                            <i class="fas fa-external-link-alt mr-1"></i>Google AI Studio
-                        </a>에서 무료 발급 가능합니다.
-                    </p>
-                </div>
-                <div class="md:w-40">
-                    <label class="text-xs text-gray-500 mb-1 block">레이블 (선택)</label>
-                    <input id="gemini-key-label" type="text"
-                        placeholder="API 키 1"
-                        class="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-purple-500 transition" />
-                </div>
-            </div>
-            <div id="gemini-add-alert" class="hidden p-3 rounded-xl text-sm"></div>
-            <button onclick="addGeminiKey()"
-                class="bg-purple-600 hover:bg-purple-500 text-white font-bold px-6 py-2.5 rounded-xl transition flex items-center gap-2">
-                <i class="fas fa-plus"></i>
-                API 추가
-            </button>
-        </div>
-
-        <!-- 등록된 키 목록 -->
-        <div>
-            <div class="text-xs text-gray-500 font-bold uppercase tracking-wider mb-3">등록된 API 키</div>
-            <div id="gemini-key-list" class="space-y-2">
-                <div class="text-center text-gray-600 py-4 text-sm">로딩 중...</div>
-            </div>
-        </div>
-
-        <div class="p-3 bg-purple-900/20 border border-purple-500/20 rounded-xl text-xs text-purple-300">
-            <i class="fas fa-info-circle mr-2"></i>
-            Gemini 2.5 Flash Lite는 분당 30 요청 무료 제공. 여러 키 추가 시 자동 분산됩니다.<br>
-            챗봇 처리 순서: <strong>정해진 스크립트</strong> → <strong>Cloudflare AI</strong> → <strong>Gemini (폴백)</strong>
-        </div>
-    </div>
-
-    <!-- ── 내장 플러그인 관리 ── -->
-    <div class="section-card space-y-4">
-        <div class="flex items-center gap-3 mb-2">
-            <i class="fas fa-puzzle-piece text-green-400 text-lg"></i>
-            <div>
-                <div class="font-bold text-white">내장 플러그인 관리</div>
-                <div class="text-xs text-gray-500">호스팅 생성 시 자동으로 설치되는 플러그인</div>
-            </div>
-        </div>
-
-        <!-- aibp-pro (내장) -->
-        <div class="bg-white/5 border border-white/10 rounded-xl p-4">
-            <div class="flex items-center justify-between">
-                <div>
-                    <div class="font-bold text-sm text-white">AIBP Pro <span class="text-xs text-green-400 ml-2">내장됨</span></div>
-                    <div class="text-xs text-gray-500 mt-0.5">AI 블로그 자동 작성 · 이미지 생성 URL: <code class="bg-white/10 px-1 rounded">https://aibp100.jiji15899.workers.dev/</code></div>
-                </div>
-                <span class="text-xs bg-green-500/20 text-green-400 border border-green-500/30 px-2 py-1 rounded-full">✅ 준비됨</span>
-            </div>
-        </div>
-
-        <!-- php-runner.js (KV 업로드) -->
-        <div class="bg-white/5 border border-white/10 rounded-xl p-4 space-y-3">
-            <div class="flex items-center justify-between">
-                <div>
-                    <div class="font-bold text-sm text-white">PHP Runner Worker</div>
-                    <div class="text-xs text-gray-500 mt-0.5">사이트 프로비저닝 시 배포되는 WordPress PHP 실행 Worker 소스</div>
-                </div>
-                <span id="php-runner-status-badge" class="text-xs px-2 py-1 rounded-full border">확인 중...</span>
-            </div>
-            <div class="text-xs text-gray-500 font-bold uppercase tracking-wider mb-1">php-runner.js 업로드</div>
-            <div class="flex items-center gap-3">
-                <input type="file" id="php-runner-input" accept=".js" class="hidden">
-                <label for="php-runner-input"
-                    class="cursor-pointer border border-white/20 px-3 py-2 rounded-xl text-xs hover:bg-white/5 transition flex items-center gap-2">
-                    <i class="fas fa-folder-open"></i> <span id="php-runner-file-label">php-runner.js 선택</span>
-                </label>
-                <button onclick="uploadPhpRunner()"
-                    id="php-runner-upload-btn"
-                    class="bg-blue-700 hover:bg-blue-600 transition px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2">
-                    <i class="fas fa-upload"></i> KV 업로드
-                </button>
-            </div>
-            <div id="php-runner-alert" class="hidden p-3 rounded-xl text-sm"></div>
-        </div>
-
-        <!-- wp-rocket (KV 업로드) -->
-        <div class="bg-white/5 border border-white/10 rounded-xl p-4 space-y-3">
-            <div class="flex items-center justify-between">
-                <div>
-                    <div class="font-bold text-sm text-white">WP Rocket</div>
-                    <div class="text-xs text-gray-500 mt-0.5">캐싱 & 성능 최적화 플러그인 (zip 업로드 필요)</div>
-                </div>
-                <span id="wprocket-status-badge" class="text-xs px-2 py-1 rounded-full border">확인 중...</span>
-            </div>
-            <div class="text-xs text-gray-500 font-bold uppercase tracking-wider mb-1">WP Rocket zip 업로드</div>
-            <div class="flex items-center gap-3">
-                <input type="file" id="wprocket-zip-input" accept=".zip" class="hidden">
-                <label for="wprocket-zip-input"
-                    class="cursor-pointer border border-white/20 px-3 py-2 rounded-xl text-xs hover:bg-white/5 transition flex items-center gap-2">
-                    <i class="fas fa-folder-open"></i> <span id="wprocket-file-label">wp-rocket.zip 선택</span>
-                </label>
-                <button onclick="uploadWpRocket()"
-                    id="wprocket-upload-btn"
-                    class="bg-green-700 hover:bg-green-600 transition px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2">
-                    <i class="fas fa-upload"></i> 업로드
-                </button>
-            </div>
-            <div id="wprocket-alert" class="hidden p-3 rounded-xl text-sm"></div>
-        </div>
-    </div>
-</main>
-
-<script src="/src/auth-frontend.js"></script>
-<script>
-const HEADERS = () => ({ Authorization: `Bearer ${localStorage.getItem('admin_token')}`, 'Content-Type': 'application/json' });
-
-// ── GitHub 토큰 목록 로드 ─────────────────────────────────────────────────
-async function loadGithubTokens() {
-    try {
-        const res  = await fetch('/api/github-storage?action=tokens', { headers: HEADERS()});
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.error || '오류');
-
-        const tokens  = data.tokens || [];
-        const el      = document.getElementById('github-token-list');
-        const badge   = document.getElementById('token-count-badge');
-        const dbBadge = document.getElementById('db-gh-tokens');
-
-        badge.textContent   = `${tokens.length}개 등록됨`;
-        dbBadge.textContent = tokens.length;
-
-        if (!tokens.length) {
-            el.innerHTML = `
-                <div class="p-4 bg-yellow-900/20 border border-yellow-500/20 rounded-xl text-sm text-yellow-300 flex items-start gap-3">
-                    <i class="fas fa-exclamation-triangle mt-0.5"></i>
-                    <div>
-                        <p class="font-bold">GitHub 토큰이 없습니다</p>
-                        <p class="text-xs mt-1 text-yellow-400">토큰을 추가하지 않으면 사이트 생성 시 GitHub 저장소를 자동으로 생성할 수 없습니다.</p>
-                    </div>
-                </div>`;
-            return;
-        }
-
-        el.innerHTML = tokens.map(t => `
-            <div class="flex items-center gap-3 p-3 bg-white/5 rounded-xl hover:bg-white/8 transition group">
-                <div class="w-8 h-8 rounded-full bg-white/10 flex items-center justify-center flex-shrink-0">
-                    <i class="fab fa-github text-sm"></i>
-                </div>
-                <div class="flex-1 min-w-0">
-                    <div class="flex items-center gap-2">
-                        <span class="font-medium text-sm">${escHtml(t.label || '토큰')}</span>
-                        ${t.active ? '<span class="text-xs bg-green-900/40 text-green-400 px-2 py-0.5 rounded-full">활성</span>' : '<span class="text-xs bg-gray-700 text-gray-400 px-2 py-0.5 rounded-full">비활성</span>'}
-                    </div>
-                    <div class="font-mono text-xs text-gray-500 mt-0.5">${escHtml(t.masked_token || '****')}</div>
-                    <div class="text-xs text-gray-600 mt-0.5">
-                        추가: ${t.created_at ? new Date(t.created_at).toLocaleDateString('ko-KR') : '-'}
-                        ${t.last_used_at ? ` · 마지막 사용: ${new Date(t.last_used_at).toLocaleDateString('ko-KR')}` : ''}
-                    </div>
-                </div>
-                <button onclick="removeGithubToken(${t.id}, '${escHtml(t.label || '이 토큰')}')"
-                    class="text-red-400 hover:text-red-300 p-2 rounded-lg hover:bg-red-900/20 transition opacity-0 group-hover:opacity-100">
-                    <i class="fas fa-trash text-xs"></i>
-                </button>
-            </div>
-        `).join('');
-    } catch (e) {
-        document.getElementById('github-token-list').innerHTML =
-            `<div class="text-sm text-red-400 p-3"><i class="fas fa-exclamation-circle mr-2"></i>${escHtml(e.message)}</div>`;
-    }
-}
-
-// ── GitHub 토큰 추가 ────────────────────────────────────────────────────────
-async function addGithubToken() {
-    const token  = document.getElementById('gh-token-input').value.trim();
-    const label  = document.getElementById('gh-token-label').value.trim();
-    const alertEl = document.getElementById('gh-add-alert');
-    const btn    = document.querySelector('button[onclick="addGithubToken()"]');
-
-    alertEl.className = 'hidden p-3 rounded-xl text-sm';
-
-    if (!token) {
-        showAlert(alertEl, 'GitHub Personal Access Token을 입력해주세요.', 'error');
-        return;
-    }
-    if (!token.startsWith('ghp_') && !token.startsWith('github_pat_') && !token.startsWith('gho_')) {
-        showAlert(alertEl, '올바른 GitHub 토큰 형식이 아닙니다. (ghp_ 또는 github_pat_ 로 시작해야 합니다)', 'warning');
-    }
-
-    btn.disabled = true;
-    btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>검증 중...';
-
-    try {
-        const res  = await fetch('/api/github-storage', {
-            method:  'POST',
-            headers: HEADERS(),
-            body:    JSON.stringify({ token, label }),
-        });
-        const data = await res.json();
-
-        if (!res.ok) throw new Error(data.error || '오류');
-
-        showAlert(alertEl, data.message, 'success');
-        document.getElementById('gh-token-input').value = '';
-        document.getElementById('gh-token-label').value = '';
-        await loadGithubTokens();
-    } catch (e) {
-        showAlert(alertEl, e.message, 'error');
-    } finally {
-        btn.disabled = false;
-        btn.innerHTML = '<i class="fas fa-plus mr-2"></i>API 추가';
-    }
-}
-
-// ── GitHub 토큰 삭제 ────────────────────────────────────────────────────────
-async function removeGithubToken(id, label) {
-    if (!confirm(`"${label}" 토큰을 삭제하시겠습니까?\n이 토큰을 사용하는 기존 사이트에는 영향이 없습니다.`)) return;
-    try {
-        const res  = await fetch(`/api/github-storage?id=${id}`, { method: 'DELETE', headers: HEADERS()});
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.error || '오류');
-        await loadGithubTokens();
-    } catch (e) {
-        alert('삭제 오류: ' + e.message);
-    }
-}
-
-// ── DB 통계 로드 ─────────────────────────────────────────────────────────────
-async function loadStats() {
-    try {
-        const res  = await fetch('/api/admin/stats', { headers: HEADERS()});
-        const data = await res.json();
-        if (data.stats) {
-            document.getElementById('db-users').textContent = data.stats.total_users ?? '-';
-            document.getElementById('db-sites').textContent = data.stats.total_sites ?? '-';
-        }
-    } catch {}
-}
-
-// ── 유틸 ────────────────────────────────────────────────────────────────────
-function showAlert(el, msg, type) {
-    const colors = {
-        success: 'bg-green-900/30 border border-green-500/30 text-green-300',
-        error:   'bg-red-900/30 border border-red-500/30 text-red-300',
-        warning: 'bg-yellow-900/30 border border-yellow-500/30 text-yellow-300',
-    };
-    el.className = `p-3 rounded-xl text-sm ${colors[type] || colors.error}`;
-    el.textContent = msg;
-}
-
-function escHtml(s) {
-    return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-}
-
-// ── 엔터키 지원 ────────────────────────────────────────────────────────────
-document.getElementById('gh-token-input').addEventListener('keydown', e => {
-    if (e.key === 'Enter') addGithubToken();
-});
-
-// ── 관리자 설정 로드 ─────────────────────────────────────────────────────────
-async function loadAdminSettings() {
-    try {
-        const res  = await fetch('/api/admin/settings', { headers: HEADERS()});
-        const data = await res.json();
-        if (!res.ok || !data.success) return;
-        const s = data.settings || {};
-        if (s.supabase_url)         document.getElementById('set-supabase-url').value    = s.supabase_url;
-        if (s.supabase_service_key) document.getElementById('set-supabase-key').value    = s.supabase_service_key;
-        if (s.smtp_from)            document.getElementById('set-smtp-from').value       = s.smtp_from;
-        if (s.platform_domain)      document.getElementById('set-platform-domain').value = s.platform_domain;
-        if (s.toss_client_key)      document.getElementById('set-toss-client').value     = s.toss_client_key;
-        if (s.toss_secret_key)      document.getElementById('set-toss-secret').value     = s.toss_secret_key;
-    } catch {}
-}
-
-// ── 이메일 설정 저장 ─────────────────────────────────────────────────────────
-async function saveEmailSettings() {
-    const alertEl = document.getElementById('email-save-alert');
-    const payload = {
-        supabase_url:         document.getElementById('set-supabase-url').value.trim(),
-        supabase_service_key: document.getElementById('set-supabase-key').value.trim(),
-        smtp_from:            document.getElementById('set-smtp-from').value.trim(),
-        platform_domain:      document.getElementById('set-platform-domain').value.trim(),
-    };
-    try {
-        const res  = await fetch('/api/admin/settings', {
-            method: 'PUT', headers: HEADERS(),
-            body: JSON.stringify(payload),
-        });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.error || '오류');
-        showAlert(alertEl, data.message, 'success');
-    } catch (e) {
-        showAlert(alertEl, e.message, 'error');
-    }
-}
-
-// ── 토스 페이먼츠 설정 저장 ─────────────────────────────────────────────────
-async function saveTossSettings() {
-    const alertEl = document.getElementById('toss-save-alert');
-    const payload = {
-        toss_client_key: document.getElementById('set-toss-client').value.trim(),
-        toss_secret_key: document.getElementById('set-toss-secret').value.trim(),
-    };
-    if (!payload.toss_client_key && !payload.toss_secret_key) {
-        showAlert(alertEl, '저장할 값을 입력해주세요.', 'warning'); return;
-    }
-    try {
-        const res  = await fetch('/api/admin/settings', {
-            method: 'PUT', headers: HEADERS(),
-            body: JSON.stringify(payload),
-        });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.error || '오류');
-        showAlert(alertEl, data.message, 'success');
-    } catch (e) {
-        showAlert(alertEl, e.message, 'error');
-    }
-}
-
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// CMS 설정
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-let _selectedCmsZipFile = null;
-
-function onCmsZipSelected(input) {
-    const file = input.files?.[0];
-    if (!file) return;
-    if (!file.name.endsWith('.zip')) {
-        showAlert(document.getElementById('cms-zip-alert'), 'zip 파일만 업로드 가능합니다.', 'error');
-        return;
-    }
-    if (file.size > 50 * 1024 * 1024) {
-        showAlert(document.getElementById('cms-zip-alert'), '파일 크기가 50MB를 초과합니다.', 'error');
-        return;
-    }
-    _selectedCmsZipFile = file;
-    document.getElementById('cms-zip-label').textContent = `${file.name} (${(file.size / 1024 / 1024).toFixed(2)} MB)`;
-    document.getElementById('cms-zip-upload-btn').disabled = false;
-    document.getElementById('cms-zip-alert').className = 'hidden';
-}
-
-function handleCmsZipDrop(event) {
-    event.preventDefault();
-    document.getElementById('cms-zip-drop-area').classList.remove('border-indigo-500', 'bg-indigo-900/10');
-    const file = event.dataTransfer.files?.[0];
-    if (file) {
-        // 가상으로 input에 파일 세팅
-        const dt = new DataTransfer();
-        dt.items.add(file);
-        const input = document.getElementById('cms-zip-input');
-        input.files = dt.files;
-        onCmsZipSelected(input);
-    }
-}
-
-async function uploadCmsZip() {
-    if (!_selectedCmsZipFile) return;
-    const alertEl = document.getElementById('cms-zip-alert');
-    const btn = document.getElementById('cms-zip-upload-btn');
-    btn.disabled = true;
-    btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>업로드 중...';
-
-    try {
-        // 파일을 base64로 변환
-        const base64 = await new Promise((resolve, reject) => {
-            const reader = new FileReader();
-            reader.onload = () => resolve(reader.result.split(',')[1]);
-            reader.onerror = reject;
-            reader.readAsDataURL(_selectedCmsZipFile);
-        });
-
-        const res = await fetch('/api/admin/cms-settings', {
-            method: 'POST',
-            headers: HEADERS(),
-            body: JSON.stringify({
-                action: 'upload_zip',
-                filename: _selectedCmsZipFile.name,
-                size: _selectedCmsZipFile.size,
-                data: base64,
-            }),
-        });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.error || '업로드 실패');
-        showAlert(alertEl, `✅ CMS zip 업로드 완료: ${_selectedCmsZipFile.name}`, 'success');
-        _selectedCmsZipFile = null;
-        document.getElementById('cms-zip-input').value = '';
-        btn.disabled = true;
-        btn.innerHTML = '<i class="fas fa-upload mr-2"></i>CMS zip 업로드';
-        await loadCmsSettings();
-    } catch (e) {
-        showAlert(alertEl, e.message, 'error');
-        btn.disabled = false;
-        btn.innerHTML = '<i class="fas fa-upload mr-2"></i>CMS zip 업로드';
-    }
-}
-
-async function saveCmsSettings() {
-    const repo  = document.getElementById('cms-github-repo').value.trim();
-    const token = document.getElementById('cms-github-token').value.trim();
-    const alertEl = document.getElementById('cms-repo-alert');
-
-    if (!repo && !token) {
-        showAlert(alertEl, '레포 또는 토큰을 입력해주세요.', 'warning'); return;
-    }
-    if (repo && !repo.includes('/')) {
-        showAlert(alertEl, '레포 형식이 올바르지 않습니다. (예: owner/repo)', 'error'); return;
-    }
-
-    try {
-        const payload = { action: 'save_repo' };
-        if (repo)  payload.cms_github_repo  = repo;
-        if (token) payload.cms_github_token = token;
-
-        const res = await fetch('/api/admin/cms-settings', {
-            method: 'POST',
-            headers: HEADERS(),
-            body: JSON.stringify(payload),
-        });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.error || '저장 실패');
-        showAlert(alertEl, '✅ CMS 설정이 저장되었습니다.', 'success');
-        if (token) document.getElementById('cms-github-token').value = '';
-        await loadCmsSettings();
-    } catch (e) {
-        showAlert(alertEl, e.message, 'error');
-    }
-}
-
-async function loadCmsSettings() {
-    try {
-        const res  = await fetch('/api/admin/cms-settings', { headers: HEADERS()});
-        const data = await res.json();
-        if (!res.ok) return;
-
-        const badge = document.getElementById('cms-status-badge');
-        if (data.cms_github_repo && data.has_zip) {
-            badge.textContent = '설정 완료';
-            badge.className = 'text-xs bg-green-900/40 text-green-400 px-3 py-1 rounded-full';
-        } else if (data.cms_github_repo || data.has_zip) {
-            badge.textContent = '부분 설정';
-            badge.className = 'text-xs bg-yellow-900/40 text-yellow-400 px-3 py-1 rounded-full';
-        } else {
-            badge.textContent = '미설정';
-            badge.className = 'text-xs bg-white/10 text-gray-300 px-3 py-1 rounded-full';
-        }
-
-        if (data.cms_github_repo) {
-            document.getElementById('cms-github-repo').value = data.cms_github_repo;
-            document.getElementById('cms-info-repo').textContent = data.cms_github_repo;
-        }
-        if (data.zip_filename) {
-            document.getElementById('cms-info-name').textContent = data.zip_filename;
-            document.getElementById('cms-info-size').textContent =
-                data.zip_size ? `${(data.zip_size / 1024 / 1024).toFixed(2)} MB` : '';
-            document.getElementById('cms-zip-label').textContent =
-                `업로드됨: ${data.zip_filename}`;
-        }
-        if (data.last_deploy) {
-            document.getElementById('cms-info-deploy').textContent =
-                new Date(data.last_deploy).toLocaleString('ko-KR');
-        }
-        if (data.updated_at) {
-            document.getElementById('cms-info-updated').textContent =
-                new Date(data.updated_at).toLocaleDateString('ko-KR');
-        }
-    } catch (e) {
-        console.warn('[CMS] 설정 로드 실패:', e.message);
-    }
-}
-
-// ── 초기화 ──────────────────────────────────────────────────────────────────
-loadStats();
-loadGithubTokens();
-loadAdminSettings();
-loadGeminiSettings();
-loadCmsSettings();
-
-// ── Gemini 설정 ─────────────────────────────────────────────────────────────
-async function loadGeminiSettings() {
-    try {
-        const res  = await fetch('/api/admin/ai-settings', { headers: HEADERS()});
-        const data = await res.json();
-        document.getElementById('gemini-count-badge').textContent = `키 ${data.count || 0}개 등록됨`;
-        if (data.model) document.getElementById('gemini-model-input').value = data.model;
-        renderGeminiKeys(data.keys || []);
-    } catch (e) {
-        document.getElementById('gemini-key-list').innerHTML = '<div class="text-red-400 text-sm">로드 실패</div>';
-    }
-}
-
-function renderGeminiKeys(keys) {
-    const el = document.getElementById('gemini-key-list');
-    if (!keys.length) {
-        el.innerHTML = '<div class="text-center text-gray-600 py-4 text-sm">등록된 API 키가 없습니다.</div>';
-        return;
-    }
-    el.innerHTML = keys.map(k => `
-        <div class="flex items-center gap-3 p-3 bg-black/20 rounded-xl border border-white/5">
-            <div class="w-8 h-8 rounded-lg bg-purple-900/30 border border-purple-500/20 flex items-center justify-center flex-shrink-0">
-                <i class="fas fa-key text-purple-400 text-xs"></i>
-            </div>
-            <div class="flex-1 min-w-0">
-                <div class="text-sm font-bold truncate">${escHtml(k.label || '(레이블 없음)')}</div>
-                <div class="text-xs text-gray-500 font-mono">${escHtml(k.api_key_masked)}</div>
-            </div>
-            <div class="text-xs text-gray-600">${k.created_at ? new Date(k.created_at).toLocaleDateString('ko-KR') : ''}</div>
-            <button onclick="removeGeminiKey(${k.id}, '${escHtml(k.label || '')}')"
-                class="text-red-400 hover:text-red-300 transition p-1.5 hover:bg-red-900/20 rounded-lg">
-                <i class="fas fa-trash-alt text-xs"></i>
-            </button>
-        </div>
-    `).join('');
-}
-
-async function addGeminiKey() {
-    const key   = document.getElementById('gemini-key-input').value.trim();
-    const label = document.getElementById('gemini-key-label').value.trim();
-    const alertEl = document.getElementById('gemini-add-alert');
-    if (!key) { showAlert(alertEl, 'API 키를 입력해주세요.', 'error'); return; }
-    const btn = document.querySelector('button[onclick="addGeminiKey()"]');
-    btn.disabled = true;
-    btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>추가 중...';
-    try {
-        const res  = await fetch('/api/admin/ai-settings', {
-            method: 'POST', headers: HEADERS(),
-            body: JSON.stringify({ api_key: key, label }),
-        });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.error || '오류');
-        showAlert(alertEl, data.message, 'success');
-        document.getElementById('gemini-key-input').value = '';
-        document.getElementById('gemini-key-label').value = '';
-        await loadGeminiSettings();
-    } catch (e) {
-        showAlert(alertEl, e.message, 'error');
-    } finally {
-        btn.disabled = false;
-        btn.innerHTML = '<i class="fas fa-plus mr-2"></i>API 추가';
-    }
-}
-
-async function removeGeminiKey(id, label) {
-    if (!confirm(`"${label || 'API 키'}"를 삭제하시겠습니까?`)) return;
-    try {
-        const res  = await fetch(`/api/admin/ai-settings?id=${id}`, { method: 'DELETE', headers: HEADERS()});
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.error || '오류');
-        await loadGeminiSettings();
-    } catch (e) { alert('삭제 오류: ' + e.message); }
-}
-
-async function saveGeminiModel() {
-    const model = document.getElementById('gemini-model-input').value.trim();
-    const alertEl = document.getElementById('gemini-model-alert');
-    if (!model) { showAlert(alertEl, '모델명을 입력해주세요.', 'error'); return; }
-    try {
-        const res  = await fetch('/api/admin/ai-settings', {
-            method: 'PUT', headers: HEADERS(),
-            body: JSON.stringify({ model }),
-        });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.error || '오류');
-        showAlert(alertEl, data.message + ` (${data.model})`, 'success');
-    } catch (e) { showAlert(alertEl, e.message, 'error'); }
-}
-
-// ── WP Rocket 업로드 ────────────────────────────────────────────────────
-document.getElementById('php-runner-input')?.addEventListener('change', function() {
-    const file = this.files[0];
-    if (file) document.getElementById('php-runner-file-label').textContent = file.name;
-});
-
-async function uploadPhpRunner() {
-    const input   = document.getElementById('php-runner-input');
-    const btn     = document.getElementById('php-runner-upload-btn');
-    const alertEl = document.getElementById('php-runner-alert');
-    const file    = input?.files[0];
-
-    if (!file) { showAlert(alertEl, 'php-runner.js 파일을 선택하세요.', 'error'); return; }
-    if (!file.name.endsWith('.js')) { showAlert(alertEl, '.js 파일만 업로드 가능합니다.', 'error'); return; }
-
-    btn.disabled = true;
-    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 업로드 중...';
-    showAlert(alertEl, 'KV에 업로드 중...', 'info');
-
-    try {
-        const source = await new Promise((res, rej) => {
-            const r = new FileReader();
-            r.onload  = () => res(r.result);
-            r.onerror = () => rej(new Error('파일 읽기 실패'));
-            r.readAsText(file);
-        });
-
-        const resp = await fetch('/api/admin/platform-assets', {
-            method: 'POST',
-            headers: HEADERS(),
-            body: JSON.stringify({ php_runner_source: source }),
-        });
-        const data = await resp.json();
-        if (!resp.ok) throw new Error(data.error || '업로드 실패');
-        showAlert(alertEl, `✅ php-runner.js KV 업로드 완료 (${(file.size/1024).toFixed(1)}KB)`, 'success');
-        await loadPhpRunnerStatus();
-    } catch (e) {
-        showAlert(alertEl, e.message, 'error');
-    } finally {
-        btn.disabled = false;
-        btn.innerHTML = '<i class="fas fa-upload"></i> KV 업로드';
-    }
-}
-
-async function loadPhpRunnerStatus() {
-    const badge = document.getElementById('php-runner-status-badge');
-    if (!badge) return;
-    try {
-        const res  = await fetch('/api/admin/platform-assets', { headers: HEADERS() });
-        const data = await res.json();
-        if (data.php_runner_exists) {
-            badge.textContent = '✅ 준비됨';
-            badge.className = 'text-xs bg-green-500/20 text-green-400 border border-green-500/30 px-2 py-1 rounded-full';
-        } else {
-            badge.textContent = '⚠️ 미업로드';
-            badge.className = 'text-xs bg-yellow-500/20 text-yellow-400 border border-yellow-500/30 px-2 py-1 rounded-full';
-        }
-    } catch {
-        badge.textContent = '⚠️ 확인 불가';
-        badge.className = 'text-xs bg-gray-500/20 text-gray-400 border border-gray-500/30 px-2 py-1 rounded-full';
-    }
-}
-loadPhpRunnerStatus();
-
-document.getElementById('wprocket-zip-input')?.addEventListener('change', function() {
-    const file = this.files[0];
-    if (file) {
-        document.getElementById('wprocket-file-label').textContent = file.name;
-    }
-});
-
-async function uploadWpRocket() {
-    const input  = document.getElementById('wprocket-zip-input');
-    const btn    = document.getElementById('wprocket-upload-btn');
-    const alertEl = document.getElementById('wprocket-alert');
-    const file   = input?.files[0];
-
-    if (!file) { showAlert(alertEl, 'zip 파일을 선택하세요.', 'error'); return; }
-    if (!file.name.endsWith('.zip')) { showAlert(alertEl, 'zip 파일만 업로드 가능합니다.', 'error'); return; }
-    if (file.size > 20 * 1024 * 1024) { showAlert(alertEl, '파일 크기가 20MB를 초과합니다.', 'error'); return; }
-
-    btn.disabled = true;
-    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 업로드 중...';
-    showAlert(alertEl, '업로드 중... 파일 크기에 따라 1~2분 소요될 수 있습니다.', 'info');
-
-    try {
-        const b64 = await new Promise((res, rej) => {
-            const r = new FileReader();
-            r.onload  = () => res(r.result.split(',')[1]);
-            r.onerror = () => rej(new Error('파일 읽기 실패'));
-            r.readAsDataURL(file);
-        });
-
-        const resp = await fetch('/api/admin/plugins', {
-            method: 'POST',
-            headers: HEADERS(),
-            body: JSON.stringify({ slug: 'wp-rocket', filename: file.name, size: file.size, data: b64 }),
-        });
-        const data = await resp.json();
-        if (!resp.ok) throw new Error(data.error || '업로드 실패');
-        showAlert(alertEl, `✅ WP Rocket 업로드 완료 (${(file.size/1024/1024).toFixed(1)}MB)`, 'success');
-        await loadPluginStatus();
-    } catch (e) {
-        showAlert(alertEl, e.message, 'error');
-    } finally {
-        btn.disabled = false;
-        btn.innerHTML = '<i class="fas fa-upload"></i> 업로드';
-    }
-}
-
-async function loadPluginStatus() {
-    try {
-        const res  = await fetch('/api/admin/plugins', { headers: HEADERS() });
-        const data = await res.json();
-        if (!res.ok) return;
-        const badge = document.getElementById('wprocket-status-badge');
-        if (!badge) return;
-        const wp = data.plugins?.find(p => p.slug === 'wp-rocket');
-        if (wp?.status === 'ready') {
-            badge.textContent = '✅ 준비됨';
-            badge.className = 'text-xs bg-green-500/20 text-green-400 border border-green-500/30 px-2 py-1 rounded-full';
-        } else {
-            badge.textContent = '⚠️ 미업로드';
-            badge.className = 'text-xs bg-yellow-500/20 text-yellow-400 border border-yellow-500/30 px-2 py-1 rounded-full';
-        }
-    } catch {}
-}
-loadPluginStatus();
-
-let _poolType = 'cpdb';
-function setPoolType(t) {
-  _poolType = t;
-  document.getElementById('pool-tab-cpdb').className = 'px-4 py-2 rounded-lg text-sm font-bold ' + (t === 'cpdb' ? 'bg-violet-600' : 'bg-white/5 text-gray-400');
-  document.getElementById('pool-tab-cp3').className = 'px-4 py-2 rounded-lg text-sm font-bold ' + (t === 'cp3' ? 'bg-green-600' : 'bg-white/5 text-gray-400');
-  loadPoolServers();
-}
-async function loadPoolServers() {
-  const el = document.getElementById('pool-servers-list');
-  const planEl = document.getElementById('pool-dns-plan');
+document.getElementById('toggle-pw').onclick = function() {
+  const pw = document.getElementById('admin_password');
+  const show = pw.type === 'password';
+  pw.type = show ? 'text' : 'password';
+  this.textContent = show ? '숨기기' : '보기';
+};
+document.getElementById('admin_password').oninput = function() {
+  const pw = this.value, el = document.getElementById('pass-strength');
+  if (!pw) { el.textContent=''; return; }
+  let s=0;
+  if(pw.length>=8)s++;if(pw.length>=12)s++;
+  if(/[A-Z]/.test(pw))s++;if(/[0-9]/.test(pw))s++;if(/[^a-zA-Z0-9]/.test(pw))s++;
+  el.innerHTML = s>=5?'<span class="strong">강력함</span>':s>=3?'<span class="good">보통</span>':s>=2?'<span class="weak">약함</span>':'<span class="bad">매우 약함</span>';
+};
+document.getElementById('setup-form').onsubmit = async function(e) {
+  e.preventDefault();
+  const f = e.target;
+  if (!f.weblog_title.value.trim()) { alert('사이트 제목을 입력해 주세요.'); return; }
+  if (!f.user_login.value.trim())   { alert('사용자명을 입력해 주세요.'); return; }
+  if (!f.admin_password.value)      { alert('비밀번호를 입력해 주세요.'); return; }
+  if (!f.admin_email.value.trim())  { alert('이메일 주소를 입력해 주세요.'); return; }
+  document.getElementById('loading-overlay').classList.add('show');
+  document.getElementById('submit-btn').disabled = true;
   try {
-    const res = await fetch('/api/products/admin/servers?type=' + _poolType, { headers: HEADERS() });
-    const data = await res.json();
-    if (!res.ok) { el.textContent = data.error || '로드 실패'; return; }
-    const servers = data.servers || [];
-    el.innerHTML = servers.length ? servers.map(s => `
-      <div class="flex justify-between items-center p-3 bg-black/30 rounded-xl mb-2">
-        <div>
-          <span class="font-bold text-white">${s.name}</span>
-          <span class="text-gray-500 ml-2">${s.github_owner}/${s.github_repo}</span>
-          <span class="text-xs ml-2 px-2 py-0.5 rounded ${s.health_status === 'healthy' ? 'bg-green-900/30 text-green-400' : 'bg-red-900/30 text-red-400'}">${s.health_status}</span>
-          <span class="text-gray-600 text-xs ml-2">weight ${s.weight}</span>
-        </div>
-        <button onclick="deletePoolServer('${s.id}')" class="text-red-400 text-xs hover:underline">삭제</button>
-      </div>`).join('') : '<p class="text-gray-600 py-4">등록된 서버 없음</p>';
-    planEl.textContent = data.dns_plan ? JSON.stringify(data.dns_plan, null, 2) : 'DNS 플랜 없음 — 헬스체크 실행';
-  } catch (e) { el.textContent = e.message; }
-}
-async function addPoolServer() {
-  const repoRaw = document.getElementById('pool-repo').value.trim();
-  let owner = '', repo = repoRaw;
-  if (repoRaw.includes('/')) { [owner, repo] = repoRaw.split('/'); }
-  const res = await fetch('/api/products/admin/servers', {
-    method: 'POST', headers: HEADERS(),
-    body: JSON.stringify({
-      product_type: _poolType,
-      name: document.getElementById('pool-name').value.trim() || repo,
-      github_owner: owner,
-      github_repo: repo,
-      github_token: document.getElementById('pool-token').value.trim(),
-      weight: Number(document.getElementById('pool-weight').value) || 100,
-    }),
-  });
-  const data = await res.json();
-  alert(data.message || data.error || '완료');
-  loadPoolServers();
-}
-async function runPoolHealthCheck() {
-  const res = await fetch('/api/products/admin/health-check', {
-    method: 'POST', headers: HEADERS(),
-    body: JSON.stringify({ product_type: _poolType }),
-  });
-  const data = await res.json();
-  alert(data.success ? 'DNS 플랜이 갱신되었습니다.' : (data.error || '실패'));
-  loadPoolServers();
-}
-async function deletePoolServer(id) {
-  if (!confirm('삭제하시겠습니까?')) return;
-  await fetch('/api/products/admin/servers?id=' + id, { method: 'DELETE', headers: HEADERS() });
-  loadPoolServers();
-}
-loadPoolServers();
-
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// Google Drive 서비스 계정 설정
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-async function loadGdriveSettings() {
-    try {
-        const res  = await fetch('/api/admin/settings?keys=gdrive_service_account_json,gdrive_root_folder_id', { headers: HEADERS() });
-        const data = await res.json();
-        if (!res.ok) return;
-        const s = data.settings || {};
-
-        if (s.gdrive_service_account_json) {
-            // 마스킹된 값이면 placeholder로 표시
-            const el = document.getElementById('set-gdrive-sa-json');
-            if (s.gdrive_service_account_json.includes('••')) {
-                el.placeholder = '✅ 서비스 계정 JSON이 저장되어 있습니다. 변경 시에만 새로 입력하세요.';
-            } else {
-                el.value = s.gdrive_service_account_json;
-            }
-        }
-        if (s.gdrive_root_folder_id) {
-            document.getElementById('set-gdrive-root-folder').value = s.gdrive_root_folder_id;
-        }
-
-        // 연결 상태 표시
-        const bar = document.getElementById('gdrive-status-bar');
-        const ico = document.getElementById('gdrive-status-ico');
-        const txt = document.getElementById('gdrive-status-text');
-        bar.classList.remove('hidden');
-        if (s.gdrive_service_account_json) {
-            ico.className = 'fas fa-circle text-green-400';
-            txt.textContent = '✅ 서비스 계정 연결됨 — 사용자별 폴더 자동 생성 활성화';
-        } else {
-            ico.className = 'fas fa-circle text-gray-600';
-            txt.textContent = '미설정 — 서비스 계정 JSON을 입력 후 저장하세요';
-        }
-    } catch (_) {}
-}
-
-async function saveGdriveSettings() {
-    const alertEl = document.getElementById('gdrive-save-alert');
-    const saJson     = document.getElementById('set-gdrive-sa-json').value.trim();
-    const rootFolder = document.getElementById('set-gdrive-root-folder').value.trim();
-
-    if (!saJson && !rootFolder) {
-        showAlert(alertEl, '서비스 계정 JSON을 입력해주세요.', 'warning'); return;
+    const body = new URLSearchParams({
+      weblog_title:   f.weblog_title.value.trim(),
+      user_login:     f.user_login.value.trim(),
+      admin_password: f.admin_password.value,
+      admin_email:    f.admin_email.value.trim(),
+    });
+    const res = await fetch('/wp-admin/install.php?step=2', {
+      method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'}, body: body.toString()
+    });
+    const text = await res.text();
+    if (res.ok && text.includes('cp-install-success')) {
+      document.getElementById('loading-msg').innerHTML = '설치 완료!<br>로그인 페이지로 이동합니다...';
+      setTimeout(() => { location.href = '/wp-login.php'; }, 1200);
+    } else {
+      document.open(); document.write(text); document.close();
     }
-
-    // JSON 유효성 검사
-    if (saJson) {
-        try {
-            const parsed = JSON.parse(saJson);
-            if (parsed.type !== 'service_account') {
-                showAlert(alertEl, '서비스 계정 JSON이 아닙니다. "type": "service_account" 가 포함되어야 합니다.', 'error'); return;
-            }
-            if (!parsed.client_email || !parsed.private_key) {
-                showAlert(alertEl, 'JSON에 client_email 또는 private_key가 없습니다.', 'error'); return;
-            }
-        } catch (e) {
-            showAlert(alertEl, 'JSON 형식이 올바르지 않습니다: ' + e.message, 'error'); return;
-        }
-    }
-
-    const payload = {};
-    if (saJson)      payload.gdrive_service_account_json = saJson;
-    if (rootFolder)  payload.gdrive_root_folder_id       = rootFolder;
-
-    try {
-        const res  = await fetch('/api/admin/settings', {
-            method: 'PUT', headers: HEADERS(),
-            body: JSON.stringify(payload),
-        });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.error || '저장 실패');
-        showAlert(alertEl, '✅ Google Drive 서비스 계정이 저장되었습니다.', 'success');
-        document.getElementById('set-gdrive-sa-json').value = '';
-        loadGdriveSettings();
-    } catch (e) {
-        showAlert(alertEl, e.message, 'error');
-    }
-}
-
-async function testGdriveConnection() {
-    const alertEl = document.getElementById('gdrive-save-alert');
-    showAlert(alertEl, '🔄 연결 테스트 중...', 'info');
-    try {
-        const res  = await fetch('/api/admin/gdrive-test', { headers: HEADERS() });
-        const data = await res.json();
-        if (!res.ok || !data.success) throw new Error(data.error || '연결 실패');
-        showAlert(alertEl, `✅ 연결 성공! 서비스 계정: ${data.email || ''}`, 'success');
-    } catch (e) {
-        showAlert(alertEl, '❌ ' + e.message + ' — 서비스 계정 JSON을 확인하세요.', 'error');
-    }
-}
-
-loadGdriveSettings();
-
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// CP3 메인 스토리지 레포 설정
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-async function loadCp3Settings() {
-    try {
-        const res  = await fetch('/api/admin/settings?keys=cp3_repo_owner,cp3_repo_name,cp3_github_token', { headers: HEADERS() });
-        const data = await res.json();
-        if (!res.ok) return;
-        const s = data.settings || {};
-        if (s.cp3_repo_owner) document.getElementById('set-cp3-owner').value = s.cp3_repo_owner;
-        if (s.cp3_repo_name)  document.getElementById('set-cp3-repo').value  = s.cp3_repo_name;
-        if (s.cp3_github_token) document.getElementById('set-cp3-token').value = s.cp3_github_token;
-    } catch (_) {}
-}
-
-async function saveCp3Settings() {
-    const alertEl = document.getElementById('cp3-save-alert');
-    const owner = document.getElementById('set-cp3-owner').value.trim();
-    const repo  = document.getElementById('set-cp3-repo').value.trim();
-    const token = document.getElementById('set-cp3-token').value.trim();
-
-    if (!owner && !repo) { showAlert(alertEl, '레포 Owner와 이름을 입력해주세요.', 'warning'); return; }
-    const payload = {};
-    if (owner) payload.cp3_repo_owner    = owner;
-    if (repo)  payload.cp3_repo_name     = repo;
-    if (token) payload.cp3_github_token  = token;
-
-    try {
-        const res  = await fetch('/api/admin/settings', {
-            method: 'PUT', headers: HEADERS(),
-            body: JSON.stringify(payload),
-        });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.error || '저장 실패');
-        showAlert(alertEl, `✅ CP3 스토리지 설정이 저장되었습니다. (${owner}/${repo})`, 'success');
-    } catch (e) {
-        showAlert(alertEl, e.message, 'error');
-    }
-}
-
-loadCp3Settings();
-
-// ── CloudPressDB 레포 + 외부 스토리지 설정 ──────────────────────────────────
-async function loadDbRepoSettings() {
-    try {
-        const res  = await fetch('/api/admin/settings?keys=db_repo_owner,db_repo_name,db_github_token,ext_storage_type,ext_storage_bucket,ext_storage_token', { headers: HEADERS() });
-        const data = await res.json();
-        const s    = data.settings || data || {};
-        if (s.db_repo_owner)       document.getElementById('set-db-owner').value = s.db_repo_owner;
-        if (s.db_repo_name)        document.getElementById('set-db-repo').value  = s.db_repo_name;
-        if (s.db_github_token)     document.getElementById('set-db-token').value  = s.db_github_token ? '••••••••' : '';
-        if (s.ext_storage_type)    document.getElementById('set-ext-storage-type').value   = s.ext_storage_type;
-        if (s.ext_storage_bucket)  document.getElementById('set-ext-storage-bucket').value = s.ext_storage_bucket;
-        if (s.ext_storage_token)   document.getElementById('set-ext-storage-token').value  = s.ext_storage_token ? '••••••••' : '';
-    } catch {}
-}
-
-async function saveDbRepoSettings() {
-    const alert = document.getElementById('db-save-alert');
-    const body  = {
-        db_repo_owner:      document.getElementById('set-db-owner').value.trim(),
-        db_repo_name:       document.getElementById('set-db-repo').value.trim(),
-        db_github_token:    document.getElementById('set-db-token').value.trim(),
-        ext_storage_type:   document.getElementById('set-ext-storage-type').value,
-        ext_storage_bucket: document.getElementById('set-ext-storage-bucket').value.trim(),
-        ext_storage_token:  document.getElementById('set-ext-storage-token').value.trim(),
-    };
-    try {
-        const res  = await fetch('/api/admin/settings', { method: 'POST', headers: HEADERS(), body: JSON.stringify(body) });
-        const data = await res.json();
-        alert.className = 'p-3 rounded-xl text-sm ' + (data.success ? 'bg-blue-900/40 text-blue-300' : 'bg-red-900/40 text-red-300');
-        alert.textContent = data.success ? '✅ DB 레포 · 스토리지 설정이 저장되었습니다.' : '❌ ' + (data.error || '저장 실패');
-        alert.classList.remove('hidden');
-        setTimeout(() => alert.classList.add('hidden'), 4000);
-    } catch (e) {
-        alert.className = 'p-3 rounded-xl text-sm bg-red-900/40 text-red-300';
-        alert.textContent = '❌ 오류: ' + e.message;
-        alert.classList.remove('hidden');
-    }
-}
-
-loadDbRepoSettings();
-
-// ── CP3 워커 관리 ─────────────────────────────────────────────────────────────
-
-async function loadWorkerDeployStatus() {
-    try {
-        const res  = await fetch('/api/admin/worker-deploy', { headers: HEADERS() });
-        const data = await res.json();
-        if (data.cf_api?.has_key) {
-            document.getElementById('worker-cf-saved').classList.remove('hidden');
-            document.getElementById('worker-cf-form').classList.add('hidden');
-            const accEl = document.getElementById('worker-cf-account-id');
-            if (data.cf_api.account_id) accEl.textContent = `• Account: ${data.cf_api.account_id.slice(0,12)}...`;
-        }
-        if (data.cf_api?.email) {
-            document.getElementById('worker-cf-email').value = data.cf_api.email;
-        }
-        renderWorkerList(data.workers || []);
-    } catch (e) {
-        console.warn('[worker-deploy] 로드 실패:', e.message);
-    }
-}
-
-function showWorkerCfForm() {
-    document.getElementById('worker-cf-saved').classList.add('hidden');
-    document.getElementById('worker-cf-form').classList.remove('hidden');
-}
-
-function setWorkerCfStatus(msg, type) {
-    const el = document.getElementById('worker-cf-status');
-    el.classList.remove('hidden');
-    const styles = {
-        loading: 'bg-blue-900/30 border border-blue-500/30 text-blue-300',
-        success: 'bg-green-900/30 border border-green-500/30 text-green-400',
-        error:   'bg-red-900/30 border border-red-500/30 text-red-400',
-    };
-    el.className = `flex items-center gap-2 text-sm px-3 py-2 rounded-xl ${styles[type] || styles.error}`;
-    const icons = { loading: 'fa-spinner fa-spin', success: 'fa-check-circle', error: 'fa-times-circle' };
-    el.innerHTML = `<i class="fas ${icons[type] || icons.error}"></i> ${msg}`;
-}
-
-async function saveWorkerCfApi() {
-    const apiKey = document.getElementById('worker-cf-api-key').value.trim();
-    const email  = document.getElementById('worker-cf-email').value.trim();
-    if (!apiKey) { setWorkerCfStatus('API 키를 입력해주세요.', 'error'); return; }
-
-    const btn = document.getElementById('worker-cf-save-btn');
-    btn.disabled = true;
-    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 검증 중...';
-    setWorkerCfStatus('Cloudflare API 키를 검증하고 있습니다...', 'loading');
-
-    try {
-        const res  = await fetch('/api/admin/worker-deploy', {
-            method: 'POST', headers: HEADERS(),
-            body: JSON.stringify({ action: 'save_cf_api', cf_api_key: apiKey, cf_email: email }),
-        });
-        const data = await res.json();
-        if (res.ok && data.success) {
-            setWorkerCfStatus(`✅ 저장 완료 (Account: ${data.account_id || '확인됨'})`, 'success');
-            document.getElementById('worker-cf-api-key').value = '';
-            document.getElementById('worker-cf-saved').classList.remove('hidden');
-            document.getElementById('worker-cf-form').classList.add('hidden');
-            const accEl = document.getElementById('worker-cf-account-id');
-            if (data.account_id) accEl.textContent = `• Account: ${data.account_id.slice(0,12)}...`;
-        } else {
-            setWorkerCfStatus(data.error || '검증 실패', 'error');
-        }
-    } catch (e) {
-        setWorkerCfStatus('네트워크 오류: ' + e.message, 'error');
-    } finally {
-        btn.disabled = false;
-        btn.innerHTML = '<i class="fas fa-shield-check"></i> 검증 후 저장';
-    }
-}
-
-function showWorkerResult(elId, data, successMsg) {
-    const el = document.getElementById(elId);
-    el.classList.remove('hidden');
-    const ok = data.success;
-    el.className = `p-3 rounded-xl text-sm ${ok ? 'bg-green-900/30 border border-green-500/30 text-green-300' : 'bg-red-900/30 border border-red-500/30 text-red-300'}`;
-    el.innerHTML = ok
-        ? `<i class="fas fa-check-circle mr-2"></i>${data.message || successMsg}`
-        : `<i class="fas fa-times-circle mr-2"></i>${data.error || data.message || '실패'}`;
-    if (ok) loadWorkers();
-}
-
-async function createMasterWorker() {
-    const btn        = document.getElementById('master-worker-btn');
-    const scriptName = document.getElementById('master-worker-name').value.trim() || 'cp3-master-worker';
-    const ghRepo     = document.getElementById('master-github-repo').value.trim();
-    const ghOwner    = document.getElementById('worker-gh-owner').value.trim();
-    const ghToken    = document.getElementById('worker-gh-token').value.trim();
-
-    btn.disabled = true;
-    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 생성 중...';
-
-    try {
-        const res  = await fetch('/api/admin/worker-deploy', {
-            method: 'POST', headers: HEADERS(),
-            body: JSON.stringify({
-                action:           'create_master_worker',
-                script_name:      scriptName,
-                github_repo_name: ghRepo || scriptName,
-                github_owner:     ghOwner,
-                github_token:     ghToken || undefined,
-            }),
-        });
-        if (res.status === 401 || res.status === 403) {
-            showWorkerResult('master-worker-result', { success: false, error: '❌ 총괄 워커 생성 실패: Authentication error — 관리자 계정으로 로그인했는지 확인하세요. (로그아웃 후 재로그인)' });
-            return;
-        }
-        const data = await res.json();
-        showWorkerResult('master-worker-result', data, '총괄 워커가 생성되었습니다.');
-    } catch (e) {
-        showWorkerResult('master-worker-result', { success: false, error: e.message });
-    } finally {
-        btn.disabled = false;
-        btn.innerHTML = '<i class="fas fa-crown"></i> 총괄 워커 생성하기';
-    }
-}
-
-async function createMultisiteWorkers() {
-    const btn    = document.getElementById('multisite-worker-btn');
-    const prefix = document.getElementById('pool-worker-prefix').value.trim() || 'cp3-pool';
-    const count  = parseInt(document.getElementById('pool-worker-count').value) || 3;
-    const ghPfx  = document.getElementById('pool-github-prefix').value.trim();
-    const ghOwner = document.getElementById('worker-gh-owner').value.trim();
-    const ghToken = document.getElementById('worker-gh-token').value.trim();
-
-    btn.disabled = true;
-    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 생성 중...';
-
-    try {
-        const res  = await fetch('/api/admin/worker-deploy', {
-            method: 'POST', headers: HEADERS(),
-            body: JSON.stringify({
-                action:               'create_multisite_worker',
-                name_prefix:          prefix,
-                count,
-                github_repo_prefix:   ghPfx || prefix,
-                github_owner:         ghOwner,
-                github_token:         ghToken || undefined,
-            }),
-        });
-        if (res.status === 401 || res.status === 403) {
-            showWorkerResult('multisite-worker-result', { success: false, error: `❌ 멀티사이트 워커 0개 생성 완료, ${count}개 실패 — Authentication error: 관리자 계정으로 로그인했는지 확인하세요.` });
-            return;
-        }
-        const data = await res.json();
-        showWorkerResult('multisite-worker-result', data, `멀티사이트 워커 ${data.created?.length || 0}개가 생성되었습니다.`);
-    } catch (e) {
-        showWorkerResult('multisite-worker-result', { success: false, error: e.message });
-    } finally {
-        btn.disabled = false;
-        btn.innerHTML = '<i class="fas fa-layer-group"></i> 멀티사이트 워커 생성하기';
-    }
-}
-
-function renderWorkerList(workers) {
-    const el = document.getElementById('worker-list');
-    if (!workers.length) {
-        el.innerHTML = '<p class="text-gray-600 text-xs">생성된 워커가 없습니다.</p>';
-        return;
-    }
-    const typeLabels = { master: '총괄 워커', multisite: '멀티사이트 워커' };
-    const typeColors = { master: 'text-orange-400', multisite: 'text-violet-400' };
-    el.innerHTML = workers.map(w => `
-        <div class="flex items-center justify-between p-3 bg-white/5 rounded-xl">
-            <div class="flex items-center gap-3">
-                <i class="fas ${w.type === 'master' ? 'fa-crown text-orange-400' : 'fa-layer-group text-violet-400'}"></i>
-                <div>
-                    <div class="font-bold text-sm">${w.script_name}</div>
-                    <div class="text-xs text-gray-500">${typeLabels[w.type] || w.type}${w.github_repo ? ` · ${w.github_repo}` : ''}</div>
-                </div>
-            </div>
-            <div class="flex items-center gap-2">
-                <span class="text-xs px-2 py-0.5 rounded-full ${w.status === 'active' ? 'bg-green-900/40 text-green-400' : 'bg-gray-800 text-gray-500'}">${w.status}</span>
-                <span class="text-xs text-gray-600">${w.created_at ? w.created_at.slice(0,10) : ''}</span>
-            </div>
-        </div>
-    `).join('');
-}
-
-async function loadWorkers() {
-    try {
-        const res  = await fetch('/api/admin/worker-deploy', { headers: HEADERS() });
-        const data = await res.json();
-        renderWorkerList(data.workers || []);
-    } catch {
-        document.getElementById('worker-list').innerHTML = '<p class="text-red-400 text-xs">워커 목록을 불러오지 못했습니다.</p>';
-    }
-}
-
-loadWorkerDeployStatus();
+  } catch(err) {
+    document.getElementById('loading-overlay').classList.remove('show');
+    document.getElementById('submit-btn').disabled = false;
+    alert('설치 중 오류가 발생했습니다: ' + err.message);
+  }
+};
 </script>
 </body>
-</html>
+</html>`;
+}
+
+function buildInstallSuccessPage(adminUser) {
+  return `<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>WordPress 설치 완료</title>
+<link rel="stylesheet" href="/wp-admin/css/install.min.css">
+<style>
+html{background:#f0f0f1}body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;margin:0}
+#wpwrap{display:flex;justify-content:center;padding:40px 16px 60px}
+#wpinstall{width:100%;max-width:600px}
+h1.wp-logo{text-align:center;margin:0 0 28px}
+h1.wp-logo a{display:inline-block;background:url('/wp-admin/images/wordpress-logo.svg') no-repeat center;background-size:contain;width:84px;height:84px;text-indent:-9999px;overflow:hidden}
+.box{background:#fff;border:1px solid #c3c4c7;border-radius:3px;padding:26px 30px;box-shadow:0 1px 1px rgba(0,0,0,.04)}
+.box h1{font-size:23px;font-weight:400;margin:0 0 18px}
+.notice-success{background:#fff;border-left:4px solid #00a32a;padding:12px 16px;margin-bottom:18px;font-size:14px}
+.button-large{background:#2271b1;color:#fff;padding:10px 24px;font-size:14px;font-weight:600;border-radius:3px;text-decoration:none;display:inline-block;border:none;cursor:pointer}
+</style>
+<!-- cp-install-success -->
+</head>
+<body>
+<div id="wpwrap"><div id="wpinstall">
+  <h1 class="wp-logo"><a href="https://wordpress.org/">WordPress</a></h1>
+  <div class="box">
+    <h1>설치 성공!</h1>
+    <div class="notice-success"><strong>WordPress</strong>가 성공적으로 설치되었습니다.</div>
+    <table style="width:100%;border-collapse:collapse;margin-bottom:20px;font-size:14px">
+      <tr><th style="text-align:left;padding:8px 0;width:120px;font-weight:600">사용자명</th><td style="padding:8px 0"><strong>${adminUser}</strong></td></tr>
+      <tr><th style="text-align:left;padding:8px 0;font-weight:600">비밀번호</th><td style="padding:8px 0">설정하신 비밀번호</td></tr>
+    </table>
+    <a href="/wp-login.php" class="button-large">로그인 →</a>
+  </div>
+</div></div>
+<script>setTimeout(()=>{ location.href='/wp-login.php'; }, 2000);</script>
+</body>
+</html>`;
+}
+
+// ─── wp-config.php 생성 ────────────────────────────────────────────────────
+
+function buildWpConfig(env, siteUrl) {
+  const s = () => crypto.randomUUID().replace(/-/g, "");
+  return `<?php
+define('DB_NAME','cloudpress');define('DB_USER','cloudpress');define('DB_PASSWORD','');define('DB_HOST','localhost');define('DB_CHARSET','utf8mb4');define('DB_COLLATE','');
+define('AUTH_KEY','${s()}');define('SECURE_AUTH_KEY','${s()}');define('LOGGED_IN_KEY','${s()}');define('NONCE_KEY','${s()}');
+define('AUTH_SALT','${s()}');define('SECURE_AUTH_SALT','${s()}');define('LOGGED_IN_SALT','${s()}');define('NONCE_SALT','${s()}');
+$table_prefix='wp_';
+define('WP_DEBUG',false);
+define('CLOUDPRESS_WP_CORE_OWNER','WordPress');
+define('CLOUDPRESS_WP_CORE_REPO','WordPress');
+define('CLOUDPRESS_GITHUB_OWNER','${env.GITHUB_OWNER||""}');
+define('CLOUDPRESS_GITHUB_REPO','${env.GITHUB_REPO||""}');
+define('CLOUDPRESS_GITHUB_TOKEN','${env.GITHUB_TOKEN||""}');
+define('WP_SITEURL','${siteUrl}');define('WP_HOME','${siteUrl}');
+define('SQLITE_DB_REALPATH','/tmp/cloudpress.db');
+define('DISALLOW_FILE_EDIT',true);define('AUTOMATIC_UPDATER_DISABLED',true);
+if(!defined('ABSPATH'))define('ABSPATH',__DIR__.'/');
+require_once ABSPATH.'wp-settings.php';
+`;
+}
+
+// ─── 준비 중 페이지 ─────────────────────────────────────────────────────────
+
+function setupPage(stage = "init") {
+  const stageMap = {
+    init:      { title: "WordPress 초기화 중", desc: "환경을 구성하고 있습니다.", steps: [1,0,0,0,0] },
+    db_ready:  { title: "DB 준비 완료", desc: "WordPress 코어를 확인하는 중...", steps: [1,1,0,0,0] },
+    no_github: { title: "GitHub 설정 필요", desc: "GITHUB_TOKEN, GITHUB_OWNER, GITHUB_REPO 환경변수를 설정해주세요.", steps: [1,1,1,0,0] },
+    almost:    { title: "거의 완료!", desc: "WordPress 최초 실행을 준비 중입니다.", steps: [1,1,1,1,0] },
+  };
+  const info  = stageMap[stage] || stageMap.init;
+  const labels = ["환경 구성", "데이터베이스 초기화", "WordPress 코어 연결", "콘텐츠 저장소 연결", "서비스 준비 완료"];
+  const stepsHtml = labels.map((label, i) => {
+    const done   = info.steps[i] === 1;
+    const active = !done && info.steps.slice(0, i).every(s => s === 1) && info.steps[i] === 0 && (i === 0 || info.steps[i-1] === 1);
+    const cls    = done ? "done" : active ? "active" : "wait";
+    return `<div class="step ${cls}"><div class="dot"></div><span>${label}</span>${done ? '<span class="check">✓</span>' : ''}</div>`;
+  }).join("");
+
+  const ghWarn = stage === "no_github"
+    ? `<div class="warn">⚠️ GitHub 환경변수 미설정<br><code>GITHUB_TOKEN · GITHUB_OWNER · GITHUB_REPO</code><br>Cloudflare Worker 대시보드에서 설정해주세요.</div>`
+    : "";
+
+  return `<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>CloudPress — WordPress 준비 중</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+  background:linear-gradient(135deg,#0f0c29 0%,#302b63 50%,#24243e 100%);
+  min-height:100vh;display:flex;align-items:center;justify-content:center}
+.card{background:rgba(255,255,255,.06);backdrop-filter:blur(20px);
+  border:1px solid rgba(255,255,255,.12);border-radius:24px;padding:44px 40px;
+  max-width:420px;width:90%;text-align:center;box-shadow:0 24px 80px rgba(0,0,0,.5)}
+.logo{width:68px;height:68px;background:linear-gradient(135deg,#3b82f6,#8b5cf6);
+  border-radius:18px;margin:0 auto 22px;display:flex;align-items:center;
+  justify-content:center;font-size:34px;box-shadow:0 8px 32px rgba(99,102,241,.4)}
+h1{font-size:20px;font-weight:800;color:#fff;margin-bottom:6px}
+.desc{color:rgba(255,255,255,.45);font-size:13px;line-height:1.6;margin-bottom:24px}
+.progress{background:rgba(255,255,255,.1);border-radius:100px;height:5px;margin-bottom:24px;overflow:hidden}
+.bar{height:100%;background:linear-gradient(90deg,#3b82f6,#8b5cf6);border-radius:100px;
+  animation:bar 2.5s ease-in-out infinite}
+@keyframes bar{0%{width:10%;margin-left:0}50%{width:55%;margin-left:25%}100%{width:10%;margin-left:85%}}
+.steps{text-align:left;display:flex;flex-direction:column;gap:8px}
+.step{display:flex;align-items:center;gap:10px;font-size:13px;color:rgba(255,255,255,.25);padding:8px 12px;border-radius:10px;transition:all .3s}
+.step.done{color:rgba(52,211,153,.9);background:rgba(52,211,153,.06)}
+.step.active{color:#60a5fa;font-weight:600;background:rgba(59,130,246,.1)}
+.dot{width:7px;height:7px;border-radius:50%;background:currentColor;flex-shrink:0}
+.step.active .dot{animation:pulse 1s ease-in-out infinite}
+@keyframes pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.4;transform:scale(.6)}}
+.check{margin-left:auto;font-size:11px}
+.warn{margin-top:16px;padding:12px 14px;background:rgba(239,68,68,.1);
+  border:1px solid rgba(239,68,68,.25);border-radius:12px;font-size:12px;
+  color:#fca5a5;text-align:left;line-height:1.7}
+.warn code{font-size:11px;opacity:.8}
+.version{position:fixed;bottom:16px;right:20px;font-size:11px;color:rgba(255,255,255,.18)}
+</style>
+<script>setTimeout(()=>location.reload(),5000)</script>
+</head>
+<body>
+<div class="card">
+  <div class="logo">☁️</div>
+  <h1>${info.title}</h1>
+  <p class="desc">${info.desc}</p>
+  <div class="progress"><div class="bar"></div></div>
+  <div class="steps">${stepsHtml}</div>
+  ${ghWarn}
+</div>
+<span class="version">CloudPress v4.0 · WordPress/WordPress 공식 코어</span>
+</body>
+</html>`;
+}
+
+// ─── PHP 실행 ────────────────────────────────────────────────────────────────
+
+async function runPhp(phpCode, env, options = {}) {
+  try {
+    if (env.PHP_RUNNER) {
+      return await env.PHP_RUNNER.fetch(new Request("https://php/run", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code: phpCode, env: options.phpEnv || {}, files: options.files || {} }),
+      }));
+    }
+    return new Response("PHP_RUNNER 바인딩이 필요합니다.", { status: 503 });
+  } catch (e) {
+    return new Response(`PHP 오류: ${e.message}`, { status: 500 });
+  }
+}
+
+function buildPhpEnv(request, env, url, siteUrl) {
+  return {
+    WP_HOME: siteUrl, WP_SITEURL: siteUrl,
+    GITHUB_OWNER: env.GITHUB_OWNER || "", GITHUB_REPO: env.GITHUB_REPO || "", GITHUB_TOKEN: env.GITHUB_TOKEN || "",
+    WP_CORE_OWNER: WP_CORE_OWNER, WP_CORE_REPO: WP_CORE_REPO,
+    REQUEST_URI: url.pathname + url.search, REQUEST_METHOD: request.method,
+    HTTP_HOST: url.host, SERVER_NAME: url.host, SERVER_PORT: url.port || "443",
+    HTTPS: url.protocol === "https:" ? "on" : "off",
+    CONTENT_TYPE: request.headers.get("Content-Type") || "",
+    HTTP_COOKIE: request.headers.get("Cookie") || "",
+    HTTP_AUTHORIZATION: request.headers.get("Authorization") || "",
+    HTTP_REFERER: request.headers.get("Referer") || "",
+    HTTP_ACCEPT_LANGUAGE: request.headers.get("Accept-Language") || "ko",
+  };
+}
+
+// ─── WordPress 요청 처리 ───────────────────────────────────────────────────
+
+/**
+ * WordPress 요청 처리 — php-wasm 기반 진짜 WordPress 실행
+ *
+ * 아키텍처:
+ *   정적 자산: GitHub 미러 or WordPress/WordPress 공식 CDN (immutable 캐시)
+ *   PHP 실행:  PHP_RUNNER Service Binding → php-wasm Worker
+ *   캐시 전략: L1 Edge Cache → L2 KV Cache → stale-while-revalidate
+ *   미러링:    업로드 파일을 GitHub 레포에 실시간 미러링
+ */
+async function handleWordPressRequest(request, env, ctx) {
+  const url    = new URL(request.url);
+  const path   = url.pathname;
+  const method = request.method.toUpperCase();
+
+  // STATIC 파일 확장자
+  const STATIC_EXT = /\.(css|js|mjs|jpg|jpeg|png|gif|webp|avif|svg|ico|woff2?|ttf|eot|otf|map|pdf|zip|mp4|mp3|ogg|wav|webm)$/i;
+
+  // ── GitHub 미러 인스턴스 ────────────────────────────────────────────────
+  const mirror = {
+    token:  env.GITHUB_TOKEN  || "",
+    owner:  env.GITHUB_OWNER  || "",
+    repo:   env.GITHUB_REPO   || "",
+    branch: "main",
+    enabled: !!(env.GITHUB_TOKEN && env.GITHUB_OWNER && env.GITHUB_REPO),
+
+    rawUrl(filePath) {
+      return `https://raw.githubusercontent.com/${this.owner}/${this.repo}/${this.branch}/${filePath}`;
+    },
+    async get(filePath) {
+      if (!this.enabled) return null;
+      const res = await fetch(this.rawUrl(filePath), {
+        headers: {
+          Authorization: `Bearer ${this.token}`,
+          "User-Agent": "CloudPress-Worker/4.0",
+        },
+        cf: { cacheEverything: true, cacheTtl: 3600 },
+      }).catch(() => null);
+      return res?.ok ? res : null;
+    },
+    // 파일을 GitHub 레포에 미러링
+    async put(filePath, content, message) {
+      if (!this.enabled) return false;
+      let b64;
+      if (typeof content === "string") {
+        const bytes = new TextEncoder().encode(content);
+        let bin = ""; for (const b of bytes) bin += String.fromCharCode(b);
+        b64 = btoa(bin);
+      } else {
+        const bytes = content instanceof ArrayBuffer ? new Uint8Array(content) : content;
+        let bin = ""; for (const b of bytes) bin += String.fromCharCode(b);
+        b64 = btoa(bin);
+      }
+      // 기존 SHA 조회
+      let sha;
+      const checkRes = await fetch(
+        `https://api.github.com/repos/${this.owner}/${this.repo}/contents/${filePath}?ref=${this.branch}`,
+        { headers: { Authorization: `Bearer ${this.token}`, Accept: "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28", "User-Agent": "CloudPress-Worker/4.0" } }
+      ).catch(() => null);
+      if (checkRes?.ok) { const d = await checkRes.json(); sha = d.sha; }
+
+      const body = { message: message || `upload: ${filePath}`, content: b64, branch: this.branch };
+      if (sha) body.sha = sha;
+      const res = await fetch(
+        `https://api.github.com/repos/${this.owner}/${this.repo}/contents/${filePath}`,
+        { method: "PUT", headers: { Authorization: `Bearer ${this.token}`, Accept: "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28", "Content-Type": "application/json", "User-Agent": "CloudPress-Worker/4.0" }, body: JSON.stringify(body) }
+      ).catch(() => null);
+      return res?.ok || false;
+    },
+  };
+
+  // GitHub 미러 미설정 시 안내
+  if (!mirror.enabled) {
+    return new Response(setupPage("no_github"), { headers: { "Content-Type": "text/html;charset=utf-8" } });
+  }
+
+  // ── 프론트엔드(Astro/TS) vs 백엔드(PHP/WordPress) 라우팅 분리 ────────────
+  // 백엔드 경로: WordPress PHP 처리 (PHP Runner / PHP-WASM)
+  const WP_BACKEND_PATHS = [
+    "/wp-admin", "/wp-login.php", "/wp-cron.php", "/wp-signup.php",
+    "/wp-activate.php", "/wp-comments-post.php", "/wp-json",
+    "/xmlrpc.php",
+  ];
+  const isBackend = WP_BACKEND_PATHS.some(p => path === p || path.startsWith(p + "/") || path.startsWith(p + "?"));
+
+  // 프론트엔드 경로: Astro 빌드 결과물 (GitHub Pages / _cache/ 정적 HTML)
+  // /frontend/* 는 절대 PHP로 넘기지 않음
+  if (path.startsWith("/frontend/")) {
+    // GitHub Pages 또는 _cache에서 Astro 빌드 결과 서빙
+    const ghPagesUrl = env.GH_PAGES_URL || "";
+    if (ghPagesUrl) {
+      try {
+        const r = await fetch(`${ghPagesUrl}${path}`, {
+          cf: { cacheEverything: true, cacheTtl: 3600 },
+          headers: { "User-Agent": "CloudPress-Frontend/5.0" },
+        });
+        if (r.ok) {
+          const body = await r.arrayBuffer();
+          return new Response(body, {
+            headers: {
+              "Content-Type": r.headers.get("Content-Type") || mimeByExt(path),
+              "Cache-Control": "public, max-age=3600, stale-while-revalidate=86400",
+              "X-Served-By": "astro-frontend",
+              "X-Content-Type-Options": "nosniff",
+            },
+          });
+        }
+      } catch {}
+    }
+    // GitHub Pages 없으면 미러에서 직접 제공
+    const filePath = path.replace(/^\//, "");
+    const res = await mirror.get(filePath);
+    if (res) {
+      const body = await res.arrayBuffer();
+      return new Response(body, {
+        headers: {
+          "Content-Type": mimeByExt(path),
+          "Cache-Control": "public, max-age=3600",
+          "X-Served-By": "astro-mirror",
+        },
+      });
+    }
+    return new Response("Frontend asset not found", { status: 404 });
+  }
+
+  // KV 캐시 헬퍼 (이 아래부터 사용)
+  // ── KV 캐시 헬퍼 ─────────────────────────────────────────────────────────
+  const kv = env.CACHE || env.KV;
+  const kvGet = async (key) => { try { return await kv?.get(key); } catch { return null; } };
+  const kvSet = async (key, val, ttl = 3600) => { try { await kv?.put(key, val, { expirationTtl: ttl }); } catch {} };
+  const kvGetMeta = async (key) => { try { return await kv?.getWithMetadata(key); } catch { return null; } };
+
+  // ── 정적 파일 서빙 ────────────────────────────────────────────────────────
+  if (STATIC_EXT.test(path)) {
+    const filePath = path.replace(/^\//, "");
+
+    // KV 캐시 확인 (핵심 자산)
+    const cacheKey = `static:${filePath}`;
+    const cached = await kvGetMeta(cacheKey);
+    if (cached?.value) {
+      return new Response(cached.value, {
+        headers: {
+          "Content-Type":  cached.metadata?.ct || mimeByExt(path),
+          "Cache-Control": "public, max-age=31536000, immutable",
+          "X-Cache":       "HIT",
+          "ETag":          cached.metadata?.etag || "",
+        },
+      });
+    }
+
+    // wp-content → GitHub 미러 우선 (wordpress/ 폴더 기준)
+    let res = null;
+    if (path.startsWith("/wp-content/")) {
+      res = await mirror.get("wordpress/" + filePath);
+    }
+
+    // WordPress 코어 → 사용자 레포 wordpress/ 폴더 우선, 그 다음 CDN
+    if (!res) {
+      res = await mirror.get("wordpress/" + filePath).catch(() => null);
+    }
+    if (!res) {
+      for (const base of [
+        `https://cdn.jsdelivr.net/npm/wordpress-static@latest`,
+        `https://raw.githubusercontent.com/WordPress/WordPress/master`,
+      ]) {
+        try {
+          const r = await fetch(`${base}/${filePath}`, { cf: { cacheEverything: true, cacheTtl: 86400 } });
+          if (r.ok) { res = r; break; }
+        } catch {}
+      }
+    }
+
+    if (!res) return new Response("Not Found", { status: 404 });
+
+    const body    = await res.arrayBuffer();
+    const ct      = mimeByExt(path);
+    const etag    = `"${Date.now().toString(36)}"`;
+    const isUploads = path.startsWith("/wp-content/uploads/");
+
+    // 텍스트 파일 KV 저장 (<=2MB)
+    if (!isUploads && body.byteLength < 2 * 1024 * 1024 && /\.(css|js|svg|json|xml|txt)$/.test(path)) {
+      if (ctx) ctx.waitUntil(
+        kv?.put(cacheKey, new TextDecoder().decode(body), {
+          expirationTtl: 86400,
+          metadata: { ct, etag },
+        }).catch(() => {})
+      );
+    }
+
+    return new Response(body, {
+      headers: {
+        "Content-Type":  ct,
+        "Cache-Control": isUploads
+          ? "public, max-age=86400, stale-while-revalidate=604800"
+          : "public, max-age=31536000, immutable",
+        "ETag":          etag,
+        "Vary":          "Accept-Encoding",
+        "X-Cache":       "MISS",
+        "X-Content-Type-Options": "nosniff",
+      },
+    });
+  }
+
+  // ── PHP 캐시 스킵 조건 ───────────────────────────────────────────────────
+  const SKIP_CACHE = ["/wp-admin", "/wp-login.php", "/cart", "/checkout", "/my-account", "/wp-cron.php"];
+  const isCacheable = method === "GET"
+    && !SKIP_CACHE.some(s => path.startsWith(s))
+    && !(request.headers.get("Cookie") || "").includes("wordpress_logged_in");
+
+  // ── KV PHP 캐시 조회 (PHP_RUNNER 유무 관계없이 항상 확인) ─────────────────
+  if (isCacheable) {
+    const cached = await kvGet(`php:${url.pathname}${url.search}`);
+    if (cached) {
+      return new Response(cached, {
+        headers: {
+          "Content-Type":  "text/html; charset=utf-8",
+          "Cache-Control": "public, s-maxage=60, stale-while-revalidate=3600",
+          "X-Cache":       "HIT",
+          "X-Content-Type-Options": "nosniff",
+        },
+      });
+    }
+  }
+
+  // ── GitHub _cache/ 정적 HTML 서빙 헬퍼 (PHP Runner 없어도 동작) ──────────
+  const serveStaticCache = async () => {
+    if (!mirror.enabled) return null;
+    const cachePath = (path === "/" || path === "")
+      ? "_cache/index.html"
+      : `_cache${path.endsWith("/") ? path : path + "/"}index.html`;
+    const r = await mirror.get(cachePath);
+    if (!r) return null;
+    const html = await r.text();
+    if (ctx && isCacheable) {
+      ctx.waitUntil(kvSet(`php:${url.pathname}${url.search}`, html, 1800));
+    }
+    return new Response(html, {
+      headers: {
+        "Content-Type":  "text/html; charset=utf-8",
+        "Cache-Control": "public, s-maxage=30, stale-while-revalidate=1800",
+        "X-Cache":       "GH-STATIC",
+        "X-Content-Type-Options": "nosniff",
+      },
+    });
+  };
+
+  // ── GitHub Pages 폴백 서빙 헬퍼 ─────────────────────────────────────────
+  const serveGhPages = async () => {
+    const ghPagesUrl = env.GH_PAGES_URL || "";
+    if (!ghPagesUrl) return null;
+    try {
+      const r = await fetch(`${ghPagesUrl}${path}`, {
+        cf: { cacheEverything: true, cacheTtl: 300 },
+        headers: { "User-Agent": "CloudPress-Fallback/5.0" },
+      });
+      if (!r.ok) return null;
+      const html = await r.text();
+      return new Response(html, {
+        headers: {
+          "Content-Type":  "text/html; charset=utf-8",
+          "Cache-Control": "public, max-age=60",
+          "X-Fallback":    "github-pages",
+          "X-Content-Type-Options": "nosniff",
+        },
+      });
+    } catch { return null; }
+  };
+
+  // ── PHP 환경변수 구성 ────────────────────────────────────────────────────
+  const siteUrl = `${url.protocol}//${url.host}`;
+  let postBody  = "";
+  if (["POST", "PUT", "PATCH"].includes(method)) {
+    postBody = await request.text().catch(() => "");
+  }
+
+  // wp-config.php + db.php를 GitHub에서 직접 가져오기
+  const [wpConfigRes, dbPhpRes] = await Promise.all([
+    mirror.get("wordpress/wp-config.php"),
+    mirror.get("wordpress/wp-content/db.php"),
+  ]);
+  const wpConfig = wpConfigRes ? await wpConfigRes.text() : "";
+  let dbPhp      = dbPhpRes    ? await dbPhpRes.text()    : "";
+
+  // db.php 없으면 SQLite 플러그인 db.copy로 자동 대체
+  if (!dbPhp && mirror.enabled) {
+    const dbCopyRes = await mirror.get("wordpress/wp-content/plugins/sqlite-database-integration/db.copy");
+    if (dbCopyRes) {
+      dbPhp = await dbCopyRes.text();
+      // db.copy 플레이스홀더 치환 (실제 constants.php가 처리하므로 단순 복사면 됨)
+      // {SQLITE_IMPLEMENTATION_FOLDER_PATH}, {SQLITE_PLUGIN}은 런타임에 constants.php가 무시함
+      // 백그라운드로 db.php 저장
+      if (ctx) ctx.waitUntil(
+        mirror.put("wordpress/wp-content/db.php", dbPhp, "auto: generate db.php from db.copy")
+      );
+    }
+  }
+
+  // ── WordPress 미설치 감지 → install.php 처리 ────────────────────────────
+  const isInstalled = !!wpConfig;
+
+  // /wp-admin/install.php 직접 처리 (GET: 설치 폼 / POST step=2: 설치 실행)
+  if (path === "/wp-admin/install.php" || path === "/wp-admin/install") {
+    const step = url.searchParams.get("step");
+
+    // GET or step=1 → 설치 폼 표시
+    if (method === "GET" || step === "1" || !step) {
+      if (isInstalled) {
+        // 이미 설치됨 → 관리자로 리다이렉트
+        return new Response(null, { status: 302, headers: { Location: "/wp-admin/" } });
+      }
+      return new Response(buildInstallPage(siteUrl), {
+        headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" },
+      });
+    }
+
+    // POST step=2 → 설치 실행
+    if (method === "POST" && step === "2") {
+      let formData;
+      try {
+        const body = await request.text();
+        formData = Object.fromEntries(new URLSearchParams(body));
+      } catch {
+        formData = {};
+      }
+      const { weblog_title, user_login, admin_password, admin_email } = formData;
+
+      // 유효성 검사
+      if (!weblog_title || !user_login || !admin_password || !admin_email) {
+        return new Response(buildInstallPage(siteUrl, { error: "모든 필드를 입력해 주세요.", ...formData }), {
+          headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" },
+        });
+      }
+      if (!/^[a-z0-9.@_-]+$/i.test(user_login)) {
+        return new Response(buildInstallPage(siteUrl, { error: "사용자명에 허용되지 않는 문자가 포함되어 있습니다.", ...formData }), {
+          headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" },
+        });
+      }
+
+      // 1) D1 DB 초기화
+      const d = env.DB || env.SITE_DB;
+      if (d) {
+        const ok = await initWordPressDB(d, siteUrl, user_login, admin_password, admin_email, weblog_title);
+        if (!ok) {
+          return new Response(buildInstallPage(siteUrl, { error: "데이터베이스 초기화에 실패했습니다. DB 바인딩을 확인해 주세요.", ...formData }), {
+            headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" },
+          });
+        }
+        // 설치 완료 KV 플래그 저장
+        await kvSet("wp:installed", "1", 86400 * 30);
+      }
+
+      // 2) wp-config.php를 GitHub 레포에 저장
+      const newWpConfig = buildWpConfig(env, siteUrl);
+      await mirror.put("wordpress/wp-config.php", newWpConfig, "install: WordPress wp-config.php");
+
+      // 3) 성공 응답
+      return new Response(buildInstallSuccessPage(user_login), {
+        headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" },
+      });
+    }
+  }
+
+  // ── 미설치 상태에서 다른 경로 접근 → install.php로 리다이렉트 ───────────
+  if (!isInstalled && !STATIC_EXT.test(path)) {
+    return new Response(null, {
+      status: 302,
+      headers: { Location: "/wp-admin/install.php", "Cache-Control": "no-store" },
+    });
+  }
+
+  // ── 공개 페이지: 백엔드 경로가 아니면 Astro 정적 캐시 우선 서빙 ──────────
+  // (isBackend가 false인 경우: /, /blog, /category/*, /tag/*, /author/*, /search 등)
+  if (!isBackend && isCacheable) {
+    const staticRes = await serveStaticCache();
+    if (staticRes) return staticRes;
+    // GitHub Pages Astro 빌드 결과 시도
+    const ghPagesRes = await serveGhPages();
+    if (ghPagesRes) return ghPagesRes;
+    // Astro 빌드가 없으면 PHP로 계속 진행 (아래 PHP 처리 블록)
+  }
+
+  // PHP 파일 경로 결정
+  let phpFile = path;
+  if (!phpFile || phpFile === "/") phpFile = "/index.php";
+  else if (!phpFile.endsWith(".php")) {
+    if (phpFile === "/wp-admin" || phpFile === "/wp-admin/") phpFile = "/wp-admin/index.php";
+    else if (phpFile.startsWith("/wp-admin/")) phpFile = phpFile.replace(/\/$/, "");
+    else phpFile = "/index.php";
+  }
+
+  const payload = {
+    phpFile,
+    phpEnv: {
+      WP_HOME:    siteUrl, WP_SITEURL: siteUrl,
+      REQUEST_URI:    path + url.search,
+      REQUEST_METHOD: method,
+      HTTP_HOST:      url.host, SERVER_NAME: url.host,
+      SERVER_PORT:    url.port || (url.protocol === "https:" ? "443" : "80"),
+      HTTPS:          url.protocol === "https:" ? "on" : "",
+      DOCUMENT_ROOT:  "/wordpress",
+      SCRIPT_FILENAME: `/wordpress${phpFile}`,
+      SCRIPT_NAME:    phpFile,
+      PHP_SELF:       phpFile,
+      GATEWAY_INTERFACE: "CGI/1.1",
+      SERVER_PROTOCOL:   "HTTP/1.1",
+      SERVER_SOFTWARE:   "CloudPress/5.0",
+      HTTP_COOKIE:          request.headers.get("Cookie")            || "",
+      HTTP_USER_AGENT:      request.headers.get("User-Agent")        || "CloudPress",
+      HTTP_ACCEPT:          request.headers.get("Accept")            || "*/*",
+      HTTP_ACCEPT_LANGUAGE: request.headers.get("Accept-Language")   || "ko-KR,ko;q=0.9",
+      HTTP_ACCEPT_ENCODING: request.headers.get("Accept-Encoding")   || "gzip",
+      HTTP_REFERER:         request.headers.get("Referer")           || "",
+      HTTP_X_FORWARDED_FOR: request.headers.get("CF-Connecting-IP")  || "",
+      CONTENT_TYPE:         request.headers.get("Content-Type")      || "",
+      CONTENT_LENGTH:       String(postBody.length),
+      QUERY_STRING:         url.search.replace(/^\?/, ""),
+      GITHUB_OWNER: mirror.owner,
+      GITHUB_REPO:  mirror.repo,
+      GITHUB_TOKEN: mirror.token,
+      CLOUDPRESS_SITE_ID: env.SITE_ID || "",
+    },
+    stdin:  postBody,
+    files: {
+      "/wordpress/wp-config.php":     wpConfig,
+      "/wordpress/wp-content/db.php": dbPhp,
+    },
+    siteId:    env.SITE_ID || "",
+    skipCache: !isCacheable,
+  };
+
+  // ── PHP Runner 호출 (Service Binding) ────────────────────────────────────
+  let phpRes = null;
+  if (!env.PHP_RUNNER) {
+    console.warn("[PHP_RUNNER] 바인딩 없음 → 정적 캐시 폴백");
+  } else {
+    try {
+      phpRes = await env.PHP_RUNNER.fetch(
+        new Request("https://php/run-wordpress", {
+          method:  "POST",
+          headers: { "Content-Type": "application/json" },
+          body:    JSON.stringify(payload),
+        })
+      );
+    } catch (e) {
+      console.error("[PHP_RUNNER] 호출 실패:", e.message);
+    }
+  }
+
+  // PHP Runner 실패(5xx, 예외) → _cache/ 정적 HTML 폴백
+  if (!phpRes || phpRes.status >= 500) {
+    const staticRes = await serveStaticCache();
+    if (staticRes) return staticRes;
+
+    const ghRes = await serveGhPages();
+    if (ghRes) return ghRes;
+
+    // 모든 폴백 실패: KV stale 캐시 최후 시도
+    const stale = await kvGet(`php:${url.pathname}${url.search}`);
+    if (stale) {
+      return new Response(stale, {
+        headers: {
+          "Content-Type":  "text/html; charset=utf-8",
+          "Cache-Control": "public, max-age=30",
+          "X-Fallback":    "kv-stale",
+        },
+      });
+    }
+
+    return new Response(`<!DOCTYPE html>
+<html lang="ko"><head><meta charset="UTF-8"><meta http-equiv="refresh" content="15">
+<title>일시적 오류</title>
+<style>body{font-family:sans-serif;background:#f0f0f1;display:flex;align-items:center;
+  justify-content:center;min-height:100vh;margin:0}.card{background:#fff;border:1px solid #c3c4c7;
+  border-radius:4px;max-width:440px;padding:40px;text-align:center}
+.badge{background:#d63638;color:#fff;font-size:11px;font-weight:700;
+  padding:3px 10px;border-radius:3px;display:inline-block;margin-bottom:14px}
+h1{color:#1d2327;font-size:20px;margin:0 0 10px}
+p{color:#646970;font-size:14px;line-height:1.6;margin:0}</style>
+</head><body><div class="card">
+<div class="badge">ERROR</div>
+<h1>⚠️ 일시적 오류</h1>
+<p>WordPress 실행 중 오류가 발생했습니다.<br>15초 후 자동으로 다시 시도합니다.</p>
+</div></body></html>`,
+      { status: 502, headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" } }
+    );
+  }
+
+  // ── 미디어 업로드 미러링 (POST /wp-json/wp/v2/media) ────────────────────
+  if (path === "/wp-json/wp/v2/media" && method === "POST" && phpRes.status === 201 && ctx) {
+    ctx.waitUntil((async () => {
+      try {
+        const body = await phpRes.clone().json();
+        const sourceUrl = body?.source_url;
+        if (sourceUrl && mirror.enabled) {
+          const fileRes = await fetch(sourceUrl).catch(() => null);
+          if (fileRes?.ok) {
+            const buf  = await fileRes.arrayBuffer();
+            const now  = new Date();
+            const y    = now.getFullYear();
+            const m    = String(now.getMonth() + 1).padStart(2, "0");
+            const name = sourceUrl.split("/").pop() || "upload";
+            await mirror.put(`wordpress/wp-content/uploads/${y}/${m}/${name}`, buf, `upload: ${name}`);
+          }
+        }
+      } catch (e) { console.error("[mirror-upload]", e.message); }
+    })());
+  }
+
+  // ── PHP 출력 KV 캐시 저장 ────────────────────────────────────────────────
+  if (phpRes.status === 200 && isCacheable && ctx) {
+    const ct = phpRes.headers.get("Content-Type") || "";
+    if (ct.includes("text/html")) {
+      ctx.waitUntil((async () => {
+        const html = await phpRes.clone().text();
+        if (!html.includes("wpadminbar") && !html.includes("wordpress_logged_in")) {
+          await kvSet(`php:${url.pathname}${url.search}`, html, 3600);
+        }
+      })());
+    }
+  }
+
+  return phpRes;
+}
+
+// ─── MIME 타입 (worker.js 내부용) ───────────────────────────────────────────
+function mimeByExt(path) {
+  const ext = path.split(".").pop()?.toLowerCase() || "";
+  return ({
+    css:"text/css;charset=utf-8", js:"application/javascript;charset=utf-8",
+    mjs:"application/javascript;charset=utf-8", json:"application/json;charset=utf-8",
+    xml:"application/xml;charset=utf-8", svg:"image/svg+xml",
+    png:"image/png", jpg:"image/jpeg", jpeg:"image/jpeg", gif:"image/gif",
+    webp:"image/webp", avif:"image/avif", ico:"image/x-icon",
+    woff:"font/woff", woff2:"font/woff2", ttf:"font/ttf",
+    eot:"application/vnd.ms-fontobject", otf:"font/otf",
+    pdf:"application/pdf", zip:"application/zip",
+    mp4:"video/mp4", webm:"video/webm", mp3:"audio/mpeg",
+    ogg:"audio/ogg", wav:"audio/wav", txt:"text/plain;charset=utf-8",
+  })[ext] || "application/octet-stream";
+}
+
+// ─── JWT 인증 ───────────────────────────────────────────────────────────────
+
+async function verifyJWT(token, secret) {
+  try {
+    const parts = token.split(".");
+    if (parts.length !== 3) return null;
+    const [h, b, sig] = parts;
+    const pad = s => s + "=".repeat((4 - s.length % 4) % 4);
+    const key = await crypto.subtle.importKey(
+      "raw", new TextEncoder().encode(secret),
+      { name: "HMAC", hash: "SHA-256" }, false, ["verify"]
+    );
+    const sigBytes = Uint8Array.from(atob(pad(sig.replace(/-/g,"+").replace(/_/g,"/"))), c=>c.charCodeAt(0));
+    const valid = await crypto.subtle.verify("HMAC", key, sigBytes, new TextEncoder().encode(`${h}.${b}`));
+    if (!valid) return null;
+    const payload = JSON.parse(atob(pad(b.replace(/-/g,"+").replace(/_/g,"/"))));
+    if (payload.exp < Math.floor(Date.now()/1000)) return null;
+    return payload;
+  } catch { return null; }
+}
+
+// ─── API 라우터 (functions/ 핸들러를 worker.js에서 직접 import) ────────────
+// Cloudflare Workers(worker.js)는 Pages Functions(functions/)를 자동 실행하지 않으므로
+// /api/* 요청을 여기서 직접 라우팅한다.
+
+import { onRequestPost as loginHandler }  from "./functions/api/login.js";
+import { onRequestPost as signupHandler, onRequestGet as signupGet } from "./functions/api/signup.js";
+import { onRequestPost as logoutHandler } from "./functions/api/logout.js";
+import { onRequestGet  as meHandler }     from "./functions/api/me.js";
+import { onRequestGet  as healthHandler } from "./functions/api/health.js";
+import {
+  onRequestGet    as sitesGet,
+  onRequestPost   as sitesPost,
+  onRequestPut    as sitesPut,
+  onRequestDelete as sitesDelete,
+} from "./functions/api/sites.js";
+import {
+  onRequestGet    as accountGet,
+  onRequestPut    as accountPut,
+} from "./functions/api/account.js";
+import {
+  onRequestGet    as adminGet,
+  onRequestPost   as adminPost,
+  onRequestPut    as adminPut,
+  onRequestDelete as adminDelete,
+} from "./functions/api/admin.js";
+import {
+  onRequestGet    as cacheGet,
+  onRequestPut    as cachePut,
+  onRequestDelete as cacheDelete,
+} from "./functions/api/cache.js";
+import {
+  onRequestGet    as domainsGet,
+  onRequestPost   as domainsPost,
+  onRequestDelete as domainsDelete,
+} from "./functions/api/domains.js";
+import {
+  onRequestGet    as dnsGet,
+  onRequestPost   as dnsPost,
+  onRequestPut    as dnsPut,
+  onRequestDelete as dnsDelete,
+} from "./functions/api/dns.js";
+import {
+  onRequestGet    as logsGet,
+  onRequestPost   as logsPost,
+  onRequestDelete as logsDelete,
+} from "./functions/api/logs.js";
+import {
+  onRequestGet    as sshGet,
+  onRequestPost   as sshPost,
+  onRequestDelete as sshDelete,
+} from "./functions/api/ssh-keys.js";
+import {
+  onRequestGet as phpVerGet,
+  onRequestPut as phpVerPut,
+} from "./functions/api/php-versions.js";
+import {
+  onRequestGet    as backupsGet,
+  onRequestPost   as backupsPost,
+  onRequestDelete as backupsDelete,
+} from "./functions/api/backups.js";
+import {
+  onRequestGet    as notifyGet,
+  onRequestPost   as notifyPost,
+} from "./functions/api/notify.js";
+import {
+  onRequestPost as chatPost,
+} from "./functions/api/chat.js";
+import {
+  onRequestGet    as paymentGet,
+  onRequestPost   as paymentPost,
+} from "./functions/api/payment.js";
+import {
+  onRequestGet    as cardsGet,
+  onRequestPost   as cardsPost,
+  onRequestPatch  as cardsPatch,
+  onRequestDelete as cardsDelete,
+} from "./functions/api/payment/cards.js";
+import { onRequestGet as tossKeyGet } from "./functions/api/payment/toss-key.js";
+import {
+  onRequestGet    as productsGet,
+  onRequestPost   as productsPost,
+  onRequestDelete as productsDelete,
+} from "./functions/api/products.js";
+import {
+  onRequestGet    as githubStorageGet,
+  onRequestPost   as githubStoragePost,
+  onRequestDelete as githubStorageDelete,
+} from "./functions/api/github-storage.js";
+import {
+  onRequestGet    as accountDomainsGet,
+  onRequestPost   as accountDomainsPost,
+  onRequestPut    as accountDomainsPut,
+  onRequestDelete as accountDomainsDelete,
+} from "./functions/api/account-domains.js";
+import {
+  onRequestPost as accountPost,
+} from "./functions/api/account.js";
+import {
+  onRequestGet    as adminInquiriesGet,
+  onRequestPut    as adminInquiriesPut,
+  onRequestDelete as adminInquiriesDelete,
+} from "./functions/api/admin/inquiries.js";
+import {
+  onRequestGet    as adminAiGet,
+  onRequestPost   as adminAiPost,
+  onRequestPut    as adminAiPut,
+  onRequestDelete as adminAiDelete,
+} from "./functions/api/admin/ai-settings.js";
+import {
+  onRequestGet  as adminCmsGet,
+  onRequestPost as adminCmsPost,
+} from "./functions/api/admin/cms-settings.js";
+import {
+  onRequestGet  as adminWorkerDeployGet,
+  onRequestPost as adminWorkerDeployPost,
+} from "./functions/api/admin/worker-deploy.js";
+import {
+  onRequestGet    as adminNoticesGet,
+  onRequestPost   as adminNoticesPost,
+  onRequestPut    as adminNoticesPut,
+  onRequestDelete as adminNoticesDelete,
+} from "./functions/api/admin/notices.js";
+import {
+  onRequestGet    as editorGet,
+  onRequestPost   as editorPost,
+} from "./functions/api/editor.js";
+import { onRequest as middlewareHandler } from "./functions/_middleware.js";
+
+// Pages-Functions 스타일의 context 객체 생성
+function makeContext(request, env, params = {}, workerCtx = null) {
+  return {
+    request,
+    env,
+    params,
+    _workerCtx: workerCtx, // 실제 Workers ctx (waitUntil용)
+    next: async () => new Response("not found", { status: 404 }),
+    waitUntil: workerCtx
+      ? workerCtx.waitUntil.bind(workerCtx)
+      : () => {},
+  };
+}
+
+// /api/* 라우터
+async function handleApiRequest(request, env, _workerCtx = null) {
+  const url    = new URL(request.url);
+  const path   = url.pathname.replace(/\/$/, ""); // trailing slash 제거
+  const method = request.method.toUpperCase();
+
+  // admin 서브경로에서 path 파라미터 추출 (e.g. /api/admin/settings → "settings")
+  function extractAdminSubPath(fullPath) {
+    return fullPath
+      .replace(/^\/api\/admin\/?/, "")
+      .replace(/\?.*$/, "")
+      .replace(/^\/+|\/+$/g, "");
+  }
+
+  // 미들웨어 적용 (CORS, Rate Limit 등)
+  // next()가 실제 핸들러를 실행하도록 래핑
+  const runWithMiddleware = async (handler, params = {}) => {
+    const ctxWithNext = makeContext(request, env, params, _workerCtx);
+    ctxWithNext.next = async () => {
+      try { return await handler(ctxWithNext); }
+      catch (e) {
+        console.error("[api error]", e);
+        return new Response(JSON.stringify({ error: "내부 서버 오류: " + e.message }), {
+          status: 500,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+    };
+    return middlewareHandler(ctxWithNext);
+  };
+
+  // ── 인증
+  if (path === "/api/login")  return runWithMiddleware(method === "POST" ? loginHandler  : () => jsonErr("Method Not Allowed", 405));
+  if (path === "/api/signup") return runWithMiddleware(method === "POST" ? signupHandler : () => jsonErr("Method Not Allowed", 405));
+  if (path === "/api/logout") return runWithMiddleware(method === "POST" ? logoutHandler : () => jsonErr("Method Not Allowed", 405));
+  if (path === "/api/me")     return runWithMiddleware(method === "GET"  ? meHandler     : () => jsonErr("Method Not Allowed", 405));
+
+  // ── 헬스체크
+  if (path === "/api/health") return runWithMiddleware(healthHandler);
+
+  // ── 사이트 관리
+  if (path === "/api/sites") {
+    if (method === "GET")    return runWithMiddleware(sitesGet);
+    if (method === "POST")   return runWithMiddleware(sitesPost);
+    if (method === "PUT")    return runWithMiddleware(sitesPut);
+    if (method === "DELETE") return runWithMiddleware(sitesDelete);
+  }
+
+  // ── 계정
+  if (path === "/api/account") {
+    if (method === "GET") return runWithMiddleware(accountGet);
+    if (method === "PUT") return runWithMiddleware(accountPut);
+  }
+
+  // ── 관리자 서브경로 (구체적인 경로 먼저, startsWith보다 앞에 위치해야 함)
+  if (path === "/api/admin/inquiries" || path.startsWith("/api/admin/inquiries/")) {
+    const p = { path: extractAdminSubPath(path) || "inquiries" };
+    if (method === "GET")    return runWithMiddleware(adminInquiriesGet, p);
+    if (method === "PUT")    return runWithMiddleware(adminInquiriesPut, p);
+    if (method === "DELETE") return runWithMiddleware(adminInquiriesDelete, p);
+  }
+  if (path === "/api/admin/ai-settings") {
+    const p = { path: "ai-settings" };
+    if (method === "GET")    return runWithMiddleware(adminAiGet, p);
+    if (method === "POST")   return runWithMiddleware(adminAiPost, p);
+    if (method === "PUT")    return runWithMiddleware(adminAiPut, p);
+    if (method === "DELETE") return runWithMiddleware(adminAiDelete, p);
+  }
+  if (path === "/api/admin/cms-settings") {
+    const p = { path: "cms-settings" };
+    if (method === "GET")  return runWithMiddleware(adminCmsGet, p);
+    if (method === "POST") return runWithMiddleware(adminCmsPost, p);
+  }
+
+  // ── 공지 관리
+  if (path === "/api/admin/notices" || path.startsWith("/api/admin/notices/")) {
+    const p = { path: extractAdminSubPath(path) || "notices" };
+    if (method === "GET")    return runWithMiddleware(adminNoticesGet, p);
+    if (method === "POST")   return runWithMiddleware(adminNoticesPost, p);
+    if (method === "PUT")    return runWithMiddleware(adminNoticesPut, p);
+    if (method === "DELETE") return runWithMiddleware(adminNoticesDelete, p);
+  }
+
+  // ── Worker 배포
+  if (path === "/api/admin/worker-deploy") {
+    const p = { path: "worker-deploy" };
+    if (method === "GET")  return runWithMiddleware(adminWorkerDeployGet, p);
+    if (method === "POST") return runWithMiddleware(adminWorkerDeployPost, p);
+  }
+
+  // ── 관리자 (stats, users, sites, settings, quota-stats)
+  if (path.startsWith("/api/admin")) {
+    const p = { path: extractAdminSubPath(path) };
+    if (method === "GET")    return runWithMiddleware(adminGet, p);
+    if (method === "POST")   return runWithMiddleware(adminPost, p);
+    if (method === "PUT")    return runWithMiddleware(adminPut, p);
+    if (method === "DELETE") return runWithMiddleware(adminDelete, p);
+  }
+
+  // ── 캐시
+  if (path === "/api/cache") {
+    if (method === "GET")    return runWithMiddleware(cacheGet);
+    if (method === "PUT")    return runWithMiddleware(cachePut);
+    if (method === "DELETE") return runWithMiddleware(cacheDelete);
+  }
+
+  // ── 도메인
+  if (path === "/api/domains") {
+    if (method === "GET")    return runWithMiddleware(domainsGet);
+    if (method === "POST")   return runWithMiddleware(domainsPost);
+    if (method === "DELETE") return runWithMiddleware(domainsDelete);
+  }
+
+  // ── DNS
+  if (path === "/api/dns") {
+    if (method === "GET")    return runWithMiddleware(dnsGet);
+    if (method === "POST")   return runWithMiddleware(dnsPost);
+    if (method === "PUT")    return runWithMiddleware(dnsPut);
+    if (method === "DELETE") return runWithMiddleware(dnsDelete);
+  }
+
+  // ── 로그
+  if (path === "/api/logs") {
+    if (method === "GET")    return runWithMiddleware(logsGet);
+    if (method === "POST")   return runWithMiddleware(logsPost);
+    if (method === "DELETE") return runWithMiddleware(logsDelete);
+  }
+
+  // ── SSH 키
+  if (path === "/api/ssh-keys" || path.startsWith("/api/ssh-keys/")) {
+    if (method === "GET")    return runWithMiddleware(sshGet);
+    if (method === "POST")   return runWithMiddleware(sshPost);
+    if (method === "DELETE") return runWithMiddleware(sshDelete);
+  }
+
+  // ── PHP 버전
+  if (path === "/api/php-versions") {
+    if (method === "GET") return runWithMiddleware(phpVerGet);
+    if (method === "PUT") return runWithMiddleware(phpVerPut);
+  }
+
+  // ── 백업
+  if (path === "/api/backups" || path.startsWith("/api/backups/")) {
+    if (method === "GET")    return runWithMiddleware(backupsGet);
+    if (method === "POST")   return runWithMiddleware(backupsPost);
+    if (method === "DELETE") return runWithMiddleware(backupsDelete);
+  }
+
+  // ── 알림
+  if (path === "/api/notify" || path.startsWith("/api/notify/")) {
+    if (method === "GET")  return runWithMiddleware(notifyGet);
+    if (method === "POST") return runWithMiddleware(notifyPost);
+  }
+
+  // ── 챗봇
+  if (path === "/api/chat" || path.startsWith("/api/chat/")) {
+    if (method === "POST") return runWithMiddleware(chatPost);
+  }
+
+  // ── 결제
+  if (path === "/api/payment" || path.startsWith("/api/payment/")) {
+    // cards 서브경로
+    if (path === "/api/payment/cards") {
+      if (method === "GET")    return runWithMiddleware(cardsGet);
+      if (method === "POST")   return runWithMiddleware(cardsPost);
+      if (method === "PATCH")  return runWithMiddleware(cardsPatch);
+      if (method === "DELETE") return runWithMiddleware(cardsDelete);
+    }
+    // toss-key
+    if (path === "/api/payment/toss-key") {
+      if (method === "GET") return runWithMiddleware(tossKeyGet);
+    }
+    // 나머지 결제 (history, site-plan, client-key, request, confirm)
+    if (method === "GET")  return runWithMiddleware(paymentGet);
+    if (method === "POST") return runWithMiddleware(paymentPost);
+  }
+
+  // ── GitHub 스토리지
+  if (path === "/api/github-storage" || path.startsWith("/api/github-storage/")) {
+    if (method === "GET")    return runWithMiddleware(githubStorageGet);
+    if (method === "POST")   return runWithMiddleware(githubStoragePost);
+    if (method === "DELETE") return runWithMiddleware(githubStorageDelete);
+  }
+
+  // ── 계정 도메인
+  if (path === "/api/account-domains" || path.startsWith("/api/account-domains/")) {
+    if (method === "GET")    return runWithMiddleware(accountDomainsGet);
+    if (method === "POST")   return runWithMiddleware(accountDomainsPost);
+    if (method === "PUT")    return runWithMiddleware(accountDomainsPut);
+    if (method === "DELETE") return runWithMiddleware(accountDomainsDelete);
+  }
+
+  // ── 계정 비밀번호 변경 (POST)
+  if (path === "/api/account/password" || (path === "/api/account" && method === "POST")) {
+    return runWithMiddleware(accountPost);
+  }
+
+  // ── 코드 에디터
+  if (path.startsWith("/api/editor/")) {
+    if (method === "GET")  return runWithMiddleware(editorGet);
+    if (method === "POST") return runWithMiddleware(editorPost);
+  }
+
+  // ── 유료 상품 (CloudPressDB, CP3, CacheCloud)
+  if (path === "/api/products" || path.startsWith("/api/products/")) {
+    if (method === "GET")    return runWithMiddleware(productsGet);
+    if (method === "POST")   return runWithMiddleware(productsPost);
+    if (method === "DELETE") return runWithMiddleware(productsDelete);
+  }
+
+
+  // ── Google OAuth 콜백
+  if (path === "/api/oauth/google/callback" && method === "GET") {
+    const code  = url.searchParams.get("code");
+    const state = url.searchParams.get("state");
+    const error = url.searchParams.get("error");
+
+    if (error) {
+      return new Response(
+        `<html><body><script>window.opener&&window.opener.postMessage({type:'gdrive_oauth_error',error:${JSON.stringify(error)}},'*');window.close();</script><p>OAuth 오류: ${error}. 창을 닫아주세요.</p></body></html>`,
+        { headers: { "Content-Type": "text/html;charset=utf-8" } }
+      );
+    }
+    if (!code) {
+      return new Response(
+        `<html><body><script>window.opener&&window.opener.postMessage({type:'gdrive_oauth_error',error:'no_code'},'*');window.close();</script><p>인증 코드가 없습니다.</p></body></html>`,
+        { headers: { "Content-Type": "text/html;charset=utf-8" } }
+      );
+    }
+    try {
+      const rows = await env.DB.prepare(
+        "SELECT key, value FROM admin_settings WHERE key IN ('gdrive_client_id','gdrive_client_secret')"
+      ).all().catch(() => ({ results: [] }));
+      const s = {};
+      for (const r of rows.results || []) s[r.key] = r.value;
+
+      if (!s.gdrive_client_id || !s.gdrive_client_secret) {
+        return new Response(
+          `<html><body><script>window.opener&&window.opener.postMessage({type:'gdrive_oauth_error',error:'no_credentials'},'*');window.close();</script><p>Client ID/Secret이 설정되지 않았습니다.</p></body></html>`,
+          { headers: { "Content-Type": "text/html;charset=utf-8" } }
+        );
+      }
+
+      const redirectUri = new URL(request.url).origin + "/api/oauth/google/callback";
+      const tokenRes = await fetch("https://oauth2.googleapis.com/token", {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({
+          code,
+          client_id:     s.gdrive_client_id,
+          client_secret: s.gdrive_client_secret,
+          redirect_uri:  redirectUri,
+          grant_type:    "authorization_code",
+        }),
+      });
+      const tokenData = await tokenRes.json();
+
+      if (!tokenRes.ok || !tokenData.refresh_token) {
+        const errMsg = tokenData.error_description || tokenData.error || "token_exchange_failed";
+        return new Response(
+          `<html><body><script>window.opener&&window.opener.postMessage({type:'gdrive_oauth_error',error:${JSON.stringify(errMsg)}},'*');window.close();</script><p>토큰 교환 실패: ${errMsg}</p></body></html>`,
+          { headers: { "Content-Type": "text/html;charset=utf-8" } }
+        );
+      }
+
+      await env.DB.prepare(
+        "INSERT INTO admin_settings (key, value) VALUES ('gdrive_refresh_token', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value"
+      ).bind(tokenData.refresh_token).run();
+
+      return new Response(
+        `<html><body><script>window.opener&&window.opener.postMessage({type:'gdrive_oauth_success'},'*');window.close();</script><p>✅ Google Drive 연결 완료! 창이 자동으로 닫힙니다.</p></body></html>`,
+        { headers: { "Content-Type": "text/html;charset=utf-8" } }
+      );
+    } catch (e) {
+      return new Response(
+        `<html><body><script>window.opener&&window.opener.postMessage({type:'gdrive_oauth_error',error:${JSON.stringify(e.message)}},'*');window.close();</script><p>서버 오류: ${e.message}</p></body></html>`,
+        { headers: { "Content-Type": "text/html;charset=utf-8" } }
+      );
+    }
+  }
+
+  return jsonErr("API 경로를 찾을 수 없습니다.", 404);
+}
+
+// ─── 메인 핸들러 ───────────────────────────────────────────────────────────
+
+export default {
+  async fetch(request, env, ctx) {
+    const url    = new URL(request.url);
+    const method = request.method.toUpperCase();
+
+    if (method === "OPTIONS") {
+      return new Response(null, { status: 204, headers: {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Methods": "GET,POST,PUT,DELETE,OPTIONS",
+        "Access-Control-Allow-Headers": "Content-Type,Authorization",
+      }});
+    }
+
+    // ── /api/* 는 항상 API 라우터로
+    if (url.pathname.startsWith("/api/")) {
+      return handleApiRequest(request, env, ctx);
+    }
+
+    // ── WordPress 사이트 Worker (GITHUB_OWNER/REPO 환경변수 있으면 → 무조건 WordPress)
+    // 사이트별 Worker는 플랫폼 페이지를 서빙하지 않음
+    if (env.GITHUB_OWNER && env.GITHUB_REPO) {
+      return handleWordPressRequest(request, env, ctx);
+    }
+
+    // ── 이하는 CloudPress 플랫폼 메인 Worker (GITHUB_OWNER 없음)
+    const platformPages = [
+      '/dashboard', '/hosting', '/hosting-create', '/hosting-detail',
+      '/domains', '/dns', '/traffic', '/storage', '/editor',
+      '/account', '/payment', '/payments', '/payment-success', '/pricing',
+      '/services', '/product-cachecloud', '/product-cp3', '/product-cloudpressdb',
+      '/login', '/signup', '/admin', '/admin-users', '/admin-sites',
+      '/admin-inquiries', '/admin-notices', '/admin-settings', '/about', '/contact',
+      '/features', '/faq', '/notices', '/chat',
+    ];
+
+    // 루트 / → index.html
+    if (url.pathname === '/' && env.ASSETS) {
+      try {
+        const indexUrl = new URL(request.url);
+        indexUrl.pathname = '/index.html';
+        const res = await env.ASSETS.fetch(new Request(indexUrl.toString(), request));
+        if (res.ok) return res;
+      } catch (_) {}
+    }
+
+    // 정적 파일 → ASSETS
+    const isStaticAsset =
+      url.pathname.endsWith('.html') ||
+      url.pathname.endsWith('.css') ||
+      url.pathname.endsWith('.js') ||
+      url.pathname.startsWith('/src/') ||
+      url.pathname.startsWith('/favicon');
+    if (isStaticAsset && env.ASSETS) {
+      try {
+        const res = await env.ASSETS.fetch(request);
+        if (res.ok) return res;
+      } catch (_) {}
+    }
+
+    // 플랫폼 경로 → .html ASSETS
+    if (platformPages.includes(url.pathname) && env.ASSETS) {
+      try {
+        const htmlUrl = new URL(request.url);
+        htmlUrl.pathname = url.pathname + '.html';
+        const res = await env.ASSETS.fetch(new Request(htmlUrl.toString(), request));
+        if (res.ok) return res;
+      } catch (_) {}
+    }
+
+    if (env.ASSETS) {
+      try {
+        const res = await env.ASSETS.fetch(request);
+        if (res.ok) return res;
+      } catch (_) {}
+    }
+
+    // Fallback: index.html (SPA 라우팅 지원)
+    if (env.ASSETS) {
+      try {
+        const indexUrl = new URL(request.url);
+        indexUrl.pathname = '/index.html';
+        return await env.ASSETS.fetch(new Request(indexUrl.toString(), request));
+      } catch (_) {}
+    }
+
+    return new Response("CloudPress WordPress Hosting Platform v5.0", {
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
+    });
+  },
+};

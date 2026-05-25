@@ -2710,7 +2710,7 @@ jobs:
 `,
   };
 }
-    ".github/workflows/astro-build.yml": `name: Astro 프론트엔드 빌드 (PHP/JS→Astro/TS 자동 변환)
+    ".github/workflows/astro-build.yml"; `name: Astro 프론트엔드 빌드 (PHP/JS→Astro/TS 자동 변환)
 
 on:
   push:

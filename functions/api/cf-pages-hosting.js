@@ -3281,6 +3281,7 @@ export async function provisionCloudflarePagesHosting({
 
       await log("▶ [5/6] GitHub 레포에 파일 push 중 (WordPress 백엔드 + Astro/TS 프론트엔드)...");
       const pushed = await ghBatchPush(ghToken, owner, repoName, filesToPush, "🚀 CloudPress 초기 설정 (WP 백엔드 + Astro/TS 프론트엔드)");
+      let cacheCloudUrl = null;  // ← 스코프를 블록 바깥으로 hoisting
       if (pushed) {
         githubRepoUrl = `https://github.com/${owner}/${repoName}`;
         await log(`✅ GitHub 레포 push 완료: ${githubRepoUrl}`);
@@ -3337,7 +3338,6 @@ export async function provisionCloudflarePagesHosting({
         await log("  ✅ GitHub Actions 환경변수 등록 완료");
 
         // ── [신규] CacheCloud 구독 중이면 CDN Worker 실제 배포 ───────────────
-        let cacheCloudUrl = null;
         if (hasCacheCloud && cfToken && cfAccountId && workerDomain) {
           await log("▶ [5.5/6] CacheCloud Worker 배포 (구독 확인됨)...");
           cacheCloudUrl = await deployCacheCloudWorkerForSite({

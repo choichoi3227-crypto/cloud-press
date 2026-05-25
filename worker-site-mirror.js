@@ -6,11 +6,13 @@
  * 처리 순서:
  *   1. PHP Runner Service Binding
  *   2. KV 캐시 HIT (정적 자산)
- *   3. wp-content / wp-includes / wp-admin 정적 자산 → GitHub raw
- *   4. _cache/ 정적 HTML → GitHub raw
- *   5. 일반 정적 자산 GitHub raw
- *   6. GitHub Pages 폴백
- *   최종: WordPress 스타일 404 (준비 중/설치 중 페이지 없음)
+ *   3. WordPress 핵심 디렉터리 정적 자산 → GitHub raw
+ *   4. dist/ (Astro 빌드 결과) 정적 HTML → GitHub raw
+ *   4b. Astro 정적 자산 (dist/_assets/)
+ *   5. _cache/ 정적 HTML → GitHub raw (레거시 폴백)
+ *   6. 일반 정적 자산 → GitHub raw
+ *   7. GitHub Pages 폴백
+ *   최종: 404 페이지
  */
 
 const GH_BRANCH  = "main";
@@ -252,7 +254,43 @@ export default {
       }
     }
 
-    // ── 4차: _cache/ 정적 HTML ───────────────────────────────────────────────
+    // ── 4차: dist/ (Astro 빌드 결과) 정적 HTML ──────────────────────────────
+    if (isGet && !STATIC_EXT.test(path) && !WP_PHP_PATHS.test(path) && !WP_PHP_FILES.test(path)) {
+      const clean = path.replace(/\/$/, "") || "/";
+      const distCandidates = [
+        `dist${clean}/index.html`,
+        `dist${clean}.html`,
+      ];
+      if (path === "/" || path === "") distCandidates.unshift("dist/index.html");
+
+      for (const dp of distCandidates) {
+        const res = await ghRaw(env, dp, 60);
+        if (res) {
+          const raw  = await res.text();
+          const html = ensureCharsetMeta(raw);
+          return new Response(html, {
+            headers: {
+              "Content-Type":  "text/html;charset=utf-8",
+              "Cache-Control": "public,max-age=60,s-maxage=300",
+              ...SEC,
+            },
+          });
+        }
+      }
+    }
+
+    // ── 4-b차: Astro 정적 자산 (dist/_assets/) ──────────────────────────────
+    if (isGet && STATIC_EXT.test(path)) {
+      const distAsset = await ghRaw(env, "dist" + path, 86400);
+      if (distAsset) {
+        const body = await distAsset.arrayBuffer();
+        return new Response(body, {
+          headers: { "Content-Type": mime(path), "Cache-Control": "public,max-age=86400,immutable", ...SEC },
+        });
+      }
+    }
+
+    // ── 5차: _cache/ 정적 HTML ───────────────────────────────────────────────
     if (isGet && !STATIC_EXT.test(path) && !WP_PHP_PATHS.test(path) && !WP_PHP_FILES.test(path)) {
       let cp = "_cache" + path;
       if (cp.endsWith("/")) cp += "index.html";
@@ -262,7 +300,6 @@ export default {
       if (!res) res = await ghRaw(env, "_cache" + path + ".html", 60);
 
       if (res) {
-        // ▼▼▼ 인코딩 깨짐 핵심 수정: 텍스트로 읽어서 charset meta 보장 후 반환 ▼▼▼
         const raw  = await res.text();
         const html = ensureCharsetMeta(raw);
         return new Response(html, {
@@ -271,18 +308,6 @@ export default {
             "Cache-Control": "public,max-age=60,s-maxage=300",
             ...SEC,
           },
-        });
-      }
-    }
-
-    // ── 5차: 일반 정적 자산 GitHub raw ──────────────────────────────────────
-    if (isGet && STATIC_EXT.test(path)) {
-      let res = await ghRaw(env, "wordpress" + path, 3600);
-      if (!res) res = await ghRaw(env, path.slice(1), 3600);
-      if (res) {
-        const body = await res.arrayBuffer();
-        return new Response(body, {
-          headers: { "Content-Type": mime(path), "Cache-Control": "public,max-age=3600", ...SEC },
         });
       }
     }

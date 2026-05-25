@@ -3167,6 +3167,7 @@ export async function provisionCloudflarePagesHosting({
 
   // ── 7. GitHub 레포 + 파일 push ────────────────────────────────────────────
   let githubRepoUrl = null;
+  let cacheCloudUrl = null; // 외부 스코프에 선언 — if(pushed) 블록 바깥에서도 참조 가능
   if (ghToken && owner) {
     await log("▶ GitHub 레포 생성 + 파일 push...");
     const created = await createGitHubRepo({ ghToken, owner, repoName, log });
@@ -3281,7 +3282,6 @@ export async function provisionCloudflarePagesHosting({
 
       await log("▶ [5/6] GitHub 레포에 파일 push 중 (WordPress 백엔드 + Astro/TS 프론트엔드)...");
       const pushed = await ghBatchPush(ghToken, owner, repoName, filesToPush, "🚀 CloudPress 초기 설정 (WP 백엔드 + Astro/TS 프론트엔드)");
-      let cacheCloudUrl = null;  // ← 스코프를 블록 바깥으로 hoisting
       if (pushed) {
         githubRepoUrl = `https://github.com/${owner}/${repoName}`;
         await log(`✅ GitHub 레포 push 완료: ${githubRepoUrl}`);

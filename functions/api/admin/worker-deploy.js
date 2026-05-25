@@ -206,6 +206,27 @@ export async function onRequestPost(context) {
 
   const { action } = body;
 
+  // ── GitHub 설정 저장 ────────────────────────────────────────────────────
+  if (action === "save_github_settings") {
+    const { github_owner, github_token } = body;
+    if (!github_owner) return jsonErr("GitHub Owner를 입력해주세요.", 400);
+
+    await setSetting(env, "admin_gh_owner", github_owner.trim());
+    if (github_token) {
+      if (!github_token.startsWith("ghp_") && !github_token.startsWith("github_pat_") && !github_token.startsWith("gho_")) {
+        return jsonErr("올바른 GitHub 토큰 형식이 아닙니다.", 400);
+      }
+      await setSetting(env, "admin_gh_worker_token", github_token.trim());
+    }
+
+    return jsonOk({
+      success: true,
+      message: "GitHub 설정이 저장되었습니다.",
+      github_owner: github_owner.trim(),
+      has_token: !!github_token,
+    });
+  }
+
   // ── CF API 키 저장 ──────────────────────────────────────────────────────
   if (action === "save_cf_api") {
     const { cf_api_key, cf_email } = body;
@@ -410,16 +431,19 @@ export async function onRequestGet(context) {
 
   await ensureTables(env);
 
-  const [hasKey, accountId, email, workers] = await Promise.all([
+  const [hasKey, accountId, email, ghOwner, hasGhToken, workers] = await Promise.all([
     getSetting(env, "admin_cf_api_key").then(v => !!v),
     getSetting(env, "admin_cf_account_id"),
     getSetting(env, "admin_cf_email"),
+    getSetting(env, "admin_gh_owner"),
+    getSetting(env, "admin_gh_worker_token").then(v => !!v),
     env.DB.prepare("SELECT * FROM deployed_workers ORDER BY created_at DESC").all()
       .catch(() => ({ results: [] })),
   ]);
 
   return jsonOk({
-    cf_api: { has_key: hasKey, account_id: accountId, email },
+    cf_api:  { has_key: hasKey, account_id: accountId, email },
+    github:  { owner: ghOwner, has_token: hasGhToken },
     workers: workers.results || [],
   });
 }

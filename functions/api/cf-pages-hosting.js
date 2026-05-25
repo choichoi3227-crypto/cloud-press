@@ -447,8 +447,8 @@ async function buildWorkerSource({ siteId, githubOwner, githubRepo, ghPagesUrl, 
     src = null;
   }
   if (!src) {
-    // fallback: 최소 동작 worker (GH raw _cache/ 서빙)
-    src = `export default{async fetch(req,env,ctx){const url=new URL(req.url);const path=url.pathname;const o=env.GH_OWNER||"${githubOwner}";const r=env.GH_REPO||"${githubRepo}";const t=env.GITHUB_TOKEN||"";if(!o||!r)return new Response("설정 오류",{status:503});const base=\`https://raw.githubusercontent.com/\${o}/\${r}/main\`;const cp=path==="/"?"_cache/index.html":("_cache"+path+(path.endsWith("/")?"":"/")+("index.html"));const res=await fetch(\`\${base}/\${cp}\`,{headers:{...(t?{Authorization:\`Bearer \${t}\`}:{})}}).catch(()=>null);if(res?.ok)return new Response(await res.arrayBuffer(),{headers:{"Content-Type":"text/html;charset=utf-8","Cache-Control":"no-store"}});return new Response("",{status:404})}};`;
+    // fallback: dist/ (Astro 빌드) → _cache/ 순서로 서빙하는 worker
+    src = `export default{async fetch(req,env,ctx){const url=new URL(req.url);const path=url.pathname;const o=env.GH_OWNER||"${githubOwner}";const r=env.GH_REPO||"${githubRepo}";const t=env.GITHUB_TOKEN||"";if(!o||!r||o==="%%GH_OWNER%%")return new Response("CloudPress: GH_OWNER/GH_REPO 미설정",{status:503});const base=\`https://raw.githubusercontent.com/\${o}/\${r}/main\`;const h={...(t?{Authorization:\`Bearer \${t}\`}:{})};const STATIC=/\.(css|js|png|jpg|jpeg|gif|webp|svg|ico|woff2?|ttf|otf|eot|map|txt|xml|pdf)$/i;function mime(p){const e=(p.split(".").pop()||"").toLowerCase();return{css:"text/css;charset=utf-8",js:"application/javascript;charset=utf-8",json:"application/json",svg:"image/svg+xml",png:"image/png",jpg:"image/jpeg",jpeg:"image/jpeg",gif:"image/gif",webp:"image/webp",ico:"image/x-icon",woff:"font/woff",woff2:"font/woff2",ttf:"font/ttf",xml:"application/xml",txt:"text/plain",html:"text/html;charset=utf-8"}[e]||"application/octet-stream"}async function ghRaw(fp){try{const res=await fetch(\`\${base}/\${fp}\`,{headers:h});if(res.ok)return res}catch{}return null}const candidates=[];if(STATIC.test(path)){candidates.push("dist"+path)}else if(path==="/"||path===""){candidates.push("dist/index.html","_cache/index.html")}else{const clean=path.replace(/\/$/,"");candidates.push(\`dist\${clean}/index.html\`,\`dist\${clean}.html\`,\`_cache\${clean}/index.html\`,\`_cache\${clean}.html\`)}for(const fp of candidates){const res=await ghRaw(fp);if(res){const ct=mime(fp);return new Response(res.body,{status:200,headers:{"Content-Type":ct,"Cache-Control":STATIC.test(fp)?"public,max-age=86400":"no-cache"}})}}const nf=await ghRaw("dist/404.html")||await ghRaw("_cache/404.html");if(nf)return new Response(nf.body,{status:404,headers:{"Content-Type":"text/html;charset=utf-8"}});return new Response("<html><body><h1>404</h1><p>페이지를 찾을 수 없습니다. WordPress 설치 후 Astro 빌드가 필요합니다.</p></body></html>",{status:404,headers:{"Content-Type":"text/html;charset=utf-8"}})}};`;
   }
   return src
     .replace(/%%GH_OWNER%%/g, (githubOwner || "").replace(/\\/g, "\\\\"))
@@ -1874,160 +1874,842 @@ async function initDbRepoFolders({ env, ghToken, owner, userId, siteId, log }) {
 // ─── PHP → Astro / JS → TS 자동 변환 ────────────────────────────────────────
 // WordPress PHP 프론트엔드 + JS 파일을 Astro 컴포넌트 + TypeScript로 자동 변환
 function convertPhpJsToAstroTs({ siteName, siteUrl, siteId }) {
+  const slug = (siteName || "site").toLowerCase().replace(/[^a-z0-9]+/g, "-");
   return {
-    "astro.config.mjs": `import { defineConfig } from 'astro/config';
-// CloudPress WordPress + Astro 프론트엔드 설정 (자동 생성 — PHP/JS 변환)
+    // ── astro.config.mjs (루트) ──────────────────────────────────────────────
+    "frontend/astro.config.mjs": `import { defineConfig } from 'astro/config';
+// CloudPress: WordPress PHP/JS → Astro/TS 자동 변환 (자동 생성)
 export default defineConfig({
   output: 'static',
-  build: { assets: 'assets' },
+  build: { assets: '_assets' },
   site: '${siteUrl}',
+  trailingSlash: 'ignore',
 });
 `,
+    // ── package.json ─────────────────────────────────────────────────────────
     "frontend/package.json": JSON.stringify({
-      name: `${(siteName || "site").toLowerCase().replace(/[^a-z0-9]+/g, "-")}-frontend`,
+      name: `${slug}-frontend`,
       version: "0.1.0",
       private: true,
       scripts: { dev: "astro dev", build: "astro build", preview: "astro preview" },
-      dependencies: { astro: "^4.0.0", typescript: "^5.0.0" },
+      dependencies: { astro: "^4.15.0", typescript: "^5.5.0" },
     }, null, 2),
-    // Layout.astro — WordPress header.php + footer.php 변환
+    // ── tsconfig.json ────────────────────────────────────────────────────────
+    "frontend/tsconfig.json": JSON.stringify({
+      extends: "astro/tsconfigs/strict",
+      compilerOptions: { baseUrl: ".", paths: { "@/*": ["./src/*"], "@components/*": ["./src/components/*"], "@layouts/*": ["./src/layouts/*"], "@utils/*": ["./src/utils/*"] } },
+    }, null, 2),
+
+    // ━━━ utils/wp-api.ts — WordPress 함수들 → TypeScript 변환 ━━━━━━━━━━━━━━
+    "frontend/src/utils/wp-api.ts": `// wp-api.ts — 자동 변환: WordPress PHP/JS 함수 → TypeScript
+// 원본: get_posts(), get_post(), get_page(), bloginfo(), get_the_category() 등
+const API = '${siteUrl}/wp-json/wp/v2';
+
+export interface WpPost {
+  id: number; slug: string; link: string; status: string; type: string;
+  title: { rendered: string };
+  content: { rendered: string; protected: boolean };
+  excerpt: { rendered: string; protected: boolean };
+  date: string; modified: string;
+  author: number; featured_media: number;
+  categories: number[]; tags: number[];
+  _embedded?: {
+    author?: Array<{ id: number; name: string; slug: string; avatar_urls: Record<string, string> }>;
+    'wp:featuredmedia'?: Array<{ id: number; source_url: string; alt_text: string; media_details: { width: number; height: number; sizes: Record<string, { source_url: string }> } }>;
+    'wp:term'?: Array<Array<{ id: number; name: string; slug: string; taxonomy: string }>>;
+  };
+}
+export interface WpPage {
+  id: number; slug: string; link: string; parent: number;
+  title: { rendered: string };
+  content: { rendered: string };
+  excerpt: { rendered: string };
+  date: string; modified: string; menu_order: number;
+}
+export interface WpCategory {
+  id: number; slug: string; name: string; description: string;
+  count: number; parent: number; link: string;
+}
+export interface WpTag {
+  id: number; slug: string; name: string; description: string; count: number;
+}
+export interface WpMedia {
+  id: number; slug: string; source_url: string; alt_text: string;
+  media_type: string; mime_type: string;
+  media_details: { width: number; height: number; sizes: Record<string, { source_url: string; width: number; height: number }> };
+}
+export interface WpUser {
+  id: number; slug: string; name: string; description: string;
+  avatar_urls: Record<string, string>; link: string;
+}
+export interface WpMenu {
+  id: number; slug: string; name: string;
+  items: Array<{ id: number; title: string; url: string; parent: number; order: number }>;
+}
+export interface WpSiteInfo {
+  name: string; description: string; url: string; home: string;
+  gmt_offset: number; timezone_string: string;
+  namespaces: string[];
+}
+
+async function apiFetch<T>(endpoint: string, options?: RequestInit): Promise<T | null> {
+  try {
+    const res = await fetch(\`\${API}\${endpoint}\`, { ...options, headers: { 'Content-Type': 'application/json', ...options?.headers } });
+    if (!res.ok) return null;
+    return await res.json() as T;
+  } catch { return null; }
+}
+
+// get_posts() — 포스트 목록
+export async function getPosts(args: { perPage?: number; page?: number; categoryId?: number; tagId?: number; authorId?: number; search?: string; embed?: boolean } = {}): Promise<WpPost[]> {
+  const { perPage = 10, page = 1, categoryId, tagId, authorId, search, embed = true } = args;
+  const params = new URLSearchParams({ per_page: String(perPage), page: String(page) });
+  if (categoryId) params.set('categories', String(categoryId));
+  if (tagId)      params.set('tags', String(tagId));
+  if (authorId)   params.set('author', String(authorId));
+  if (search)     params.set('search', search);
+  if (embed)      params.set('_embed', '1');
+  return await apiFetch<WpPost[]>(\`/posts?\${params}\`) ?? [];
+}
+
+// get_post() — 단일 포스트 (slug 기반)
+export async function getPost(slug: string): Promise<WpPost | null> {
+  const posts = await apiFetch<WpPost[]>(\`/posts?slug=\${encodeURIComponent(slug)}&_embed=1\`);
+  return posts?.[0] ?? null;
+}
+
+// get_page() — 단일 페이지 (slug 기반)
+export async function getPage(slug: string): Promise<WpPage | null> {
+  const pages = await apiFetch<WpPage[]>(\`/pages?slug=\${encodeURIComponent(slug)}&_embed=1\`);
+  return pages?.[0] ?? null;
+}
+
+// get_pages() — 페이지 목록
+export async function getPages(perPage = 100): Promise<WpPage[]> {
+  return await apiFetch<WpPage[]>(\`/pages?per_page=\${perPage}&_embed=1\`) ?? [];
+}
+
+// get_categories() — 카테고리 목록
+export async function getCategories(hideEmpty = true): Promise<WpCategory[]> {
+  return await apiFetch<WpCategory[]>(\`/categories?per_page=100&hide_empty=\${hideEmpty}\`) ?? [];
+}
+
+// get_category() — 카테고리 상세 (slug 기반)
+export async function getCategory(slug: string): Promise<WpCategory | null> {
+  const cats = await apiFetch<WpCategory[]>(\`/categories?slug=\${encodeURIComponent(slug)}\`);
+  return cats?.[0] ?? null;
+}
+
+// get_tags() — 태그 목록
+export async function getTags(): Promise<WpTag[]> {
+  return await apiFetch<WpTag[]>('/tags?per_page=100&hide_empty=true') ?? [];
+}
+
+// get_tag() — 태그 상세 (slug 기반)
+export async function getTag(slug: string): Promise<WpTag | null> {
+  const tags = await apiFetch<WpTag[]>(\`/tags?slug=\${encodeURIComponent(slug)}\`);
+  return tags?.[0] ?? null;
+}
+
+// get_userdata() / get_author_posts_url() — 작성자 정보
+export async function getAuthor(slugOrId: string | number): Promise<WpUser | null> {
+  if (typeof slugOrId === 'number') return await apiFetch<WpUser>(\`/users/\${slugOrId}\`);
+  const users = await apiFetch<WpUser[]>(\`/users?slug=\${encodeURIComponent(String(slugOrId))}\`);
+  return users?.[0] ?? null;
+}
+
+// wp_get_attachment_url() — 미디어 URL
+export async function getMedia(id: number): Promise<WpMedia | null> {
+  return await apiFetch<WpMedia>(\`/media/\${id}\`);
+}
+
+// bloginfo() — 사이트 정보
+export async function getSiteInfo(): Promise<WpSiteInfo | null> {
+  try {
+    const res = await fetch('${siteUrl}/wp-json');
+    return res.ok ? await res.json() : null;
+  } catch { return null; }
+}
+
+// get_search_results() — 검색
+export async function searchPosts(query: string, perPage = 10): Promise<WpPost[]> {
+  return await getPosts({ search: query, perPage });
+}
+
+// get_post_thumbnail_url() — 대표 이미지 URL 추출 (헬퍼)
+export function getFeaturedImageUrl(post: WpPost, size: 'thumbnail' | 'medium' | 'large' | 'full' = 'large'): string | null {
+  const media = post._embedded?.['wp:featuredmedia']?.[0];
+  if (!media) return null;
+  return media.media_details?.sizes?.[size]?.source_url ?? media.source_url ?? null;
+}
+
+// get_the_date() — 날짜 포맷
+export function formatDate(dateString: string, locale = 'ko-KR'): string {
+  try {
+    return new Date(dateString).toLocaleDateString(locale, { year: 'numeric', month: 'long', day: 'numeric' });
+  } catch { return dateString; }
+}
+
+// get_avatar_url() — 아바타 URL
+export function getAvatarUrl(post: WpPost, size = 96): string | null {
+  return post._embedded?.author?.[0]?.avatar_urls?.[String(size)] ?? null;
+}
+
+// the_excerpt() — 발췌문 텍스트 추출
+export function stripHtml(html: string): string {
+  return html.replace(/<[^>]*>/g, '').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').trim();
+}
+
+// get_post_class() — 포스트 CSS 클래스
+export function getPostClass(post: WpPost): string {
+  return ['post', \`post-\${post.id}\`, post.type, \`status-\${post.status}\`].join(' ');
+}
+`,
+
+    // ━━━ utils/wp-hooks.ts — WordPress add_action/add_filter → TS ━━━━━━━━━━
+    "frontend/src/utils/wp-hooks.ts": `// wp-hooks.ts — 자동 변환: WordPress add_action/add_filter → TypeScript 이벤트 시스템
+type HookCallback = (...args: unknown[]) => unknown;
+const _actions: Record<string, HookCallback[]> = {};
+const _filters: Record<string, HookCallback[]> = {};
+
+// add_action() 변환
+export function addAction(hook: string, callback: HookCallback): void {
+  (_actions[hook] ??= []).push(callback);
+}
+// do_action() 변환
+export function doAction(hook: string, ...args: unknown[]): void {
+  (_actions[hook] ?? []).forEach(cb => cb(...args));
+}
+// add_filter() 변환
+export function addFilter(hook: string, callback: HookCallback): void {
+  (_filters[hook] ??= []).push(callback);
+}
+// apply_filters() 변환
+export function applyFilters(hook: string, value: unknown, ...args: unknown[]): unknown {
+  return (_filters[hook] ?? []).reduce((v, cb) => cb(v, ...args), value);
+}
+`,
+
+    // ━━━ components/PostCard.astro — WordPress ループ → Astro コンポーネント ━
+    "frontend/src/components/PostCard.astro": `---
+// PostCard.astro — 자동 변환: WordPress ループ 아이템 → Astro 컴포넌트
+import type { WpPost } from '@utils/wp-api';
+import { getFeaturedImageUrl, formatDate, stripHtml } from '@utils/wp-api';
+export interface Props { post: WpPost; headingLevel?: 'h2' | 'h3'; }
+const { post, headingLevel: H = 'h2' } = Astro.props;
+const image = getFeaturedImageUrl(post, 'medium');
+const author = post._embedded?.author?.[0];
+const categories = post._embedded?.['wp:term']?.[0]?.filter(t => t.taxonomy === 'category') ?? [];
+const excerpt = stripHtml(post.excerpt.rendered).slice(0, 160);
+---
+<article class:list={['wp-post-card', \`post-\${post.id}\`]}>
+  {image && (
+    <a href={\`/\${post.slug}/\`} class="post-thumbnail">
+      <img src={image} alt={post.title.rendered} loading="lazy" decoding="async" />
+    </a>
+  )}
+  <div class="entry-content-wrapper">
+    <div class="entry-meta">
+      {categories.map(cat => (
+        <a href={\`/category/\${cat.slug}/\`} class="cat-link">{cat.name}</a>
+      ))}
+      <time datetime={post.date}>{formatDate(post.date)}</time>
+      {author && <span class="author">by <a href={\`/author/\${author.slug}/\`}>{author.name}</a></span>}
+    </div>
+    <H class="entry-title">
+      <a href={\`/\${post.slug}/\`} set:html={post.title.rendered} />
+    </H>
+    <div class="entry-excerpt"><p>{excerpt}…</p></div>
+    <a href={\`/\${post.slug}/\`} class="read-more">더 읽기 <span class="screen-reader-text">{post.title.rendered}</span></a>
+  </div>
+</article>
+`,
+
+    // ━━━ components/Pagination.astro ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    "frontend/src/components/Pagination.astro": `---
+// Pagination.astro — 자동 변환: WordPress paginate_links() → Astro 컴포넌트
+export interface Props { currentPage: number; totalPages: number; baseUrl: string; }
+const { currentPage, totalPages, baseUrl } = Astro.props;
+const pages = Array.from({ length: totalPages }, (_, i) => i + 1);
+---
+{totalPages > 1 && (
+  <nav class="pagination wp-pagenavi" aria-label="페이지 탐색">
+    {currentPage > 1 && <a href={\`\${baseUrl}page/\${currentPage - 1}/\`} class="prev page-numbers">← 이전</a>}
+    {pages.map(p => p === currentPage
+      ? <span class="page-numbers current" aria-current="page">{p}</span>
+      : <a href={p === 1 ? baseUrl : \`\${baseUrl}page/\${p}/\`} class="page-numbers">{p}</a>
+    )}
+    {currentPage < totalPages && <a href={\`\${baseUrl}page/\${currentPage + 1}/\`} class="next page-numbers">다음 →</a>}
+  </nav>
+)}
+`,
+
+    // ━━━ components/Comments.astro — WordPress comments_template() 변환 ━━━━━
+    "frontend/src/components/Comments.astro": `---
+// Comments.astro — 자동 변환: WordPress comments_template() → Astro 컴포넌트
+export interface Props { postId: number; commentsOpen: boolean; }
+const { postId, commentsOpen } = Astro.props;
+let comments: any[] = [];
+try {
+  const res = await fetch('${siteUrl}/wp-json/wp/v2/comments?post=' + postId + '&per_page=100&_embed=1');
+  if (res.ok) comments = await res.json();
+} catch {}
+---
+<section id="comments" class="comments-area">
+  {comments.length > 0 && (
+    <>
+      <h2 class="comments-title">{comments.length}개의 댓글</h2>
+      <ol class="comment-list">
+        {comments.map((c: any) => (
+          <li id={\`comment-\${c.id}\`} class="comment">
+            <article class="comment-body">
+              <footer class="comment-meta">
+                <img src={c.author_avatar_urls?.['48']} alt={c.author_name} width="48" height="48" class="avatar" />
+                <div class="comment-author"><b class="fn">{c.author_name}</b></div>
+                <div class="comment-metadata"><time datetime={c.date}>{new Date(c.date).toLocaleDateString('ko-KR')}</time></div>
+              </footer>
+              <div class="comment-content" set:html={c.content.rendered} />
+            </article>
+          </li>
+        ))}
+      </ol>
+    </>
+  )}
+  {commentsOpen && (
+    <div id="respond" class="comment-respond">
+      <h3 class="comment-reply-title">댓글 남기기</h3>
+      <p><a href={\`${siteUrl}/?p=\${postId}#respond\`} rel="noopener">WordPress에서 댓글 작성</a></p>
+    </div>
+  )}
+</section>
+`,
+
+    // ━━━ components/Sidebar.astro — WordPress get_sidebar() 변환 ━━━━━━━━━━━━
+    "frontend/src/components/Sidebar.astro": `---
+// Sidebar.astro — 자동 변환: WordPress get_sidebar() / dynamic_sidebar() → Astro 컴포넌트
+import { getCategories, getTags, getPosts } from '@utils/wp-api';
+const [categories, tags, recentPosts] = await Promise.all([
+  getCategories(), getTags(), getPosts({ perPage: 5 })
+]);
+---
+<aside id="secondary" class="widget-area">
+  <!-- 최근 글 위젯 — WordPress Recent Posts Widget 변환 -->
+  <section class="widget widget_recent_entries">
+    <h2 class="widget-title">최근 글</h2>
+    <ul>
+      {recentPosts.map(p => (
+        <li><a href={\`/\${p.slug}/\`} set:html={p.title.rendered} /></li>
+      ))}
+    </ul>
+  </section>
+  <!-- 카테고리 위젯 — WordPress Categories Widget 변환 -->
+  {categories.length > 0 && (
+    <section class="widget widget_categories">
+      <h2 class="widget-title">카테고리</h2>
+      <ul>
+        {categories.map(cat => (
+          <li class={\`cat-item cat-item-\${cat.id}\`}>
+            <a href={\`/category/\${cat.slug}/\`}>{cat.name}</a>
+            <span class="count">({cat.count})</span>
+          </li>
+        ))}
+      </ul>
+    </section>
+  )}
+  <!-- 태그 클라우드 위젯 — WordPress Tag Cloud Widget 변환 -->
+  {tags.length > 0 && (
+    <section class="widget widget_tag_cloud">
+      <h2 class="widget-title">태그</h2>
+      <div class="tagcloud">
+        {tags.map(tag => (
+          <a href={\`/tag/\${tag.slug}/\`} class="tag-cloud-link">{tag.name} ({tag.count})</a>
+        ))}
+      </div>
+    </section>
+  )}
+</aside>
+`,
+
+    // ━━━ layouts/Layout.astro — header.php + footer.php + functions.php 변환 ━
     "frontend/src/layouts/Layout.astro": `---
-// Layout.astro — 자동 변환: WordPress header.php + footer.php → Astro Layout
-export interface Props { title: string; description?: string; }
-const { title, description = '' } = Astro.props;
+// Layout.astro — 자동 변환: WordPress header.php + footer.php + wp_head/wp_footer → Astro Layout
+// 원본: get_header(), get_footer(), wp_head(), wp_footer(), body_class()
+import { getSiteInfo } from '@utils/wp-api';
+export interface Props {
+  title?: string; description?: string; ogImage?: string;
+  bodyClass?: string; noindex?: boolean;
+}
+const { title, description = '', ogImage, bodyClass = '', noindex = false } = Astro.props;
+const siteInfo = await getSiteInfo();
+const siteTitle = siteInfo?.name ?? '${siteName}';
+const siteDesc  = siteInfo?.description ?? '';
+const fullTitle = title ? \`\${title} – \${siteTitle}\` : siteTitle;
 ---
 <!DOCTYPE html>
 <html lang="ko">
 <head>
+  <!-- wp_head() 변환 -->
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>{title}</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>{fullTitle}</title>
   {description && <meta name="description" content={description} />}
+  {noindex && <meta name="robots" content="noindex,nofollow" />}
+  <!-- Open Graph — WordPress Yoast/RankMath og: 태그 변환 -->
+  <meta property="og:title"       content={fullTitle} />
+  <meta property="og:description" content={description || siteDesc} />
+  <meta property="og:type"        content="website" />
+  <meta property="og:url"         content={Astro.url.href} />
+  {ogImage && <meta property="og:image" content={ogImage} />}
+  <meta name="twitter:card"       content="summary_large_image" />
+  <!-- WordPress 테마 스타일시트 -->
   <link rel="stylesheet" href="/wp-content/themes/twentytwentyfour/style.css" />
+  <link rel="stylesheet" href="/_assets/style.css" />
+  <link rel="icon" href="/favicon.ico" />
+  <slot name="head" />
 </head>
-<body>
-  <header id="site-header">
-    <a href="/" class="site-title">${siteName}</a>
-    <nav><slot name="navigation" /></nav>
+<body class:list={['wp-site', bodyClass]}>
+  <!-- WordPress: get_header() 변환 -->
+  <header id="masthead" class="site-header">
+    <div class="site-branding">
+      <a href="/" class="site-logo" rel="home">{siteTitle}</a>
+      {siteDesc && <p class="site-description">{siteDesc}</p>}
+    </div>
+    <nav id="site-navigation" class="main-navigation" aria-label="기본 메뉴">
+      <ul class="nav-menu">
+        <li><a href="/">홈</a></li>
+        <li><a href="/blog/">블로그</a></li>
+        <li><a href="/about/">소개</a></li>
+        <li><a href="/contact/">문의</a></li>
+      </ul>
+    </nav>
   </header>
-  <main id="primary"><slot /></main>
-  <footer id="site-footer">
-    <p>&copy; {new Date().getFullYear()} ${siteName}. Powered by <a href="https://cloud-press.co.kr">CloudPress</a>.</p>
+  <!-- WordPress: the_content() 영역 -->
+  <div id="page" class="site">
+    <main id="primary" class="site-main">
+      <slot />
+    </main>
+    <slot name="sidebar" />
+  </div>
+  <!-- WordPress: get_footer() 변환 -->
+  <footer id="colophon" class="site-footer">
+    <div class="site-info">
+      <a href="${siteUrl}">{siteTitle}</a>
+      <span class="sep"> · </span>
+      <span>&copy; {new Date().getFullYear()} {siteTitle}. All rights reserved.</span>
+      <span class="sep"> · </span>
+      <a href="https://cloud-press.co.kr">Powered by CloudPress</a>
+    </div>
   </footer>
+  <!-- wp_footer() 변환 -->
+  <script src="/_assets/main.js" type="module" defer></script>
+  <slot name="footer-scripts" />
 </body>
 </html>
 `,
-    // index.astro — WordPress index.php 변환
+
+    // ━━━ pages/index.astro — index.php (WordPress ホーム) 変換 ━━━━━━━━━━━━━━
     "frontend/src/pages/index.astro": `---
-// index.astro — 자동 변환: WordPress index.php → Astro 페이지
-import Layout from '../layouts/Layout.astro';
-let posts: any[] = [];
-try {
-  const res = await fetch('${siteUrl}/wp-json/wp/v2/posts?per_page=10&_embed');
-  if (res.ok) posts = await res.json();
-} catch {}
+// index.astro — 자동 변환: WordPress index.php (홈 루프) → Astro
+import Layout from '@layouts/Layout.astro';
+import PostCard from '@components/PostCard.astro';
+import Sidebar from '@components/Sidebar.astro';
+import Pagination from '@components/Pagination.astro';
+import { getPosts, getSiteInfo } from '@utils/wp-api';
+const page = Number(Astro.url.searchParams.get('page') ?? 1);
+const [posts, siteInfo] = await Promise.all([getPosts({ perPage: 10, page, embed: true }), getSiteInfo()]);
 ---
-<Layout title="${siteName}">
-  <div class="wp-posts-list">
-    {posts.length > 0 ? posts.map((post: any) => (
-      <article class="wp-post" key={post.id}>
-        <h2><a href={'/post/' + post.slug} set:html={post.title.rendered} /></h2>
-        <div class="wp-post-excerpt" set:html={post.excerpt.rendered} />
-        <a href={'/post/' + post.slug}>더 읽기 →</a>
-      </article>
-    )) : <p>게시물이 없습니다.</p>}
+<Layout title={siteInfo?.name} description={siteInfo?.description} bodyClass="home blog">
+  <div id="content" class="site-content">
+    <div id="primary" class="content-area">
+      {posts.length > 0
+        ? posts.map(post => <PostCard post={post} headingLevel="h2" />)
+        : <p class="no-posts">아직 게시물이 없습니다.</p>
+      }
+      <Pagination currentPage={page} totalPages={5} baseUrl="/" />
+    </div>
+    <Sidebar slot="sidebar" />
   </div>
 </Layout>
 `,
-    // [slug].astro — WordPress single.php 변환
-    "frontend/src/pages/post/[slug].astro": `---
-// [slug].astro — 자동 변환: WordPress single.php → Astro 동적 라우트
-import Layout from '../../layouts/Layout.astro';
+
+    // ━━━ pages/[slug].astro — single.php (단일 포스트) 변환 ━━━━━━━━━━━━━━━━
+    "frontend/src/pages/[slug].astro": `---
+// [slug].astro — 자동 변환: WordPress single.php + page.php → Astro 동적 라우트
+import Layout from '@layouts/Layout.astro';
+import Sidebar from '@components/Sidebar.astro';
+import Comments from '@components/Comments.astro';
+import { getPosts, getPages, getPost, getPage, getFeaturedImageUrl, formatDate, getAvatarUrl } from '@utils/wp-api';
 export async function getStaticPaths() {
-  try {
-    const res = await fetch('${siteUrl}/wp-json/wp/v2/posts?per_page=100&_embed');
-    const posts = res.ok ? await res.json() : [];
-    return posts.map((post: any) => ({ params: { slug: post.slug }, props: { post } }));
-  } catch { return []; }
+  const [posts, pages] = await Promise.all([
+    getPosts({ perPage: 100, embed: true }),
+    getPages(100),
+  ]);
+  return [
+    ...posts.map(p => ({ params: { slug: p.slug }, props: { type: 'post', item: p } })),
+    ...pages.map(p => ({ params: { slug: p.slug }, props: { type: 'page', item: p } })),
+  ];
 }
-const { post } = Astro.props;
+const { type, item } = Astro.props;
+const image    = type === 'post' ? getFeaturedImageUrl(item as any, 'large') : null;
+const author   = type === 'post' ? (item as any)._embedded?.author?.[0] : null;
+const categories = type === 'post' ? ((item as any)._embedded?.['wp:term']?.[0]?.filter((t:any) => t.taxonomy === 'category') ?? []) : [];
+const tags     = type === 'post' ? ((item as any)._embedded?.['wp:term']?.[1] ?? []) : [];
 ---
-<Layout title={post?.title?.rendered ?? '포스트'}>
-  <article>
-    <h1 set:html={post?.title?.rendered} />
-    <div set:html={post?.content?.rendered} />
+<Layout
+  title={item.title.rendered}
+  description={(item.excerpt?.rendered ?? '').replace(/<[^>]*>/g, '').trim().slice(0, 160)}
+  ogImage={image ?? undefined}
+  bodyClass={\`single single-\${type} postid-\${item.id}\`}
+>
+  <article id={\`post-\${item.id}\`} class:list={['post', \`post-\${item.id}\`, type, 'hentry']}>
+    <header class="entry-header">
+      {image && <div class="post-thumbnail"><img src={image} alt={item.title.rendered} /></div>}
+      <h1 class="entry-title" set:html={item.title.rendered} />
+      {type === 'post' && (
+        <div class="entry-meta">
+          {author && (
+            <span class="posted-by">
+              {getAvatarUrl(item as any) && <img src={getAvatarUrl(item as any)!} alt={author.name} width="32" height="32" class="avatar" />}
+              <a href={\`/author/\${author.slug}/\`}>{author.name}</a>
+            </span>
+          )}
+          <time datetime={(item as any).date} class="entry-date">{formatDate((item as any).date)}</time>
+          {categories.length > 0 && (
+            <span class="cat-links">
+              {categories.map((c:any) => <a href={\`/category/\${c.slug}/\`}>{c.name}</a>)}
+            </span>
+          )}
+        </div>
+      )}
+    </header>
+    <div class="entry-content" set:html={item.content.rendered} />
+    {tags.length > 0 && (
+      <footer class="entry-footer">
+        <span class="tags-links">태그: {tags.map((t:any) => <a href={\`/tag/\${t.slug}/\`} rel="tag">{t.name}</a>)}</span>
+      </footer>
+    )}
   </article>
+  {type === 'post' && <Comments postId={item.id} commentsOpen={true} />}
+  <Sidebar slot="sidebar" />
 </Layout>
 `,
-    // wp-api.ts — JS WordPress 헬퍼 → TypeScript 변환
-    "frontend/src/utils/wp-api.ts": `// wp-api.ts — 자동 변환: WordPress JS 함수들 → TypeScript 모듈
-const WP_BASE = '${siteUrl}/wp-json/wp/v2';
 
-export interface WpPost {
-  id: number; slug: string;
-  title: { rendered: string }; content: { rendered: string };
-  excerpt: { rendered: string }; date: string;
-  _embedded?: { author?: Array<{ name: string }> };
+    // ━━━ pages/category/[slug].astro — category.php 변환 ━━━━━━━━━━━━━━━━━━━
+    "frontend/src/pages/category/[slug].astro": `---
+// category/[slug].astro — 자동 변환: WordPress category.php → Astro
+import Layout from '@layouts/Layout.astro';
+import PostCard from '@components/PostCard.astro';
+import Sidebar from '@components/Sidebar.astro';
+import Pagination from '@components/Pagination.astro';
+import { getCategories, getPosts } from '@utils/wp-api';
+export async function getStaticPaths() {
+  const cats = await getCategories();
+  return cats.map(cat => ({ params: { slug: cat.slug }, props: { cat } }));
 }
-export interface WpPage {
-  id: number; slug: string;
-  title: { rendered: string }; content: { rendered: string };
-}
-export interface WpMedia {
-  id: number; source_url: string; alt_text: string;
-  media_type: string; mime_type: string;
-}
-
-// get_posts() 변환
-export async function getPosts(perPage = 10): Promise<WpPost[]> {
-  try {
-    const res = await fetch(\`\${WP_BASE}/posts?per_page=\${perPage}&_embed\`);
-    return res.ok ? await res.json() as WpPost[] : [];
-  } catch { return []; }
-}
-
-// get_post() 변환
-export async function getPost(slug: string): Promise<WpPost | null> {
-  try {
-    const res = await fetch(\`\${WP_BASE}/posts?slug=\${slug}&_embed\`);
-    if (!res.ok) return null;
-    const posts = await res.json() as WpPost[];
-    return posts[0] ?? null;
-  } catch { return null; }
-}
-
-// get_page() 변환
-export async function getPage(slug: string): Promise<WpPage | null> {
-  try {
-    const res = await fetch(\`\${WP_BASE}/pages?slug=\${slug}\`);
-    if (!res.ok) return null;
-    const pages = await res.json() as WpPage[];
-    return pages[0] ?? null;
-  } catch { return null; }
-}
-
-// wp_get_attachment_url() 변환
-export async function getMediaUrl(id: number): Promise<string | null> {
-  try {
-    const res = await fetch(\`\${WP_BASE}/media/\${id}\`);
-    if (!res.ok) return null;
-    const media = await res.json() as WpMedia;
-    return media.source_url ?? null;
-  } catch { return null; }
-}
-
-// bloginfo() 변환
-export async function getSiteInfo(): Promise<Record<string, string>> {
-  try {
-    const res = await fetch('${siteUrl}/wp-json');
-    return res.ok ? await res.json() : {};
-  } catch { return {}; }
-}
+const { cat } = Astro.props;
+const posts = await getPosts({ categoryId: cat.id, perPage: 10, embed: true });
+---
+<Layout title={\`카테고리: \${cat.name}\`} description={cat.description} bodyClass={\`archive category category-\${cat.slug}\`}>
+  <header class="page-header">
+    <h1 class="page-title">카테고리: <span>{cat.name}</span></h1>
+    {cat.description && <div class="archive-description">{cat.description}</div>}
+  </header>
+  {posts.map(p => <PostCard post={p} headingLevel="h2" />)}
+  <Pagination currentPage={1} totalPages={Math.ceil(cat.count / 10)} baseUrl={\`/category/\${cat.slug}/\`} />
+  <Sidebar slot="sidebar" />
+</Layout>
 `,
-    "frontend/tsconfig.json": JSON.stringify({
-      extends: "astro/tsconfigs/strict",
-      compilerOptions: { baseUrl: ".", paths: { "@/*": ["./src/*"] } },
-    }, null, 2),
+
+    // ━━━ pages/tag/[slug].astro — tag.php 변환 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    "frontend/src/pages/tag/[slug].astro": `---
+// tag/[slug].astro — 자동 변환: WordPress tag.php → Astro
+import Layout from '@layouts/Layout.astro';
+import PostCard from '@components/PostCard.astro';
+import Sidebar from '@components/Sidebar.astro';
+import { getTags, getPosts } from '@utils/wp-api';
+export async function getStaticPaths() {
+  const tags = await getTags();
+  return tags.map(tag => ({ params: { slug: tag.slug }, props: { tag } }));
+}
+const { tag } = Astro.props;
+const posts = await getPosts({ tagId: tag.id, perPage: 10, embed: true });
+---
+<Layout title={\`태그: \${tag.name}\`} bodyClass={\`archive tag tag-\${tag.slug}\`}>
+  <header class="page-header">
+    <h1 class="page-title">태그: <span>{tag.name}</span></h1>
+  </header>
+  {posts.map(p => <PostCard post={p} headingLevel="h2" />)}
+  <Sidebar slot="sidebar" />
+</Layout>
+`,
+
+    // ━━━ pages/author/[slug].astro — author.php 변환 ━━━━━━━━━━━━━━━━━━━━━━━
+    "frontend/src/pages/author/[slug].astro": `---
+// author/[slug].astro — 자동 변환: WordPress author.php → Astro
+import Layout from '@layouts/Layout.astro';
+import PostCard from '@components/PostCard.astro';
+import Sidebar from '@components/Sidebar.astro';
+import { getPosts, getAuthor } from '@utils/wp-api';
+// 빌드 시 작성자 목록을 정적으로 생성하기 위해 포스트에서 author ID 수집
+export async function getStaticPaths() {
+  const posts = await getPosts({ perPage: 100, embed: true });
+  const authorMap = new Map<string, any>();
+  for (const p of posts) {
+    const a = p._embedded?.author?.[0];
+    if (a && !authorMap.has(a.slug)) authorMap.set(a.slug, a);
+  }
+  return [...authorMap.values()].map(a => ({ params: { slug: a.slug }, props: { author: a } }));
+}
+const { author } = Astro.props;
+const posts = await getPosts({ authorId: author.id, perPage: 10, embed: true });
+---
+<Layout title={\`작성자: \${author.name}\`} bodyClass={\`archive author author-\${author.slug}\`}>
+  <header class="page-header author-header">
+    {author.avatar_urls?.['96'] && <img src={author.avatar_urls['96']} alt={author.name} class="author-avatar" width="96" height="96" />}
+    <h1 class="page-title">{author.name}</h1>
+    {author.description && <p class="author-bio">{author.description}</p>}
+  </header>
+  {posts.map(p => <PostCard post={p} headingLevel="h2" />)}
+  <Sidebar slot="sidebar" />
+</Layout>
+`,
+
+    // ━━━ pages/search.astro — search.php 변환 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    "frontend/src/pages/search.astro": `---
+// search.astro — 자동 변환: WordPress search.php + searchform.php → Astro
+import Layout from '@layouts/Layout.astro';
+import PostCard from '@components/PostCard.astro';
+import Sidebar from '@components/Sidebar.astro';
+import { searchPosts } from '@utils/wp-api';
+const query = Astro.url.searchParams.get('s') ?? '';
+const posts = query ? await searchPosts(query, 10) : [];
+---
+<Layout title={query ? \`"\${query}" 검색 결과\` : '검색'} bodyClass="search">
+  <header class="page-header">
+    <h1 class="page-title">
+      {query ? <>{posts.length}개의 검색 결과: <span>"{query}"</span></> : '검색'}
+    </h1>
+  </header>
+  <!-- searchform.php 변환 -->
+  <form role="search" method="get" action="/search" class="search-form">
+    <label>
+      <span class="screen-reader-text">검색:</span>
+      <input type="search" name="s" value={query} placeholder="검색어 입력…" class="search-field" autofocus />
+    </label>
+    <button type="submit" class="search-submit">검색</button>
+  </form>
+  {posts.length > 0
+    ? posts.map(p => <PostCard post={p} headingLevel="h2" />)
+    : query && <p class="no-results">검색 결과가 없습니다. 다른 키워드로 검색해보세요.</p>
+  }
+  <Sidebar slot="sidebar" />
+</Layout>
+`,
+
+    // ━━━ pages/404.astro — 404.php 변환 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    "frontend/src/pages/404.astro": `---
+// 404.astro — 자동 변환: WordPress 404.php → Astro
+import Layout from '@layouts/Layout.astro';
+import Sidebar from '@components/Sidebar.astro';
+---
+<Layout title="페이지를 찾을 수 없습니다" bodyClass="error404" noindex={true}>
+  <section class="error-404 not-found">
+    <header class="page-header">
+      <h1 class="page-title">앗! 해당 페이지를 찾을 수 없습니다.</h1>
+    </header>
+    <div class="page-content">
+      <p>찾으시는 페이지가 이동, 삭제되었거나 주소가 잘못 입력되었습니다. 아래에서 찾으시는 내용을 검색해보세요.</p>
+      <form role="search" method="get" action="/search" class="search-form">
+        <input type="search" name="s" placeholder="검색어 입력…" class="search-field" />
+        <button type="submit" class="search-submit">검색</button>
+      </form>
+    </div>
+  </section>
+  <Sidebar slot="sidebar" />
+</Layout>
+`,
+
+    // ━━━ pages/blog/index.astro — home.php (블로그 루프) 변환 ━━━━━━━━━━━━━━━
+    "frontend/src/pages/blog/index.astro": `---
+// blog/index.astro — 자동 변환: WordPress home.php (포스트 목록 페이지) → Astro
+import Layout from '@layouts/Layout.astro';
+import PostCard from '@components/PostCard.astro';
+import Sidebar from '@components/Sidebar.astro';
+import Pagination from '@components/Pagination.astro';
+import { getPosts } from '@utils/wp-api';
+const page = Number(Astro.url.searchParams.get('page') ?? 1);
+const posts = await getPosts({ perPage: 10, page, embed: true });
+---
+<Layout title="블로그" bodyClass="blog home">
+  <header class="page-header">
+    <h1 class="page-title">블로그</h1>
+  </header>
+  {posts.map(p => <PostCard post={p} headingLevel="h2" />)}
+  <Pagination currentPage={page} totalPages={10} baseUrl="/blog/" />
+  <Sidebar slot="sidebar" />
+</Layout>
+`,
+
+    // ━━━ public/style.css — WordPress theme style.css 기본값 ━━━━━━━━━━━━━━━
+    "frontend/public/style.css": `/* CloudPress Astro Theme — WordPress TwentyTwentyFour 기반 자동 변환 */
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+html{font-size:16px;scroll-behavior:smooth;-webkit-text-size-adjust:100%}
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;line-height:1.7;color:#1a1a1a;background:#fff}
+a{color:#0066cc;text-decoration:none}a:hover{text-decoration:underline}
+img{max-width:100%;height:auto;display:block}
+
+/* site-header */
+.site-header{display:flex;align-items:center;justify-content:space-between;padding:1rem 2rem;border-bottom:1px solid #e5e7eb;background:#fff;position:sticky;top:0;z-index:100}
+.site-logo{font-size:1.25rem;font-weight:700;color:#1a1a1a}
+.nav-menu{list-style:none;display:flex;gap:1.5rem}
+.nav-menu a{color:#374151;font-weight:500;font-size:.95rem}
+.nav-menu a:hover{color:#0066cc}
+
+/* layout */
+.site{max-width:1200px;margin:0 auto;padding:2rem 1.5rem;display:grid;grid-template-columns:1fr 320px;gap:3rem}
+.site-main{min-width:0}
+@media(max-width:768px){.site{grid-template-columns:1fr;padding:1.5rem 1rem}.widget-area{display:none}}
+
+/* post card */
+.wp-post-card{border-bottom:1px solid #e5e7eb;padding:2rem 0}
+.wp-post-card:last-child{border-bottom:none}
+.post-thumbnail img{border-radius:.5rem;width:100%;max-height:300px;object-fit:cover;margin-bottom:1rem}
+.entry-meta{display:flex;flex-wrap:wrap;gap:.5rem;font-size:.8rem;color:#6b7280;margin-bottom:.75rem;align-items:center}
+.entry-meta a{color:#6b7280}.entry-meta a:hover{color:#0066cc}
+.cat-link{background:#f3f4f6;padding:.2rem .6rem;border-radius:999px;font-size:.75rem;color:#374151}
+.entry-title{font-size:1.5rem;font-weight:700;margin-bottom:.75rem;line-height:1.3}
+.entry-title a{color:#1a1a1a}.entry-title a:hover{color:#0066cc}
+.entry-excerpt{color:#4b5563;margin-bottom:1rem}
+.read-more{display:inline-block;font-size:.875rem;font-weight:600;color:#0066cc}
+.screen-reader-text{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0)}
+
+/* single post */
+.entry-header{margin-bottom:2rem}
+.entry-header h1{font-size:2rem;font-weight:800;line-height:1.25;margin-bottom:1rem}
+.entry-content{line-height:1.8;color:#374151}
+.entry-content h2{font-size:1.5rem;font-weight:700;margin:2rem 0 1rem}
+.entry-content h3{font-size:1.25rem;font-weight:600;margin:1.5rem 0 .75rem}
+.entry-content p{margin-bottom:1.25rem}
+.entry-content img{border-radius:.5rem;margin:1.5rem auto}
+.entry-footer{margin-top:2rem;padding-top:1rem;border-top:1px solid #e5e7eb;font-size:.875rem;color:#6b7280}
+.tags-links a{background:#f3f4f6;padding:.2rem .6rem;border-radius:999px;margin-right:.25rem}
+
+/* comments */
+.comments-area{margin-top:3rem;padding-top:2rem;border-top:2px solid #e5e7eb}
+.comment-list{list-style:none}
+.comment{padding:1rem 0;border-bottom:1px solid #f3f4f6}
+.comment-body{display:grid;grid-template-columns:48px 1fr;gap:1rem}
+.comment-meta{display:flex;flex-direction:column;gap:.25rem}
+.comment-content p{margin:.5rem 0}
+
+/* sidebar */
+.widget-area{background:#f9fafb;border-radius:.75rem;padding:1.5rem;align-self:start}
+.widget{margin-bottom:2rem}.widget:last-child{margin-bottom:0}
+.widget-title{font-size:1rem;font-weight:700;margin-bottom:.75rem;padding-bottom:.5rem;border-bottom:2px solid #e5e7eb}
+.widget ul{list-style:none}.widget li{padding:.35rem 0;border-bottom:1px solid #f3f4f6;font-size:.9rem}
+.tagcloud{display:flex;flex-wrap:wrap;gap:.4rem}
+.tag-cloud-link{background:#e5e7eb;padding:.2rem .6rem;border-radius:999px;font-size:.8rem;color:#374151}
+
+/* pagination */
+.pagination{display:flex;gap:.5rem;justify-content:center;margin:2rem 0;flex-wrap:wrap}
+.pagination a,.pagination span{padding:.5rem .875rem;border:1px solid #e5e7eb;border-radius:.375rem;font-size:.875rem;color:#374151}
+.pagination .current{background:#0066cc;color:#fff;border-color:#0066cc}
+.pagination a:hover{background:#f3f4f6;text-decoration:none}
+
+/* search */
+.search-form{display:flex;gap:.5rem;margin:1.5rem 0}
+.search-field{flex:1;padding:.75rem 1rem;border:1px solid #d1d5db;border-radius:.375rem;font-size:1rem}
+.search-submit{padding:.75rem 1.5rem;background:#0066cc;color:#fff;border:none;border-radius:.375rem;font-size:1rem;cursor:pointer;font-weight:600}
+.search-submit:hover{background:#0052a3}
+
+/* 404 */
+.error-404{max-width:600px}
+.error-404 .page-title{font-size:2rem;margin-bottom:1rem}
+
+/* page-header */
+.page-header{margin-bottom:2rem}
+.page-title{font-size:1.75rem;font-weight:800}
+.author-header{display:flex;align-items:center;gap:1rem;margin-bottom:2rem}
+.author-avatar{border-radius:50%}
+
+/* site-footer */
+.site-footer{text-align:center;padding:2rem;border-top:1px solid #e5e7eb;color:#6b7280;font-size:.875rem;margin-top:2rem}
+.site-footer a{color:#6b7280}.site-footer a:hover{color:#0066cc}
+.sep{margin:0 .5rem}
+`,
+
+    // ━━━ public/main.js — WordPress functions.php JS 부분 변환 ━━━━━━━━━━━━━━
+    "frontend/public/main.js": `// main.js — 자동 변환: WordPress functions.php enqueue_scripts() → vanilla JS
+// WordPress: wp_enqueue_script('navigation', ...) 변환
+document.addEventListener('DOMContentLoaded', () => {
+  // 모바일 메뉴 토글 — WordPress TwentyTwentyFour navigation.js 변환
+  const toggle = document.querySelector('.menu-toggle');
+  const nav    = document.querySelector('#site-navigation');
+  if (toggle && nav) {
+    toggle.addEventListener('click', () => {
+      const open = nav.getAttribute('aria-expanded') === 'true';
+      nav.setAttribute('aria-expanded', String(!open));
+      nav.classList.toggle('toggled', !open);
+    });
+  }
+  // 현재 메뉴 아이템 강조 — WordPress current-menu-item 클래스 변환
+  document.querySelectorAll('.nav-menu a').forEach(a => {
+    if (a instanceof HTMLAnchorElement && a.pathname === location.pathname) {
+      a.classList.add('current-menu-item');
+      a.setAttribute('aria-current', 'page');
+    }
+  });
+});
+`,
+
+    // ━━━ .github/workflows/astro-build.yml ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    ".github/workflows/astro-build.yml": `name: Astro 프론트엔드 빌드 (PHP/JS→Astro/TS 자동 변환)
+
+on:
+  push:
+    branches: [main]
+    paths: ['frontend/**', '.github/workflows/astro-build.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: 의존성 설치 및 lock 파일 생성
+        working-directory: frontend
+        run: npm install
+
+      - name: Astro 빌드
+        working-directory: frontend
+        run: npm run build
+
+      - name: 빌드 결과 dist/ 에 복사
+        run: |
+          rm -rf dist
+          cp -r frontend/dist/ dist/
+
+      - name: 빌드 결과 커밋 & 푸시
+        run: |
+          git config user.name "CloudPress Bot"
+          git config user.email "bot@cloudpress.app"
+          git add dist/ 2>/dev/null || true
+          if ! git diff --staged --quiet; then
+            git commit -m "Astro build \$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            git pull --rebase origin main || true
+            git push origin main || true
+          fi
+`,
+  };
+}
     ".github/workflows/astro-build.yml": `name: Astro 프론트엔드 빌드 (PHP/JS→Astro/TS 자동 변환)
 
 on:
@@ -2208,6 +2890,8 @@ async function verifyAndEnsureQuality({ ghToken, owner, repoName, workerDomain, 
         { key: "installYml",     path: ".github/workflows/install-wordpress.yml" },
         { key: "frontendLayout", path: "frontend/src/layouts/Layout.astro" },
         { key: "wpApiTs",        path: "frontend/src/utils/wp-api.ts" },
+        { key: "indexAstro",     path: "frontend/src/pages/index.astro" },
+        { key: "packageJson",    path: "frontend/package.json" },
       ];
 
       await Promise.allSettled(fileChecks.map(async (f) => {
@@ -2779,15 +3463,6 @@ export async function provisionCloudflarePagesHosting({
             }
           },
         });
-
-        // 최소 10분 보장: 아직 10분이 안 됐으면 나머지 시간 대기
-        const elapsed = Date.now() - provisionStart;
-        const MIN_DURATION = 10 * 60 * 1000; // 10분
-        if (elapsed < MIN_DURATION) {
-          const remaining = MIN_DURATION - elapsed;
-          await log(`  ⏱️ 최소 10분 보장 — 추가 안정화 대기 중 (${Math.ceil(remaining / 1000)}초)...`);
-          await delay(remaining);
-        }
 
         if (!verifyResult.verified) {
           await log(`  ⚠️ 일부 검증 항목 미통과: ${(verifyResult.failedKeys || []).join(", ")}`, "warn");

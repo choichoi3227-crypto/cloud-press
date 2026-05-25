@@ -312,6 +312,25 @@ export async function sessionDelete(sessionsKV, token) {
   await sessionsKV.delete(`session:${token}`);
 }
 
+// ── 관리자 CF API 키 조회 (cms_settings 테이블에서) ─────────────────────────
+// 도메인 추가 등 플랫폼 차원의 CF 작업에 사용
+export async function getAdminCfCredentials(db) {
+  try {
+    const rows = await db.prepare(
+      "SELECT key, value FROM cms_settings WHERE key IN ('admin_cf_api_key', 'admin_cf_email', 'admin_cf_account_id')"
+    ).all().catch(() => ({ results: [] }));
+    const map = {};
+    for (const r of (rows?.results || [])) map[r.key] = r.value;
+    return {
+      apiKey:    map["admin_cf_api_key"]    || null,
+      email:     map["admin_cf_email"]      || null,
+      accountId: map["admin_cf_account_id"] || null,
+    };
+  } catch {
+    return { apiKey: null, email: null, accountId: null };
+  }
+}
+
 // ── 인증 미들웨어 ───────────────────────────────────────────────────────────
 export async function requireAuth(request, env) {
   const authHeader = request.headers.get("Authorization");

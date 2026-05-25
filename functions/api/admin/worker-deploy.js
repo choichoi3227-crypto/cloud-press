@@ -50,12 +50,11 @@ async function setSetting(env, key, value) {
 
 // ── CF Workers API 헬퍼 ───────────────────────────────────────────────────
 async function cfApiReq(method, path, apiKey, body) {
+  const headers = { "Authorization": `Bearer ${apiKey}` };
+  if (body) headers["Content-Type"] = "application/json";
   const res = await fetch(`https://api.cloudflare.com/client/v4${path}`, {
     method,
-    headers: {
-      "Authorization": `Bearer ${apiKey}`,
-      "Content-Type":  "application/json",
-    },
+    headers,
     body: body ? JSON.stringify(body) : undefined,
   });
   return res.json();
@@ -87,35 +86,33 @@ function buildMasterWorkerScript() {
   return `// CP3 Master Worker - Control Plane
 // 자동 생성됨 by CloudPress Admin
 
-addEventListener('fetch', event => {
-  event.respondWith(handleRequest(event.request));
-});
+export default {
+  async fetch(request) {
+    const url = new URL(request.url);
 
-async function handleRequest(request) {
-  const url = new URL(request.url);
+    // Health check
+    if (url.pathname === '/health') {
+      return new Response(JSON.stringify({
+        status: 'ok',
+        type: 'master_worker',
+        timestamp: new Date().toISOString(),
+      }), { headers: { 'Content-Type': 'application/json' } });
+    }
 
-  // Health check
-  if (url.pathname === '/health') {
-    return new Response(JSON.stringify({
-      status: 'ok',
-      type: 'master_worker',
-      timestamp: new Date().toISOString(),
-    }), { headers: { 'Content-Type': 'application/json' } });
-  }
+    // Pool status
+    if (url.pathname === '/api/pools/status') {
+      return new Response(JSON.stringify({
+        pools: [],
+        message: 'Master Worker ready. Configure pools via admin panel.',
+      }), { headers: { 'Content-Type': 'application/json' } });
+    }
 
-  // Pool status
-  if (url.pathname === '/api/pools/status') {
-    return new Response(JSON.stringify({
-      pools: [],
-      message: 'Master Worker ready. Configure pools via admin panel.',
-    }), { headers: { 'Content-Type': 'application/json' } });
-  }
-
-  return new Response('CP3 Master Worker - Control Plane', {
-    status: 200,
-    headers: { 'Content-Type': 'text/plain' },
-  });
-}
+    return new Response('CP3 Master Worker - Control Plane', {
+      status: 200,
+      headers: { 'Content-Type': 'text/plain' },
+    });
+  },
+};
 `;
 }
 
@@ -123,27 +120,25 @@ function buildMultisiteWorkerScript(index) {
   return `// CP3 Multisite Worker - Pool ${index}
 // 자동 생성됨 by CloudPress Admin
 
-addEventListener('fetch', event => {
-  event.respondWith(handleRequest(event.request));
-});
+export default {
+  async fetch(request) {
+    const url = new URL(request.url);
 
-async function handleRequest(request) {
-  const url = new URL(request.url);
+    if (url.pathname === '/health') {
+      return new Response(JSON.stringify({
+        status: 'ok',
+        type: 'multisite_worker',
+        pool: ${index},
+        timestamp: new Date().toISOString(),
+      }), { headers: { 'Content-Type': 'application/json' } });
+    }
 
-  if (url.pathname === '/health') {
-    return new Response(JSON.stringify({
-      status: 'ok',
-      type: 'multisite_worker',
-      pool: ${index},
-      timestamp: new Date().toISOString(),
-    }), { headers: { 'Content-Type': 'application/json' } });
-  }
-
-  return new Response('CP3 Multisite Worker - Pool ${index}', {
-    status: 200,
-    headers: { 'Content-Type': 'text/plain' },
-  });
-}
+    return new Response('CP3 Multisite Worker - Pool ${index}', {
+      status: 200,
+      headers: { 'Content-Type': 'text/plain' },
+    });
+  },
+};
 `;
 }
 

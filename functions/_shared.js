@@ -312,12 +312,28 @@ export async function sessionDelete(sessionsKV, token) {
   await sessionsKV.delete(`session:${token}`);
 }
 
-// ── 관리자 CF API 키 조회 (cms_settings 테이블에서) ─────────────────────────
+// ── 관리자 CF API 키 조회 (cms_settings 또는 admin_settings 테이블에서) ────────
 // 도메인 추가 등 플랫폼 차원의 CF 작업에 사용
 export async function getAdminCfCredentials(db) {
   try {
-    const rows = await db.prepare(
+    // 1) cms_settings 우선 (worker-deploy.js가 여기에 저장)
+    const cmsRows = await db.prepare(
       "SELECT key, value FROM cms_settings WHERE key IN ('admin_cf_api_key', 'admin_cf_email', 'admin_cf_account_id')"
+    ).all().catch(() => ({ results: [] }));
+    const cmsMap = {};
+    for (const r of (cmsRows?.results || [])) cmsMap[r.key] = r.value;
+
+    if (cmsMap["admin_cf_api_key"]) {
+      return {
+        apiKey:    cmsMap["admin_cf_api_key"]    || null,
+        email:     cmsMap["admin_cf_email"]      || null,
+        accountId: cmsMap["admin_cf_account_id"] || null,
+      };
+    }
+
+    // 2) 폴백: admin_settings
+    const rows = await db.prepare(
+      "SELECT key, value FROM admin_settings WHERE key IN ('admin_cf_api_key', 'admin_cf_email', 'admin_cf_account_id')"
     ).all().catch(() => ({ results: [] }));
     const map = {};
     for (const r of (rows?.results || [])) map[r.key] = r.value;

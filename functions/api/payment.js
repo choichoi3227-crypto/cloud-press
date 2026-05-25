@@ -437,6 +437,187 @@ export async function onRequestPost(context) {
     });
   }
 
+  // ── PayPal 주문 생성 ──────────────────────────────────────────────────────
+  if (sub === "paypal-create") {
+    const { product_type = "hosting", site_id, plan, billing_cycle = "monthly" } = body;
+
+    if (!["hosting", "cpdb", "cp3", "cachecloud"].includes(product_type))
+      return jsonErr("유효하지 않은 상품 타입입니다.", 400);
+    if (!plan || !VALID_PLANS[product_type]?.includes(plan))
+      return jsonErr(`유효하지 않은 플랜입니다.`, 400);
+
+    const settings = await getSettings(env);
+    const clientId = settings.paypal_client_id || env.PAYPAL_CLIENT_ID || "";
+    const secret   = settings.paypal_secret     || env.PAYPAL_SECRET     || "";
+    const sandbox  = settings.paypal_sandbox !== "false";
+
+    if (!clientId || !secret) return jsonErr("PayPal 설정이 완료되지 않았습니다.", 503);
+
+    const amount = PLANS[product_type][plan][billing_cycle];
+    // PayPal은 USD 단위 (원화 → USD 변환: 1USD ≈ 1350원)
+    const amountUsd = (amount / 1350).toFixed(2);
+
+    const baseUrl = sandbox
+      ? "https://api-m.sandbox.paypal.com"
+      : "https://api-m.paypal.com";
+
+    // Access Token 획득
+    const tokenRes = await fetch(`${baseUrl}/v1/oauth2/token`, {
+      method: "POST",
+      headers: {
+        Authorization: `Basic ${btoa(clientId + ":" + secret)}`,
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      body: "grant_type=client_credentials",
+    });
+    const tokenData = await tokenRes.json();
+    if (!tokenRes.ok) return jsonErr("PayPal 인증 실패: " + (tokenData.error_description || ""), 503);
+
+    const accessToken = tokenData.access_token;
+    const orderId = `cp-pp-${(site_id || payload.id).slice(0, 8)}-${Date.now()}`;
+    const productLabel = PRODUCT_NAMES[product_type] || product_type;
+    const planLabel = { starter: "스타터", pro: "프로", enterprise: "엔터프라이즈", basic: "베이직", standard: "스탠다드" }[plan] || plan;
+
+    // PayPal 주문 생성
+    const orderRes = await fetch(`${baseUrl}/v2/checkout/orders`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        intent: "CAPTURE",
+        purchase_units: [{
+          reference_id: orderId,
+          description: `${productLabel} ${planLabel} (${billing_cycle === "monthly" ? "월간" : "연간"})`,
+          amount: { currency_code: "USD", value: amountUsd },
+        }],
+        application_context: {
+          brand_name: "CloudPress",
+          locale: "ko-KR",
+          user_action: "PAY_NOW",
+        },
+      }),
+    });
+    const orderData = await orderRes.json();
+    if (!orderRes.ok) return jsonErr("PayPal 주문 생성 실패: " + (orderData.message || ""), 502);
+
+    // DB에 pending 결제 저장
+    await env.DB.prepare(
+      `INSERT INTO payments (id, user_id, site_id, product_type, plan, billing_cycle, amount, status, toss_order_id, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)`
+    ).bind(
+      crypto.randomUUID(), payload.id, site_id || null,
+      product_type, plan, billing_cycle,
+      amount, `paypal:${orderData.id}`, new Date().toISOString()
+    ).run();
+
+    return jsonOk({
+      success: true,
+      paypalOrderId: orderData.id,
+      approveUrl: orderData.links?.find(l => l.rel === "approve")?.href,
+      orderId,
+      amount,
+      amountUsd,
+    });
+  }
+
+  // ── PayPal 결제 캡처 (승인 완료 후) ──────────────────────────────────────
+  if (sub === "paypal-capture") {
+    const { paypal_order_id } = body;
+    if (!paypal_order_id) return jsonErr("paypal_order_id가 필요합니다.", 400);
+
+    const settings = await getSettings(env);
+    const clientId = settings.paypal_client_id || env.PAYPAL_CLIENT_ID || "";
+    const secret   = settings.paypal_secret     || env.PAYPAL_SECRET     || "";
+    const sandbox  = settings.paypal_sandbox !== "false";
+
+    if (!clientId || !secret) return jsonErr("PayPal 설정이 완료되지 않았습니다.", 503);
+
+    const baseUrl = sandbox
+      ? "https://api-m.sandbox.paypal.com"
+      : "https://api-m.paypal.com";
+
+    // Access Token 재획득
+    const tokenRes = await fetch(`${baseUrl}/v1/oauth2/token`, {
+      method: "POST",
+      headers: {
+        Authorization: `Basic ${btoa(clientId + ":" + secret)}`,
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      body: "grant_type=client_credentials",
+    });
+    const tokenData = await tokenRes.json();
+    if (!tokenRes.ok) return jsonErr("PayPal 인증 실패", 503);
+
+    // 결제 캡처
+    const captureRes = await fetch(`${baseUrl}/v2/checkout/orders/${paypal_order_id}/capture`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${tokenData.access_token}`,
+        "Content-Type": "application/json",
+      },
+    });
+    const captureData = await captureRes.json();
+
+    if (!captureRes.ok || captureData.status !== "COMPLETED") {
+      await env.DB.prepare(
+        "UPDATE payments SET status = 'failed' WHERE toss_order_id = ?"
+      ).bind(`paypal:${paypal_order_id}`).run().catch(() => {});
+      return jsonErr("PayPal 결제 실패: " + (captureData.message || captureData.status || ""), 402);
+    }
+
+    // DB에서 해당 결제 정보 조회
+    const payment = await env.DB.prepare(
+      "SELECT * FROM payments WHERE toss_order_id = ? AND user_id = ? AND status = 'pending'"
+    ).bind(`paypal:${paypal_order_id}`, payload.id).first();
+
+    if (!payment) return jsonErr("결제 정보를 찾을 수 없습니다.", 404);
+
+    // 만료일 계산
+    const now = new Date();
+    const expiresAt = new Date(now);
+    if (payment.billing_cycle === "yearly") expiresAt.setFullYear(expiresAt.getFullYear() + 1);
+    else expiresAt.setMonth(expiresAt.getMonth() + 1);
+
+    // 결제 성공 → DB 업데이트
+    await env.DB.prepare(
+      `UPDATE payments SET status = 'paid', toss_payment_key = ?, expires_at = ? WHERE toss_order_id = ?`
+    ).bind(
+      `paypal:${paypal_order_id}:captured`,
+      expiresAt.toISOString(),
+      `paypal:${paypal_order_id}`
+    ).run();
+
+    const productType = payment.product_type || "hosting";
+    // 구독 업데이트
+    if (productType === "hosting" && payment.site_id) {
+      await env.DB.prepare(
+        "UPDATE sites SET site_plan = ?, plan_expires_at = ? WHERE id = ?"
+      ).bind(payment.plan, expiresAt.toISOString(), payment.site_id).run();
+    } else if (["cpdb", "cp3", "cachecloud"].includes(productType)) {
+      await env.DB.prepare(
+        `INSERT INTO user_product_subscriptions (user_id, product_type, plan, status, expires_at, created_at)
+         VALUES (?, ?, ?, 'active', ?, ?)
+         ON CONFLICT(user_id, product_type) DO UPDATE SET
+           plan = excluded.plan, status = 'active', expires_at = excluded.expires_at`
+      ).bind(
+        payment.user_id, productType, payment.plan,
+        expiresAt.toISOString(), new Date().toISOString()
+      ).run().catch(() => {});
+    }
+
+    const planLabels = { starter: "스타터", pro: "프로", enterprise: "엔터프라이즈", basic: "베이직", standard: "스탠다드" };
+    return jsonOk({
+      success: true,
+      message: `${PRODUCT_NAMES[productType] || productType} ${planLabels[payment.plan] || payment.plan} 플랜이 활성화되었습니다! (PayPal)`,
+      product_type: productType,
+      plan: payment.plan,
+      expires_at: expiresAt.toISOString(),
+      paypal_order_id,
+    });
+  }
+
   return jsonErr("알 수 없는 경로", 404);
 }
 

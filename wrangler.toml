@@ -1,15 +1,3 @@
-# CloudPress — wrangler.toml
-# 플랫폼 메타데이터 Worker (Cloudflare Pages Functions)
-#
-# 호스팅 방식:
-#   GitHub Actions → PHP CLI로 WordPress 실제 실행 (SQLite)
-#   정적 캐시(_cache/) → GitHub 레포에 커밋
-#   Cloudflare Worker → _cache/ + wp-content 순수 미러링
-#
-# DB:    Cloudflare D1 (플랫폼 메타데이터)
-# Cache: Cloudflare KV (세션)
-# PHP:   GitHub Actions PHP CLI (변환 없이 100% 원본 WordPress)
-
 name = "cloud-press"
 main = "worker.js"
 compatibility_date = "2026-05-14"
@@ -36,21 +24,30 @@ id      = "19e5e273e99941fbb963300e56dbdf9e"
 binding = "KV"
 id      = "9b8370d20a9646b9aa73f63c9200379f"
 
+# ── Durable Objects: WordPress 관리자 (사용자당 1개) ─────────────────────────
+# 역할: 설치관리, 상태관리, 세션, 락, 크론, DB 담당
+[[durable_objects.bindings]]
+name       = "WP_MANAGER"
+class_name = "WpManager"
+# script_name은 같은 worker이므로 생략
+
+# Durable Object 마이그레이션 (최초 배포 시)
+[[migrations]]
+tag  = "v1"
+new_classes = ["WpManager"]
+
 # ── Secrets (wrangler secret put 명령으로 설정) ───────────────────────────────
 #
 #   wrangler secret put JWT_SECRET
-#     ← CloudPress 플랫폼 JWT 서명키
-#
 #   wrangler secret put GITHUB_TOKEN
-#     ← GitHub Personal Access Token (레포 생성·파일 미러링용)
-#     ← repo, workflow 권한 필요
-#
-#   wrangler secret put CF_API_TOKEN       (선택)
-#     ← Cloudflare API 토큰 (Pages 프로젝트 자동 생성용)
-#     ← Cloudflare Pages:Edit 권한 필요
-#
+#   wrangler secret put CF_API_TOKEN      (선택)
 #   wrangler secret put CF_ACCOUNT_ID     (선택)
-#     ← Cloudflare 계정 ID
+#   wrangler secret put TOSS_SECRET_KEY
+#   wrangler secret put PAYPAL_CLIENT_ID
+#   wrangler secret put PAYPAL_SECRET
+#   wrangler secret put R2_ACCESS_KEY_ID  (선택: R2 폴백 사용 시)
+#   wrangler secret put R2_SECRET_KEY     (선택: R2 폴백 사용 시)
+#   wrangler secret put CP3_GITHUB_TOKEN  (선택: CP3 전용 레포 사용 시)
 
 [vars]
 # 플랫폼 도메인
@@ -58,6 +55,13 @@ PLATFORM_DOMAIN = "cloud-press.co.kr"
 
 # WordPress → Astro 변환 활성화
 ASTRO_CONVERT = "true"
+
+# PayPal 모드 (sandbox | live)
+PAYPAL_MODE = "sandbox"
+
+# R2 버킷 이름 (폴백 스토리지)
+# R2_BUCKET = "cloudpress-fallback"
+# R2_ACCOUNT_ID = ""
 
 [observability]
 enabled            = false

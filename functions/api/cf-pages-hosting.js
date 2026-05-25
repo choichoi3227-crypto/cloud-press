@@ -2749,7 +2749,7 @@ jobs:
             git push origin main || true
           fi
 `,
-  };
+ };
 }
 
 // ─── CacheCloud Worker 실제 배포 (사용자가 CacheCloud 구독 중일 때) ───────────

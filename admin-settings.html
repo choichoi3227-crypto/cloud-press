@@ -1834,6 +1834,10 @@ async function createMasterWorker() {
                 github_token:     ghToken || undefined,
             }),
         });
+        if (res.status === 401 || res.status === 403) {
+            showWorkerResult('master-worker-result', { success: false, error: '❌ 총괄 워커 생성 실패: Authentication error — 관리자 계정으로 로그인했는지 확인하세요. (로그아웃 후 재로그인)' });
+            return;
+        }
         const data = await res.json();
         showWorkerResult('master-worker-result', data, '총괄 워커가 생성되었습니다.');
     } catch (e) {
@@ -1867,6 +1871,10 @@ async function createMultisiteWorkers() {
                 github_token:         ghToken || undefined,
             }),
         });
+        if (res.status === 401 || res.status === 403) {
+            showWorkerResult('multisite-worker-result', { success: false, error: `❌ 멀티사이트 워커 0개 생성 완료, ${count}개 실패 — Authentication error: 관리자 계정으로 로그인했는지 확인하세요.` });
+            return;
+        }
         const data = await res.json();
         showWorkerResult('multisite-worker-result', data, `멀티사이트 워커 ${data.created?.length || 0}개가 생성되었습니다.`);
     } catch (e) {

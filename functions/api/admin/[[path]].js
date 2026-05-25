@@ -79,11 +79,11 @@ export async function onRequestOptions() {
 // ── GET ───────────────────────────────────────────────────────────────────────
 export async function onRequestGet(context) {
   const sub = subPath(context);
-  if (sub === "inquiries")    return inquiriesGet(context);
-  if (sub === "ai-settings")  return aiGet(context);
-  if (sub === "cms-settings") return cmsGet(context);
-  if (sub === "notices")      return noticesGet(context);
-  if (sub === "plugins")      return pluginsGet(context);
+  if (sub === "inquiries")     return inquiriesGet(context);
+  if (sub === "ai-settings")   return aiGet(context);
+  if (sub === "cms-settings")  return cmsGet(context);
+  if (sub === "notices")       return noticesGet(context);
+  if (sub === "plugins")       return pluginsGet(context);
   if (sub === "worker-deploy") return workerDeployGet(context);
   // stats, users, sites, settings, quota-stats → admin.js
   return adminGet(context);

@@ -2709,47 +2709,7 @@ jobs:
           fi
 `,
   };
-}
-    ".github/workflows/astro-build.yml"; `name: Astro 프론트엔드 빌드 (PHP/JS→Astro/TS 자동 변환)
 
-on:
-  push:
-    branches: [main]
-    paths: ['frontend/**', '.github/workflows/astro-build.yml']
-  workflow_dispatch:
-
-permissions:
-  contents: write
-
-jobs:
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-
-      - name: 의존성 설치 및 lock 파일 생성
-        working-directory: frontend
-        run: npm install
-
-      - name: Astro 빌드
-        working-directory: frontend
-        run: npm run build
-      - name: 빌드 결과 커밋
-        run: |
-          git config user.name "CloudPress Bot"
-          git config user.email "bot@cloudpress.app"
-          cp -r frontend/dist/ _astro-dist/ 2>/dev/null || true
-          git add _astro-dist/ 2>/dev/null || true
-          if ! git diff --staged --quiet; then
-            git commit -m "Astro build $(date -u +%Y-%m-%dT%H:%M:%SZ)"
-            git pull --rebase origin main || true
-            git push origin main || true
-          fi
-`,
- };
 }
 
 // ─── CacheCloud Worker 실제 배포 (사용자가 CacheCloud 구독 중일 때) ───────────

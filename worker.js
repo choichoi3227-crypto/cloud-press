@@ -1180,6 +1180,10 @@ import {
   onRequestPost as adminCmsPost,
 } from "./functions/api/admin/cms-settings.js";
 import {
+  onRequestGet  as adminWorkerDeployGet,
+  onRequestPost as adminWorkerDeployPost,
+} from "./functions/api/admin/worker-deploy.js";
+import {
   onRequestGet    as adminNoticesGet,
   onRequestPost   as adminNoticesPost,
   onRequestPut    as adminNoticesPut,

@@ -60,61 +60,6 @@
                     </div>
                 </div>
 
-                <!-- Cloudflare API 설정 -->
-                <div class="p-6 bg-white/5 border border-white/10 rounded-2xl space-y-4">
-                    <h2 class="text-lg font-bold flex items-center gap-2">
-                        <i class="fab fa-cloudflare text-orange-400"></i> Cloudflare 연동
-                    </h2>
-                    <p class="text-xs text-gray-500">
-                        Account ID는 <a href="https://dash.cloudflare.com" target="_blank" class="text-blue-400 underline">Cloudflare 대시보드 → 우측 사이드바</a>에서, API 토큰은 <a href="https://dash.cloudflare.com/profile/api-tokens" target="_blank" class="text-blue-400 underline">내 프로필 → API 토큰</a>에서 확인하세요.
-                    </p>
-
-                    <!-- 저장된 상태 배너 -->
-                    <div id="cfkey-saved-banner" class="hidden p-3 bg-green-900/30 border border-green-500/30 rounded-xl text-green-400 text-sm flex items-center justify-between gap-2">
-                        <div class="flex items-center gap-2">
-                            <i class="fas fa-check-circle"></i>
-                            <span>Cloudflare API 키가 연동되어 있습니다.</span>
-                            <span id="cfkey-email-saved" class="text-green-300 ml-1"></span>
-                            <span id="cfkey-account-saved" class="text-green-300/70 text-xs ml-1"></span>
-                            <span id="cfkey-accountname-saved" class="text-green-300/50 text-xs ml-1"></span>
-                        </div>
-                        <button onclick="showCfKeyForm()" class="text-xs text-orange-300 hover:text-orange-200 underline flex-shrink-0">
-                            키 변경
-                        </button>
-                    </div>
-
-                    <!-- CF 키 입력 폼 -->
-                    <div id="cfkey-form" class="space-y-4">
-                        <div class="space-y-2">
-                            <label class="text-sm text-gray-400">Cloudflare 계정 이메일 <span class="text-gray-600 text-xs">(Global API Key 방식일 때만 필요)</span></label>
-                            <input type="email" id="cf_email"
-                                class="w-full p-4 bg-white/5 border border-white/10 rounded-xl outline-none focus:border-orange-400 transition"
-                                placeholder="cloudflare@example.com">
-                        </div>
-                        <div class="space-y-2">
-                            <label class="text-sm text-gray-400">API Token (또는 Global API Key) <span class="text-red-400">*</span></label>
-                            <div class="relative">
-                                <input type="password" id="cf_api"
-                                    class="w-full p-4 bg-white/5 border border-white/10 rounded-xl outline-none focus:border-orange-400 transition pr-12"
-                                    placeholder="API Token 또는 Global API Key">
-                                <button onclick="toggleApiKeyVisibility()" class="absolute right-4 top-1/2 -translate-y-1/2 text-gray-500 hover:text-white transition">
-                                    <i id="eye-icon" class="fas fa-eye"></i>
-                                </button>
-                            </div>
-                        </div>
-                        <div id="validate-status" class="hidden p-3 rounded-xl text-sm flex items-center gap-2"></div>
-                        <div class="flex gap-3">
-                            <button onclick="validateAndSave()" id="save-btn"
-                                class="flex-1 bg-orange-600 px-8 py-3 rounded-xl text-white font-bold hover:bg-orange-500 transition flex items-center justify-center gap-2">
-                                <i class="fas fa-shield-check"></i> 검증 후 저장
-                            </button>
-                            <button onclick="clearCfKey()"
-                                class="px-6 py-3 rounded-xl border border-white/20 text-gray-400 font-bold hover:bg-white/5 transition text-sm">
-                                초기화
-                            </button>
-                        </div>
-                    </div>
-                </div>
 
                 <!-- 비밀번호 변경 -->
                 <div class="p-6 bg-white/5 border border-white/10 rounded-2xl space-y-4">
@@ -169,32 +114,7 @@
             setTimeout(() => el.classList.add('hidden'), 4000);
         }
 
-        function setValidateStatus(msg, type) {
-            const el = document.getElementById('validate-status');
-            el.classList.remove('hidden');
-            if (type === 'loading') {
-                el.className = 'p-3 rounded-xl text-sm flex items-center gap-2 bg-blue-900/30 border border-blue-500/30 text-blue-300';
-                el.innerHTML = `<i class="fas fa-spinner fa-spin"></i> ${msg}`;
-            } else if (type === 'success') {
-                el.className = 'p-3 rounded-xl text-sm flex items-center gap-2 bg-green-900/30 border border-green-500/30 text-green-400';
-                el.innerHTML = `<i class="fas fa-check-circle"></i> ${msg}`;
-            } else {
-                el.className = 'p-3 rounded-xl text-sm flex items-center gap-2 bg-red-900/30 border border-red-500/30 text-red-400';
-                el.innerHTML = `<i class="fas fa-times-circle"></i> ${msg}`;
-            }
-        }
-
-        function toggleApiKeyVisibility() {
-            const input = document.getElementById('cf_api');
-            const icon  = document.getElementById('eye-icon');
-            if (input.type === 'password') {
-                input.type = 'text';
-                icon.classList.replace('fa-eye', 'fa-eye-slash');
-            } else {
-                input.type = 'password';
-                icon.classList.replace('fa-eye-slash', 'fa-eye');
-            }
-        }
+        function toggleApiKeyVisibility() { /* removed - CF API managed by admin */ }
 
         async function loadAccountInfo() {
             try {
@@ -211,75 +131,11 @@
                     document.getElementById('user-role-display').value = roleMap[data.role] || data.role;
                     const planMap = { pro: 'Pro (최상급)', starter: 'Starter', free: '무료' };
                     document.getElementById('user-plan-display').value = planMap[data.plan] || data.plan || '무료';
-
-                    if (data.hasCfKey) {
-                        document.getElementById('cfkey-saved-banner').classList.remove('hidden');
-                        if (data.cfEmail) {
-                            document.getElementById('cfkey-email-saved').textContent = `(${data.cfEmail})`;
-                        }
-                        if (data.cfAccountId) {
-                            document.getElementById('cfkey-account-saved').textContent = `• ID: ${data.cfAccountId.slice(0,8)}...`;
-                        }
-                        if (data.cfAccountName) {
-                            document.getElementById('cfkey-accountname-saved').textContent = `(${data.cfAccountName})`;
-                        }
-                        document.getElementById('cfkey-form').classList.add('hidden');
-                    }
                 }
             } catch (e) {
                 console.error('[account] 로드 실패:', e);
                 showAlert('계정 정보를 불러오지 못했습니다.', 'error');
             }
-        }
-
-        async function validateAndSave() {
-            const cfEmail  = document.getElementById('cf_email').value.trim();
-            const cfApiKey = document.getElementById('cf_api').value.trim();
-
-            if (!cfApiKey) {
-                showAlert('Cloudflare API Token 또는 Global API Key를 입력해주세요.', 'error'); return;
-            }
-
-            const btn = document.getElementById('save-btn');
-            btn.disabled = true;
-            btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 검증 중...';
-            setValidateStatus('Cloudflare API 키를 검증하고 있습니다...', 'loading');
-
-            try {
-                const res  = await fetch('/api/account', {
-                    method: 'PUT', headers: HEADERS,
-                    body: JSON.stringify({ cf_api_key: cfApiKey, cf_email: cfEmail || undefined }),
-                });
-                const data = await res.json();
-                if (res.ok && data.success) {
-                    setValidateStatus('API 키 검증 성공! 저장되었습니다.', 'success');
-                    document.getElementById('cf_api').value   = '';
-                    document.getElementById('cf_email').value = '';
-                    document.getElementById('cfkey-saved-banner').classList.remove('hidden');
-                    document.getElementById('cfkey-email-saved').textContent = `(${cfEmail})`;
-                    document.getElementById('cfkey-form').classList.add('hidden');
-                    showAlert('Cloudflare API 키가 검증되어 저장되었습니다.');
-                } else {
-                    setValidateStatus(data.error || '검증에 실패했습니다.', 'error');
-                    showAlert(data.error || '저장에 실패했습니다.', 'error');
-                }
-            } catch {
-                setValidateStatus('네트워크 오류가 발생했습니다.', 'error');
-                showAlert('저장 중 오류가 발생했습니다.', 'error');
-            } finally {
-                btn.disabled = false;
-                btn.innerHTML = '<i class="fas fa-shield-check"></i> 검증 후 저장';
-            }
-        }
-
-        function clearCfKey() {
-            document.getElementById('cf_email').value = '';
-            document.getElementById('cf_api').value   = '';
-            document.getElementById('validate-status').classList.add('hidden');
-        }
-
-        function showCfKeyForm() {
-            document.getElementById('cfkey-form').classList.remove('hidden');
         }
 
         async function changePassword() {

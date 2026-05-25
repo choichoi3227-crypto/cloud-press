@@ -2047,13 +2047,14 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
-          cache: 'npm'
+
+      - name: 의존성 설치 및 lock 파일 생성
+        working-directory: frontend
+        run: npm install
 
       - name: Astro 빌드
         working-directory: frontend
-        run: |
-          npm install
-          npm run build
+        run: npm run build
       - name: 빌드 결과 커밋
         run: |
           git config user.name "CloudPress Bot"

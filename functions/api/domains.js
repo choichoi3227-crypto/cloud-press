@@ -4,19 +4,25 @@
 // POST   /api/domains                             → 도메인 추가 (CF 네임서버 방식 + 이미 CF 사용 중이면 자동 추가)
 // DELETE /api/domains?id=                         → 도메인 삭제
 
-import { jsonOk, jsonErr, requireAuth } from "../_shared.js";
+import { jsonOk, jsonErr, requireAuth, getAdminCfCredentials } from "../_shared.js";
 import { configureGithubPagesCustomDomainWithToken, setupGithubPagesDns } from "./github-pages-hosting.js";
 import { pickGithubToken } from "./github-storage.js";
 
 // ── Cloudflare API 헬퍼 ───────────────────────────────────────────────────────
+// apiKey: Bearer token (starts with "Bearer ") or raw key (X-Auth-Key mode)
 async function cfReq(method, path, apiKey, email, body) {
+  // API Token 방식이면 Bearer, 아니면 X-Auth-Key 방식
+  const isToken = !email || apiKey.startsWith("Bearer ");
+  const rawKey  = apiKey.replace(/^Bearer /, "");
+  const headers = {
+    "Content-Type": "application/json",
+    ...(isToken
+      ? { "Authorization": `Bearer ${rawKey}` }
+      : { "X-Auth-Key": rawKey, "X-Auth-Email": email }),
+  };
   const res = await fetch(`https://api.cloudflare.com/client/v4${path}`, {
     method,
-    headers: {
-      "X-Auth-Key":   apiKey,
-      "X-Auth-Email": email,
-      "Content-Type": "application/json",
-    },
+    headers,
     body: body ? JSON.stringify(body) : undefined,
   });
   return res.json();
@@ -253,16 +259,14 @@ export async function onRequestGet(context) {
       : isCfNs;
 
     if (nsMatch || isCfNs) {
-      const user = await env.DB.prepare(
-        "SELECT cf_global_api_key, cf_email FROM users WHERE id = ?"
-      ).bind(payload.id).first();
+      const adminCf = await getAdminCfCredentials(env.DB);
 
       let workerRouteSet = false;
-      if (user?.cf_global_api_key && user?.cf_email && da.cf_zone_id && site.cf_worker_name) {
+      if (adminCf.apiKey && da.cf_zone_id && site.cf_worker_name) {
         try {
-          await setupDnsRecords(user.cf_global_api_key, user.cf_email, da.cf_zone_id, domain);
+          await setupDnsRecords(adminCf.apiKey, adminCf.email || "", da.cf_zone_id, domain);
           await setupWorkerCustomDomain(
-            user.cf_global_api_key, user.cf_email,
+            adminCf.apiKey, adminCf.email || "",
             da.cf_zone_id, domain, site.cf_worker_name
           );
           workerRouteSet = true;
@@ -358,13 +362,14 @@ export async function onRequestPost(context) {
     return jsonErr(`이 도메인은 이미 다른 호스팅 '${existing.site_name}'에서 사용 중입니다.`, 409);
   }
 
-  // ── 사용자 CF API 키 조회 ────────────────────────────────────────────────
-  const user = await env.DB.prepare(
-    "SELECT cf_global_api_key, cf_email FROM users WHERE id = ?"
-  ).bind(payload.id).first();
+  // ── 관리자 CF API 키 조회 (플랫폼 차원의 도메인 추가) ─────────────────────
+  const adminCf = await getAdminCfCredentials(env.DB);
 
-  if (!user?.cf_global_api_key || !user?.cf_email)
-    return jsonErr("Cloudflare API 키가 설정되어 있지 않습니다. 계정 설정에서 먼저 등록해주세요.", 400);
+  if (!adminCf.apiKey)
+    return jsonErr("플랫폼 Cloudflare API 키가 설정되어 있지 않습니다. 관리자에게 문의해주세요.", 400);
+
+  const cfApiKey = adminCf.apiKey;
+  const cfEmail  = adminCf.email || "";
 
   let nameservers    = [];
   let zoneId         = null;
@@ -375,7 +380,7 @@ export async function onRequestPost(context) {
 
   try {
     const zoneResult = await getOrCreateCfZone(
-      user.cf_global_api_key, user.cf_email, domainClean
+      cfApiKey, cfEmail, domainClean
     );
 
     if (zoneResult.error) {
@@ -388,7 +393,7 @@ export async function onRequestPost(context) {
 
       // DNS 레코드 설정
       if (zoneId) {
-        await setupDnsRecords(user.cf_global_api_key, user.cf_email, zoneId, domainClean)
+        await setupDnsRecords(cfApiKey, cfEmail, zoneId, domainClean)
           .catch(e => console.warn("[domains] dns setup:", e.message));
       }
 
@@ -396,7 +401,7 @@ export async function onRequestPost(context) {
       if ((alreadyOnCf || zoneStatus === "active") && site.cf_worker_name && zoneId) {
         try {
           await setupWorkerCustomDomain(
-            user.cf_global_api_key, user.cf_email,
+            cfApiKey, cfEmail,
             zoneId, domainClean, site.cf_worker_name
           );
           workerRouteSet = true;
@@ -527,19 +532,17 @@ export async function onRequestDelete(context) {
   // CF Zone의 Worker 라우트 제거
   if (da.cf_zone_id && da.cf_ssl_status === "active") {
     try {
-      const user = await env.DB.prepare(
-        "SELECT cf_global_api_key, cf_email FROM users WHERE id = ?"
-      ).bind(da.user_id).first();
-      if (user?.cf_global_api_key && user?.cf_email) {
+      const adminCfDel = await getAdminCfCredentials(env.DB);
+      if (adminCfDel.apiKey) {
         const routes = await cfReq(
           "GET", `/zones/${da.cf_zone_id}/workers/routes`,
-          user.cf_global_api_key, user.cf_email
+          adminCfDel.apiKey, adminCfDel.email || ""
         );
         for (const r of routes.result || []) {
           if (r.pattern.includes(da.domain)) {
             await cfReq(
               "DELETE", `/zones/${da.cf_zone_id}/workers/routes/${r.id}`,
-              user.cf_global_api_key, user.cf_email
+              adminCfDel.apiKey, adminCfDel.email || ""
             ).catch(() => {});
           }
         }

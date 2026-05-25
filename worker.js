@@ -1214,10 +1214,19 @@ async function handleApiRequest(request, env, _workerCtx = null) {
   const url    = new URL(request.url);
   const path   = url.pathname.replace(/\/$/, ""); // trailing slash 제거
   const method = request.method.toUpperCase();
+
+  // admin 서브경로에서 path 파라미터 추출 (e.g. /api/admin/settings → "settings")
+  function extractAdminSubPath(fullPath) {
+    return fullPath
+      .replace(/^\/api\/admin\/?/, "")
+      .replace(/\?.*$/, "")
+      .replace(/^\/+|\/+$/g, "");
+  }
+
   // 미들웨어 적용 (CORS, Rate Limit 등)
   // next()가 실제 핸들러를 실행하도록 래핑
-  const runWithMiddleware = async (handler) => {
-    const ctxWithNext = makeContext(request, env, {}, _workerCtx);
+  const runWithMiddleware = async (handler, params = {}) => {
+    const ctxWithNext = makeContext(request, env, params, _workerCtx);
     ctxWithNext.next = async () => {
       try { return await handler(ctxWithNext); }
       catch (e) {
@@ -1256,35 +1265,47 @@ async function handleApiRequest(request, env, _workerCtx = null) {
 
   // ── 관리자 서브경로 (구체적인 경로 먼저, startsWith보다 앞에 위치해야 함)
   if (path === "/api/admin/inquiries" || path.startsWith("/api/admin/inquiries/")) {
-    if (method === "GET")    return runWithMiddleware(adminInquiriesGet);
-    if (method === "PUT")    return runWithMiddleware(adminInquiriesPut);
-    if (method === "DELETE") return runWithMiddleware(adminInquiriesDelete);
+    const p = { path: extractAdminSubPath(path) || "inquiries" };
+    if (method === "GET")    return runWithMiddleware(adminInquiriesGet, p);
+    if (method === "PUT")    return runWithMiddleware(adminInquiriesPut, p);
+    if (method === "DELETE") return runWithMiddleware(adminInquiriesDelete, p);
   }
   if (path === "/api/admin/ai-settings") {
-    if (method === "GET")    return runWithMiddleware(adminAiGet);
-    if (method === "POST")   return runWithMiddleware(adminAiPost);
-    if (method === "PUT")    return runWithMiddleware(adminAiPut);
-    if (method === "DELETE") return runWithMiddleware(adminAiDelete);
+    const p = { path: "ai-settings" };
+    if (method === "GET")    return runWithMiddleware(adminAiGet, p);
+    if (method === "POST")   return runWithMiddleware(adminAiPost, p);
+    if (method === "PUT")    return runWithMiddleware(adminAiPut, p);
+    if (method === "DELETE") return runWithMiddleware(adminAiDelete, p);
   }
   if (path === "/api/admin/cms-settings") {
-    if (method === "GET")  return runWithMiddleware(adminCmsGet);
-    if (method === "POST") return runWithMiddleware(adminCmsPost);
+    const p = { path: "cms-settings" };
+    if (method === "GET")  return runWithMiddleware(adminCmsGet, p);
+    if (method === "POST") return runWithMiddleware(adminCmsPost, p);
   }
 
   // ── 공지 관리
   if (path === "/api/admin/notices" || path.startsWith("/api/admin/notices/")) {
-    if (method === "GET")    return runWithMiddleware(adminNoticesGet);
-    if (method === "POST")   return runWithMiddleware(adminNoticesPost);
-    if (method === "PUT")    return runWithMiddleware(adminNoticesPut);
-    if (method === "DELETE") return runWithMiddleware(adminNoticesDelete);
+    const p = { path: extractAdminSubPath(path) || "notices" };
+    if (method === "GET")    return runWithMiddleware(adminNoticesGet, p);
+    if (method === "POST")   return runWithMiddleware(adminNoticesPost, p);
+    if (method === "PUT")    return runWithMiddleware(adminNoticesPut, p);
+    if (method === "DELETE") return runWithMiddleware(adminNoticesDelete, p);
+  }
+
+  // ── Worker 배포
+  if (path === "/api/admin/worker-deploy") {
+    const p = { path: "worker-deploy" };
+    if (method === "GET")  return runWithMiddleware(adminWorkerDeployGet, p);
+    if (method === "POST") return runWithMiddleware(adminWorkerDeployPost, p);
   }
 
   // ── 관리자 (stats, users, sites, settings, quota-stats)
   if (path.startsWith("/api/admin")) {
-    if (method === "GET")    return runWithMiddleware(adminGet);
-    if (method === "POST")   return runWithMiddleware(adminPost);
-    if (method === "PUT")    return runWithMiddleware(adminPut);
-    if (method === "DELETE") return runWithMiddleware(adminDelete);
+    const p = { path: extractAdminSubPath(path) };
+    if (method === "GET")    return runWithMiddleware(adminGet, p);
+    if (method === "POST")   return runWithMiddleware(adminPost, p);
+    if (method === "PUT")    return runWithMiddleware(adminPut, p);
+    if (method === "DELETE") return runWithMiddleware(adminDelete, p);
   }
 
   // ── 캐시

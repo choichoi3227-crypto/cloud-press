@@ -285,9 +285,10 @@ export async function onRequestPost(context) {
         log,
       });
 
-      if (!result) {
+      if (!result || result.success === false) {
         await env.DB.prepare("UPDATE sites SET status = 'error' WHERE id = ?")
           .bind(id).run().catch(() => {});
+        await log("❌ 프로비저닝 실패: " + (result?.error || "알 수 없는 오류"), "error");
         return;
       }
 

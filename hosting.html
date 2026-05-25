@@ -8,9 +8,11 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <style>
-        .status-active   { background:#16a34a22; border-color:#16a34a55; color:#4ade80; }
-        .status-creating { background:#1d4ed822; border-color:#3b82f655; color:#60a5fa; }
-        .status-suspended{ background:#dc262622; border-color:#ef444455; color:#f87171; }
+        .status-active       { background:#16a34a22; border-color:#16a34a55; color:#4ade80; }
+        .status-creating     { background:#1d4ed822; border-color:#3b82f655; color:#60a5fa; }
+        .status-suspended    { background:#dc262622; border-color:#ef444455; color:#f87171; }
+        .status-error        { background:#7f1d1d22; border-color:#ef444455; color:#fca5a5; }
+        .status-provisioning { background:#78350f22; border-color:#f59e0b55; color:#fbbf24; }
         .site-card:hover  { border-color: rgba(255,255,255,0.2); transform: translateY(-2px); }
         .site-card { transition: all 0.2s ease; }
     select, select, select option { background: #111827; color: #e5e7eb; } select { color-scheme: dark; } select { color-scheme: dark; }
@@ -49,8 +51,10 @@
                     class="px-3 py-3 bg-white/5 border border-white/10 rounded-xl outline-none focus:border-blue-500 transition text-sm">
                     <option value="">전체</option>
                     <option value="active">운영 중</option>
-                    <option value="suspended">중단됨</option>
+                    <option value="provisioning">설치 중</option>
                     <option value="creating">생성 중</option>
+                    <option value="error">오류</option>
+                    <option value="suspended">중단됨</option>
                 </select>
             </div>
 
@@ -74,11 +78,13 @@
 
         function statusBadge(status) {
             const map = {
-                active:    { cls: 'status-active',    icon: 'fa-circle',    label: '운영 중' },
-                creating:  { cls: 'status-creating',  icon: 'fa-spinner fa-spin', label: '생성 중' },
-                suspended: { cls: 'status-suspended', icon: 'fa-pause',     label: '중단됨'  },
+                active:       { cls: 'status-active',       icon: 'fa-circle',         label: '운영 중'  },
+                creating:     { cls: 'status-creating',     icon: 'fa-spinner fa-spin', label: '생성 중'  },
+                provisioning: { cls: 'status-provisioning', icon: 'fa-spinner fa-spin', label: '설치 중'  },
+                error:        { cls: 'status-error',        icon: 'fa-exclamation-triangle', label: '오류' },
+                suspended:    { cls: 'status-suspended',    icon: 'fa-pause',           label: '중단됨'   },
             };
-            const s = map[status] || { cls: 'status-creating', icon: 'fa-question', label: status };
+            const s = map[status] || { cls: 'status-suspended', icon: 'fa-question', label: status };
             return `<span class="text-xs px-3 py-1 rounded-full border font-bold ${s.cls}">
                         <i class="fas ${s.icon} mr-1 text-[10px]"></i>${s.label}
                     </span>`;

@@ -1,22 +1,23 @@
 // src/sidebar.js
-// 공통 사이드바 + 프로필 드롭다운 컴포넌트
+// 공통 사이드바 + 프로필 드롭다운 (라이트/다크 테마 지원)
 
 (function () {
-  // ── 현재 페이지 감지 ──────────────────────────────────────────
   const path = window.location.pathname;
 
   function isActive(href) {
-    if (href === '/dashboard.html') return path === '/dashboard' || path === '/';
-    return path.startsWith(href);
+    if (href === '/dashboard') return path === '/dashboard' || path === '/' || path === '';
+    return path === href || path.startsWith(href + '.');
   }
 
-  // 서비스 메뉴 항목 중 활성화 여부
-  const servicePages = ['/hosting', '/hosting-create', '/hosting-detail',
-    '/domains', '/dns', '/payment', '/payments', '/account', '/services',
-    '/product-cloudpressdb', '/product-cp3', '/product-cachecloud'];
-  const isServiceActive = servicePages.some(p => path.startsWith(p));
+  // 다크모드 상태
+  let isDark = localStorage.getItem('cp-theme') === 'dark';
+  function applyTheme() {
+    document.documentElement.setAttribute('data-theme', isDark ? 'dark' : 'light');
+    document.body.classList.toggle('dark', isDark);
+  }
+  applyTheme();
 
-  // ── 사용자 정보 로드 ─────────────────────────────────────────
+  // 사용자 정보 로드
   async function loadUserInfo() {
     try {
       const token = localStorage.getItem('admin_token');
@@ -27,251 +28,238 @@
     } catch { return null; }
   }
 
-  // ── 사이드바 HTML 생성 ────────────────────────────────────────
+  // 토스트 알림
+  function showToast(msg, type = 'info') {
+    let container = document.getElementById('cp-toast-container');
+    if (!container) {
+      container = document.createElement('div');
+      container.id = 'cp-toast-container';
+      document.body.appendChild(container);
+    }
+    const icons = { success: 'fa-check-circle', error: 'fa-times-circle', warning: 'fa-exclamation-triangle', info: 'fa-info-circle' };
+    const toast = document.createElement('div');
+    toast.className = `cp-toast cp-toast-${type}`;
+    toast.innerHTML = `<i class="fas ${icons[type] || icons.info} cp-toast-icon"></i><span class="cp-toast-msg">${msg}</span>`;
+    container.appendChild(toast);
+    setTimeout(() => {
+      toast.classList.add('removing');
+      setTimeout(() => toast.remove(), 220);
+    }, 4000);
+  }
+  window.cpToast = showToast;
+
+  // 사이드바 HTML 생성
   function buildSidebar(user) {
-    const email = user?.email || '사용자';
-    const name = user?.name || email.split('@')[0];
-    const role = user?.role;
+    const email    = user?.email || '';
+    const name     = user?.name  || email.split('@')[0] || '사용자';
+    const role     = user?.role;
     const initials = name.charAt(0).toUpperCase();
+    const isAdmin  = role === 'admin';
 
     const navItems = [
-      { href: '/dashboard', icon: 'fas fa-tachometer-alt', label: '대시보드' },
-      { href: '/traffic', icon: 'fas fa-chart-line', label: '트래픽' },
-      { href: '/storage', icon: 'fas fa-hdd', label: '스토리지' },
+      { href: '/dashboard',  icon: 'fas fa-chart-pie',    label: '대시보드' },
+      { href: '/hosting',    icon: 'fas fa-server',        label: '호스팅 관리' },
+      { href: '/domains',    icon: 'fas fa-globe',         label: '도메인 관리' },
+      { href: '/storage',    icon: 'fas fa-hdd',           label: '스토리지' },
+      { href: '/traffic',    icon: 'fas fa-chart-line',    label: '트래픽' },
+      { href: '/services',   icon: 'fas fa-th-large',      label: '전체 서비스' },
+      { href: '/account',    icon: 'fas fa-user-circle',   label: '내 정보 관리' },
+      { href: '/payment',    icon: 'fas fa-credit-card',   label: '결제 관리' },
     ];
 
-    const serviceItems = [
-      { href: '/hosting', icon: 'fas fa-server', label: '호스팅 관리' },
-      { href: '/domains', icon: 'fas fa-globe', label: '도메인 관리' },
-      { href: '/account', icon: 'fas fa-user-circle', label: '내 정보 관리' },
-      { href: '/payment', icon: 'fas fa-credit-card', label: '결제수단 관리' },
-      { href: '/services', icon: 'fas fa-th-large', label: '전체 서비스 관리' },
-    ];
+    const adminItems = isAdmin ? [
+      { href: '/admin',          icon: 'fas fa-shield-alt',  label: '관리자 패널' },
+      { href: '/admin-settings', icon: 'fas fa-cog',         label: '플랫폼 설정' },
+    ] : [];
+
+    const renderItem = (item) => {
+      const active = isActive(item.href);
+      return `<a href="${item.href}" class="cp-sidebar-link${active ? ' active' : ''}">
+        <i class="${item.icon}"></i>
+        <span>${item.label}</span>
+      </a>`;
+    };
 
     return `
-    <aside id="cp-sidebar" class="w-64 border-r border-white/10 flex flex-col flex-shrink-0 hidden md:flex" style="background:#07090f;">
+    <aside id="cp-sidebar" class="cp-sidebar">
       <!-- 로고 -->
-      <div class="px-6 pt-7 pb-5 border-b border-white/5">
-        <a href="/dashboard" class="text-2xl font-black text-blue-500 tracking-tight">CLOUD<span class="text-white">PRESS</span></a>
+      <div class="cp-sidebar-logo">
+        <a href="/dashboard">CLOUD<span>PRESS</span></a>
       </div>
 
       <!-- 네비게이션 -->
-      <nav class="flex-1 px-3 py-4 space-y-0.5 overflow-y-auto">
-        ${navItems.map(item => `
-          <a href="${item.href}" class="sidebar-link flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all text-sm font-medium ${isActive(item.href) ? 'bg-blue-600/20 text-blue-400 font-semibold' : 'text-gray-400 hover:bg-white/5 hover:text-white'}">
-            <i class="${item.icon} w-4 text-center opacity-80"></i>
-            ${item.label}
-          </a>
-        `).join('')}
+      <nav class="cp-sidebar-nav" role="navigation" aria-label="메인 네비게이션">
+        <div class="cp-sidebar-section">서비스</div>
+        ${navItems.map(renderItem).join('')}
 
-        <!-- 서비스 드롭다운 -->
-        <div class="mt-1">
-          <button id="service-toggle" onclick="toggleServiceMenu()" class="w-full flex items-center justify-between gap-3 px-3 py-2.5 rounded-xl transition-all text-sm font-medium ${isServiceActive ? 'bg-blue-600/20 text-blue-400 font-semibold' : 'text-gray-400 hover:bg-white/5 hover:text-white'}">
-            <span class="flex items-center gap-3">
-              <i class="fas fa-th-large w-4 text-center opacity-80"></i>
-              서비스
-            </span>
-            <i id="service-chevron" class="fas fa-chevron-${isServiceActive ? 'down' : 'right'} text-xs opacity-60 transition-transform duration-200"></i>
-          </button>
-          <div id="service-submenu" class="${isServiceActive ? '' : 'hidden'} pl-3 mt-0.5 space-y-0.5">
-            ${serviceItems.map(item => `
-              <a href="${item.href}" class="sidebar-link flex items-center gap-3 px-3 py-2 rounded-xl transition-all text-sm ${isActive(item.href) ? 'bg-white/10 text-white font-semibold' : 'text-gray-500 hover:bg-white/5 hover:text-gray-300'}">
-                <i class="${item.icon} w-4 text-center text-xs opacity-70"></i>
-                ${item.label}
-              </a>
-            `).join('')}
-          </div>
-        </div>
+        ${isAdmin ? `
+        <div class="cp-sidebar-section" style="margin-top:0.75rem;">관리자</div>
+        ${adminItems.map(renderItem).join('')}
+        ` : ''}
       </nav>
 
-      <!-- 어드민 링크 (어드민만) -->
-      ${role === 'admin' ? `
-      <div class="px-3 pb-2">
-        <a href="/admin" class="flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-purple-400 hover:bg-purple-900/20 transition-all">
-          <i class="fas fa-shield-alt w-4 text-center"></i>
-          관리자 패널
-        </a>
-      </div>` : ''}
+      <!-- 하단 영역 -->
+      <div class="cp-sidebar-footer">
+        <!-- 다크모드 토글 -->
+        <button id="cp-theme-toggle" onclick="window.cpToggleTheme()"
+          class="cp-sidebar-link" style="width:100%;background:none;border:none;text-align:left;"
+          aria-label="테마 전환">
+          <i class="${isDark ? 'fas fa-sun' : 'fas fa-moon'}"></i>
+          <span id="cp-theme-label">${isDark ? '라이트 모드' : '다크 모드'}</span>
+        </button>
 
-      <!-- 프로필 섹션 -->
-      <div class="px-3 pb-4 border-t border-white/5 pt-3">
-        <div class="relative">
-          <button id="profile-btn" onclick="toggleProfileDropdown()" class="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-white/5 transition-all group">
-            <div class="w-8 h-8 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center text-sm font-bold flex-shrink-0">${initials}</div>
-            <div class="flex-1 text-left min-w-0">
-              <div class="text-sm font-semibold text-white truncate">${name}</div>
-              <div class="text-xs text-gray-500 truncate">${email}</div>
+        <!-- 사용자 프로필 -->
+        <div style="position:relative;margin-top:0.5rem;">
+          <button id="cp-user-btn" onclick="window.cpToggleUserMenu()"
+            class="cp-sidebar-link" style="width:100%;background:none;border:none;text-align:left;"
+            aria-haspopup="true" aria-expanded="false">
+            <div style="width:28px;height:28px;border-radius:50%;background:var(--cp-primary);
+              color:#fff;display:flex;align-items:center;justify-content:center;
+              font-size:0.75rem;font-weight:700;flex-shrink:0;">${initials}</div>
+            <div style="flex:1;min-width:0;">
+              <div style="font-size:0.8125rem;font-weight:600;color:var(--cp-sidebar-active);
+                white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${name}</div>
+              <div style="font-size:0.6875rem;color:var(--cp-sidebar-text);
+                white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${email}</div>
             </div>
-            <i class="fas fa-ellipsis-h text-xs text-gray-600 group-hover:text-gray-400 transition-colors"></i>
+            <i class="fas fa-chevron-up" style="font-size:0.6875rem;opacity:0.5;"></i>
           </button>
-          <!-- 프로필 드롭다운 -->
-          <div id="profile-dropdown" class="hidden absolute bottom-full left-0 right-0 mb-2 bg-[#111] border border-white/10 rounded-xl shadow-2xl overflow-hidden z-50">
-            <div class="px-4 py-3 border-b border-white/5">
-              <div class="text-xs font-semibold text-gray-400 uppercase tracking-wider">계정</div>
-              <div class="text-sm text-white font-medium mt-0.5 truncate">${email}</div>
-            </div>
-            <div class="p-1">
-              <a href="/account" class="flex items-center gap-3 px-3 py-2 rounded-lg text-sm text-gray-300 hover:bg-white/5 hover:text-white transition-all">
-                <i class="fas fa-user-circle w-4 text-center text-gray-500"></i> 내 정보 관리
-              </a>
-              <a href="/payment" class="flex items-center gap-3 px-3 py-2 rounded-lg text-sm text-gray-300 hover:bg-white/5 hover:text-white transition-all">
-                <i class="fas fa-credit-card w-4 text-center text-gray-500"></i> 결제 수단
-              </a>
-              ${role === 'admin' ? `
-              <a href="/admin" class="flex items-center gap-3 px-3 py-2 rounded-lg text-sm text-purple-400 hover:bg-purple-900/20 transition-all">
-                <i class="fas fa-shield-alt w-4 text-center"></i> 관리자 패널
-              </a>` : ''}
-            </div>
-            <div class="p-1 border-t border-white/5">
-              <button onclick="logout()" class="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm text-red-400 hover:bg-red-900/20 transition-all">
-                <i class="fas fa-sign-out-alt w-4 text-center"></i> 로그아웃
-              </button>
-            </div>
+
+          <!-- 사용자 드롭다운 -->
+          <div id="cp-user-menu" class="hidden"
+            style="position:absolute;bottom:100%;left:0;right:0;margin-bottom:4px;
+              background:var(--cp-surface);border:1px solid var(--cp-border);
+              border-radius:var(--cp-radius-md);box-shadow:var(--cp-shadow-md);
+              overflow:hidden;z-index:100;">
+            <a href="/account" style="display:flex;align-items:center;gap:0.625rem;
+              padding:0.625rem 1rem;font-size:0.8125rem;color:var(--cp-text);
+              transition:background var(--cp-transition);"
+              onmouseover="this.style.background='var(--cp-surface-alt)'"
+              onmouseout="this.style.background=''">
+              <i class="fas fa-user-circle" style="color:var(--cp-primary);width:14px;"></i> 내 정보 관리
+            </a>
+            <a href="/payment" style="display:flex;align-items:center;gap:0.625rem;
+              padding:0.625rem 1rem;font-size:0.8125rem;color:var(--cp-text);
+              transition:background var(--cp-transition);"
+              onmouseover="this.style.background='var(--cp-surface-alt)'"
+              onmouseout="this.style.background=''">
+              <i class="fas fa-credit-card" style="color:var(--cp-primary);width:14px;"></i> 결제 관리
+            </a>
+            <hr style="border:none;border-top:1px solid var(--cp-border);margin:0.25rem 0;">
+            <button onclick="window.cpLogout()"
+              style="display:flex;align-items:center;gap:0.625rem;
+                padding:0.625rem 1rem;font-size:0.8125rem;color:#EF4444;width:100%;
+                text-align:left;background:none;border:none;cursor:pointer;font-family:inherit;
+                transition:background var(--cp-transition);"
+              onmouseover="this.style.background='var(--cp-danger-bg)'"
+              onmouseout="this.style.background=''">
+              <i class="fas fa-sign-out-alt" style="width:14px;"></i> 로그아웃
+            </button>
           </div>
         </div>
       </div>
-    </aside>`;
+    </aside>
+
+    <!-- 모바일 오버레이 -->
+    <div id="cp-sidebar-overlay" class="cp-sidebar-overlay" onclick="window.cpCloseSidebar()"></div>
+    `;
   }
 
-  // ── 모바일 헤더 HTML 생성 ─────────────────────────────────────
-  function buildMobileHeader(user) {
-    const email = user?.email || '사용자';
-    const name = user?.name || email.split('@')[0];
-    const initials = name.charAt(0).toUpperCase();
-    const role = user?.role;
-
-    const allLinks = [
-      { href: '/dashboard', icon: 'fas fa-tachometer-alt', label: '대시보드' },
-      { href: '/traffic', icon: 'fas fa-chart-line', label: '트래픽' },
-      { href: '/storage', icon: 'fas fa-hdd', label: '스토리지' },
-      { href: '/hosting', icon: 'fas fa-server', label: '호스팅 관리' },
-      { href: '/domains', icon: 'fas fa-globe', label: '도메인 관리' },
-      { href: '/account', icon: 'fas fa-user-circle', label: '내 정보 관리' },
-      { href: '/services', icon: 'fas fa-th-large', label: '전체 서비스 관리' },
-      { href: '/payment', icon: 'fas fa-credit-card', label: '결제수단 관리' },
-    ];
-
+  // 모바일 햄버거 버튼 HTML
+  function buildMobileMenuBtn() {
     return `
-    <header id="cp-mobile-header" class="md:hidden sticky top-0 z-50 border-b border-white/10" style="background:#07090f;">
-      <div class="flex justify-between items-center px-4 py-3">
-        <a href="/dashboard" class="text-xl font-black text-blue-500">CLOUD<span class="text-white">PRESS</span></a>
-        <div class="flex items-center gap-2">
-          <button id="mobile-profile-btn" onclick="toggleMobileProfileDropdown()" class="w-8 h-8 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center text-sm font-bold">
-            ${initials}
-          </button>
-          <button id="mobileMenuBtn" class="text-gray-400 hover:text-white p-2">
-            <i class="fas fa-bars text-xl"></i>
-          </button>
-        </div>
-      </div>
-
-      <!-- 모바일 프로필 드롭다운 -->
-      <div id="mobile-profile-dropdown" class="hidden border-t border-white/10 py-2 px-2">
-        <div class="px-3 py-2 mb-1">
-          <div class="text-sm font-semibold text-white">${name}</div>
-          <div class="text-xs text-gray-500">${email}</div>
-        </div>
-        <a href="/account" class="flex items-center gap-3 px-3 py-2 rounded-xl hover:bg-white/5 text-sm text-gray-300"><i class="fas fa-user-circle w-4"></i> 내 정보 관리</a>
-        <a href="/payment" class="flex items-center gap-3 px-3 py-2 rounded-xl hover:bg-white/5 text-sm text-gray-300"><i class="fas fa-credit-card w-4"></i> 결제 수단</a>
-        ${role === 'admin' ? `<a href="/admin" class="flex items-center gap-3 px-3 py-2 rounded-xl hover:bg-purple-900/20 text-sm text-purple-400"><i class="fas fa-shield-alt w-4"></i> 관리자 패널</a>` : ''}
-        <button onclick="logout()" class="w-full flex items-center gap-3 px-3 py-2 rounded-xl text-red-400 hover:bg-red-900/20 text-sm"><i class="fas fa-sign-out-alt w-4"></i> 로그아웃</button>
-      </div>
-
-      <!-- 모바일 내비게이션 메뉴 -->
-      <div id="mobileMenu" class="hidden border-t border-white/10 py-2 px-2 space-y-0.5">
-        ${allLinks.map(item => `
-          <a href="${item.href}" class="flex items-center gap-3 px-4 py-3 rounded-xl hover:bg-white/5 transition text-sm ${path.startsWith(item.href) ? 'bg-white/10 font-bold text-white' : 'text-gray-400'}">
-            <i class="${item.icon} w-5 text-center"></i> ${item.label}
-          </a>
-        `).join('')}
-      </div>
-    </header>`;
+    <button id="cp-mobile-menu-btn" class="cp-mobile-menu-btn btn btn-ghost btn-icon"
+      onclick="window.cpOpenSidebar()" aria-label="메뉴 열기"
+      style="display:none;">
+      <i class="fas fa-bars"></i>
+    </button>`;
   }
 
-  // ── DOM 삽입 ───────────────────────────────────────────────────
-  function inject(user) {
-    const body = document.body;
+  // 사이드바 삽입
+  function insertSidebar(user) {
+    // 기존 사이드바 제거
+    document.getElementById('cp-sidebar')?.remove();
+    document.getElementById('cp-sidebar-overlay')?.remove();
 
-    // 기존 사이드바/헤더 제거
-    document.querySelectorAll('aside, #cp-sidebar, #cp-mobile-header').forEach(el => {
-      // 기존 aside 중 nav가 포함된 것만 제거
-      if (el.querySelector('nav') || el.id === 'cp-sidebar') el.remove();
-    });
-    document.querySelectorAll('header.md\\:hidden, #cp-mobile-header').forEach(el => el.remove());
+    const sidebarHtml = buildSidebar(user);
+    const wrapper = document.createElement('div');
+    wrapper.innerHTML = sidebarHtml;
 
-    // body에 모바일 헤더 삽입
-    body.insertAdjacentHTML('afterbegin', buildMobileHeader(user));
-
-    // body flex에 사이드바 삽입 (모바일 헤더 다음)
-    const mobileHeader = document.getElementById('cp-mobile-header');
-    mobileHeader.insertAdjacentHTML('afterend', buildSidebar(user));
-
-    // 모바일 메뉴 토글
-    document.getElementById('mobileMenuBtn').addEventListener('click', () => {
-      document.getElementById('mobileMenu').classList.toggle('hidden');
-      document.getElementById('mobile-profile-dropdown').classList.add('hidden');
-    });
-
-    // 모바일 링크 클릭시 닫기
-    document.querySelectorAll('#mobileMenu a').forEach(a => {
-      a.addEventListener('click', () => document.getElementById('mobileMenu').classList.add('hidden'));
-    });
-
-    // 외부 클릭 시 드롭다운 닫기
-    document.addEventListener('click', (e) => {
-      if (!e.target.closest('#profile-btn') && !e.target.closest('#profile-dropdown')) {
-        document.getElementById('profile-dropdown')?.classList.add('hidden');
-      }
-      if (!e.target.closest('#mobile-profile-btn') && !e.target.closest('#mobile-profile-dropdown')) {
-        document.getElementById('mobile-profile-dropdown')?.classList.add('hidden');
-      }
-    });
+    const target = document.getElementById('cp-sidebar-mount') || document.body;
+    target.insertAdjacentHTML('afterbegin', sidebarHtml);
   }
 
-  // ── 전역 함수 ─────────────────────────────────────────────────
-  // ── 로그아웃 (auth-frontend.js가 없어도 동작하도록 내장) ────
-  window.logout = window.logout || async function () {
+  // 전역 함수
+  window.cpToggleTheme = function () {
+    isDark = !isDark;
+    localStorage.setItem('cp-theme', isDark ? 'dark' : 'light');
+    applyTheme();
+    const btn = document.getElementById('cp-theme-toggle');
+    const label = document.getElementById('cp-theme-label');
+    if (btn) {
+      const icon = btn.querySelector('i');
+      if (icon) { icon.className = isDark ? 'fas fa-sun' : 'fas fa-moon'; }
+    }
+    if (label) label.textContent = isDark ? '라이트 모드' : '다크 모드';
+  };
+
+  window.cpToggleUserMenu = function () {
+    const menu = document.getElementById('cp-user-menu');
+    const btn  = document.getElementById('cp-user-btn');
+    if (!menu) return;
+    const isOpen = !menu.classList.contains('hidden');
+    menu.classList.toggle('hidden', isOpen);
+    btn?.setAttribute('aria-expanded', String(!isOpen));
+
+    if (!isOpen) {
+      // 외부 클릭 시 닫기
+      const close = (e) => {
+        if (!menu.contains(e.target) && e.target !== btn && !btn?.contains(e.target)) {
+          menu.classList.add('hidden');
+          btn?.setAttribute('aria-expanded', 'false');
+          document.removeEventListener('click', close);
+        }
+      };
+      setTimeout(() => document.addEventListener('click', close), 0);
+    }
+  };
+
+  window.cpOpenSidebar = function () {
+    const sidebar = document.getElementById('cp-sidebar');
+    const overlay = document.getElementById('cp-sidebar-overlay');
+    sidebar?.classList.add('open');
+    overlay?.classList.add('visible');
+  };
+
+  window.cpCloseSidebar = function () {
+    const sidebar = document.getElementById('cp-sidebar');
+    const overlay = document.getElementById('cp-sidebar-overlay');
+    sidebar?.classList.remove('open');
+    overlay?.classList.remove('visible');
+  };
+
+  window.cpLogout = async function () {
     try {
       const token = localStorage.getItem('admin_token');
-      if (token) {
-        await fetch('/api/logout', {
-          method: 'POST',
-          headers: { Authorization: `Bearer ${token}` }
-        }).catch(() => {});
-      }
+      if (token) await fetch('/api/logout', { method: 'POST', headers: { Authorization: `Bearer ${token}` } });
     } catch {}
     localStorage.removeItem('admin_token');
-    sessionStorage.clear();
+    localStorage.removeItem('user_data');
     window.location.href = '/login';
   };
 
-  window.toggleServiceMenu = function () {
-    const submenu = document.getElementById('service-submenu');
-    const chevron = document.getElementById('service-chevron');
-    submenu.classList.toggle('hidden');
-    const isOpen = !submenu.classList.contains('hidden');
-    chevron.className = `fas fa-chevron-${isOpen ? 'down' : 'right'} text-xs opacity-60 transition-transform duration-200`;
-  };
-
-  window.toggleProfileDropdown = function () {
-    document.getElementById('profile-dropdown').classList.toggle('hidden');
-  };
-
-  window.toggleMobileProfileDropdown = function () {
-    const pd = document.getElementById('mobile-profile-dropdown');
-    const menu = document.getElementById('mobileMenu');
-    pd.classList.toggle('hidden');
-    menu.classList.add('hidden');
-  };
-
-  // ── 초기화 ────────────────────────────────────────────────────
+  // DOM 준비 후 사이드바 삽입
   async function init() {
     const user = await loadUserInfo();
-    inject(user);
-
-    // 헤더의 사용자 이름 표시 업데이트
-    const emailEl = document.getElementById('user-email');
-    if (emailEl && user?.email) emailEl.textContent = user.email;
+    if (!user) {
+      // 인증되지 않은 경우 로그인 페이지로
+      const publicPages = ['/login', '/signup', '/index', '/', '/pricing', '/features', '/about', '/contact', '/faq', '/terms', '/privacy', '/services'];
+      const isPublic = publicPages.some(p => path === p || path.startsWith(p + '.'));
+      if (!isPublic && !path.includes('login') && !path.includes('signup') && !path.includes('.html')) {
+        // window.location.href = '/login';
+      }
+    }
+    insertSidebar(user);
   }
 
   if (document.readyState === 'loading') {

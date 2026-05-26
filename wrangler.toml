@@ -24,18 +24,6 @@ id      = "19e5e273e99941fbb963300e56dbdf9e"
 binding = "KV"
 id      = "9b8370d20a9646b9aa73f63c9200379f"
 
-# ── Durable Objects: WordPress 관리자 (사용자당 1개) ─────────────────────────
-# 역할: 설치관리, 상태관리, 세션, 락, 크론, DB 담당
-[[durable_objects.bindings]]
-name       = "WP_MANAGER"
-class_name = "93a4b500a10e49d1b033af94065d8b12"
-# script_name은 같은 worker이므로 생략
-
-# Durable Object 마이그레이션 (최초 배포 시)
-[[migrations]]
-tag  = "v1"
-new_classes = ["WpManager"]
-
 # ── Secrets (wrangler secret put 명령으로 설정) ───────────────────────────────
 #
 #   wrangler secret put JWT_SECRET

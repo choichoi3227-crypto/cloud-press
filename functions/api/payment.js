@@ -183,11 +183,21 @@ export async function onRequestGet(context) {
   }
 
   // 토스 클라이언트 키 조회 (프론트엔드용)
-  if (sub === "client-key") {
+  if (sub === "client-key" || sub === "toss-key") {
     const settings = await getSettings(env);
-    const clientKey = settings.toss_client_key || "";
+    const clientKey    = settings.toss_client_key    || env.TOSS_CLIENT_KEY || "";
+    const customerKey  = settings.toss_customer_key  || payload.id;
     if (!clientKey) return jsonErr("결제 설정이 되어있지 않습니다. 관리자에게 문의하세요.", 503);
-    return jsonOk({ success: true, client_key: clientKey });
+    return jsonOk({ success: true, client_key: clientKey, customer_key: customerKey });
+  }
+
+  // PayPal 클라이언트 ID 조회 (프론트엔드용)
+  if (sub === "paypal-key") {
+    const settings = await getSettings(env);
+    const clientId = settings.paypal_client_id || env.PAYPAL_CLIENT_ID || "";
+    const sandbox  = settings.paypal_sandbox !== "false";
+    if (!clientId) return jsonErr("PayPal 설정이 완료되지 않았습니다. 관리자에게 문의하세요.", 503);
+    return jsonOk({ success: true, client_id: clientId, sandbox });
   }
 
   return jsonErr("알 수 없는 경로", 404);

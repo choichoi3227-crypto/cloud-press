@@ -12,7 +12,7 @@ binding   = "ASSETS"
 [[d1_databases]]
 binding       = "DB"
 database_name = "cloudpress-db"
-database_id   = "a04d0702-b6d8-49d3-8e57-b81ee5028ac7"
+database_id   = "ab63954b-e1e6-4be6-8f82-9083406c1a8e"
 
 # ── KV: 세션 관리 ────────────────────────────────────────────────────────────
 [[kv_namespaces]]

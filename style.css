@@ -42,7 +42,7 @@
   --cp-sidebar-bg:     #1E293B;
   --cp-sidebar-text:   #CBD5E1;
   --cp-sidebar-active: #FFFFFF;
-  --cp-sidebar-width:  260px;
+  /* Sidebar width moved to sidebar section */
 
   /* Shadows */
   --cp-shadow-sm:  0 1px 3px 0 rgba(0,0,0,0.08), 0 1px 2px -1px rgba(0,0,0,0.06);
@@ -59,24 +59,6 @@
 
   /* Transition */
   --cp-transition: 150ms ease;
-}
-
-/* ── Dark Mode ────────────────────────────────────────────── */
-[data-theme="dark"], .dark {
-  --cp-bg:             #0F172A;
-  --cp-surface:        #1E293B;
-  --cp-surface-alt:    #293548;
-  --cp-border:         #334155;
-  --cp-border-light:   #1E293B;
-  --cp-text:           #F8FAFC;
-  --cp-text-secondary: #CBD5E1;
-  --cp-text-muted:     #64748B;
-  --cp-sidebar-bg:     #0B1120;
-  --cp-sidebar-text:   #94A3B8;
-  --cp-primary-bg:     #1E3A5F;
-  --cp-success-bg:     #064E3B;
-  --cp-warning-bg:     #451A03;
-  --cp-danger-bg:      #450A0A;
 }
 
 /* ── Reset & Base ─────────────────────────────────────────── */
@@ -126,6 +108,12 @@ p { color: var(--cp-text-secondary); line-height: 1.7; }
 }
 
 /* ── Sidebar ──────────────────────────────────────────────── */
+:root {
+  --cp-sidebar-width:          260px;
+  --cp-sidebar-collapsed-width: 64px;
+  --cp-sidebar-transition:     220ms ease;
+}
+
 .cp-sidebar {
   width: var(--cp-sidebar-width);
   background: var(--cp-sidebar-bg);
@@ -134,43 +122,160 @@ p { color: var(--cp-text-secondary); line-height: 1.7; }
   position: fixed;
   top: 0; left: 0; bottom: 0;
   z-index: 40;
-  overflow-y: auto;
-  transition: transform var(--cp-transition);
+  overflow: hidden;               /* 접혔을 때 텍스트 숨김 */
+  transition: width var(--cp-sidebar-transition);
+  will-change: width;
 }
 
+/* ── 접힌 상태 ──────────────────────────────────────────────── */
+.cp-sidebar[data-collapsed="true"] {
+  width: var(--cp-sidebar-collapsed-width);
+}
+
+/* 접혔을 때 텍스트 라벨 숨김 */
+.cp-sidebar[data-collapsed="true"] .cp-sidebar-link-label {
+  opacity: 0;
+  width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  transition: opacity var(--cp-sidebar-transition), width var(--cp-sidebar-transition);
+}
+
+/* 펼쳤을 때 라벨 표시 */
+.cp-sidebar:not([data-collapsed]) .cp-sidebar-link-label,
+.cp-sidebar[data-collapsed="false"] .cp-sidebar-link-label {
+  opacity: 1;
+  width: auto;
+  transition: opacity var(--cp-sidebar-transition), width var(--cp-sidebar-transition);
+}
+
+/* 접혔을 때 섹션 헤더 숨김 */
+.cp-sidebar[data-collapsed="true"] .cp-sidebar-section {
+  opacity: 0;
+  height: 0;
+  padding: 0;
+  overflow: hidden;
+}
+
+/* 접혔을 때 로고 텍스트 숨김 */
+.cp-sidebar[data-collapsed="true"] .cp-sidebar-logo-text {
+  opacity: 0;
+  width: 0;
+  overflow: hidden;
+}
+
+/* 접혔을 때 아이콘 중앙 정렬 */
+.cp-sidebar[data-collapsed="true"] .cp-sidebar-link {
+  justify-content: center;
+  padding: 0.625rem 0;
+}
+
+.cp-sidebar[data-collapsed="true"] .cp-sidebar-link i {
+  margin: 0;
+}
+
+/* 접혔을 때 유저 버튼 아이콘만 */
+.cp-sidebar[data-collapsed="true"] .cp-sidebar-user-btn {
+  justify-content: center;
+}
+
+/* 접힌 상태 tooltip (CSS) */
+.cp-sidebar[data-collapsed="true"] .cp-sidebar-link:hover::after {
+  content: attr(title);
+  position: absolute;
+  left: calc(var(--cp-sidebar-collapsed-width) + 8px);
+  background: #1E293B;
+  color: #F8FAFC;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  padding: 6px 12px;
+  border-radius: 8px;
+  white-space: nowrap;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+  pointer-events: none;
+  z-index: 200;
+}
+.cp-sidebar[data-collapsed="true"] .cp-sidebar-link {
+  position: relative;
+}
+
+/* ── 로고 영역 ────────────────────────────────────────────── */
 .cp-sidebar-logo {
-  padding: 1.5rem 1.25rem 1.25rem;
+  padding: 0 0.75rem;
+  height: 64px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   border-bottom: 1px solid rgba(255,255,255,0.06);
+  flex-shrink: 0;
+  gap: 0.5rem;
 }
 
-.cp-sidebar-logo a {
-  font-size: 1.4rem;
+.cp-sidebar-logo-text {
+  font-size: 1.35rem;
   font-weight: 900;
   letter-spacing: -0.03em;
   color: #fff;
+  text-decoration: none;
+  white-space: nowrap;
+  overflow: hidden;
+  transition: opacity var(--cp-sidebar-transition), width var(--cp-sidebar-transition);
 }
 
-.cp-sidebar-logo span { color: var(--cp-primary-light); }
+.cp-sidebar-logo-text span { color: var(--cp-primary-light); }
 
+/* ── 접기 버튼 ────────────────────────────────────────────── */
+.cp-sidebar-collapse-btn {
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  background: rgba(255,255,255,0.07);
+  border: none;
+  color: rgba(255,255,255,0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background var(--cp-sidebar-transition), color var(--cp-sidebar-transition);
+  font-size: 0.6875rem;
+}
+
+.cp-sidebar-collapse-btn:hover {
+  background: rgba(255,255,255,0.13);
+  color: #fff;
+}
+
+/* 접혔을 때 버튼만 남고 중앙에 */
+.cp-sidebar[data-collapsed="true"] .cp-sidebar-logo {
+  justify-content: center;
+  padding: 0;
+}
+
+/* ── 네비게이션 ───────────────────────────────────────────── */
 .cp-sidebar-nav {
   flex: 1;
-  padding: 1rem 0.75rem;
+  padding: 0.75rem 0.625rem;
   display: flex;
   flex-direction: column;
   gap: 2px;
+  overflow-y: auto;
+  overflow-x: hidden;
 }
 
 .cp-sidebar-link {
   display: flex;
   align-items: center;
   gap: 0.75rem;
-  padding: 0.625rem 0.875rem;
+  padding: 0.625rem 0.75rem;
   border-radius: var(--cp-radius);
   color: var(--cp-sidebar-text);
   font-size: 0.875rem;
   font-weight: 500;
-  transition: all var(--cp-transition);
+  transition: background var(--cp-sidebar-transition), color var(--cp-sidebar-transition);
   white-space: nowrap;
+  cursor: pointer;
+  text-decoration: none;
 }
 
 .cp-sidebar-link:hover {
@@ -187,23 +292,129 @@ p { color: var(--cp-text-secondary); line-height: 1.7; }
 .cp-sidebar-link i {
   width: 1rem;
   text-align: center;
-  font-size: 0.875rem;
-  opacity: 0.85;
+  font-size: 0.9rem;
   flex-shrink: 0;
+  transition: none;
 }
 
 .cp-sidebar-section {
-  padding: 0.75rem 0.875rem 0.25rem;
-  font-size: 0.6875rem;
+  padding: 0.625rem 0.75rem 0.25rem;
+  font-size: 0.625rem;
   font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: rgba(255,255,255,0.3);
+  letter-spacing: 0.1em;
+  color: rgba(255,255,255,0.28);
+  white-space: nowrap;
+  overflow: hidden;
+  transition: opacity var(--cp-sidebar-transition), height var(--cp-sidebar-transition), padding var(--cp-sidebar-transition);
 }
 
+/* ── 하단 영역 ────────────────────────────────────────────── */
 .cp-sidebar-footer {
-  padding: 0.75rem;
+  padding: 0.625rem;
   border-top: 1px solid rgba(255,255,255,0.06);
+  flex-shrink: 0;
+}
+
+/* ── 아바타 ───────────────────────────────────────────────── */
+.cp-sidebar-avatar {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--cp-primary);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.75rem;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.cp-sidebar-user-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.cp-sidebar-user-name {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: #fff;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cp-sidebar-user-email {
+  font-size: 0.6875rem;
+  color: var(--cp-sidebar-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ── 사용자 드롭다운 메뉴 ─────────────────────────────────── */
+.cp-user-menu {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 0;
+  right: 0;
+  background: var(--cp-surface);
+  border: 1px solid var(--cp-border);
+  border-radius: var(--cp-radius-md);
+  box-shadow: var(--cp-shadow-md);
+  overflow: hidden;
+  z-index: 100;
+  padding: 4px;
+}
+
+/* 접혔을 때 드롭다운은 사이드바 오른쪽에 */
+.cp-sidebar[data-collapsed="true"] .cp-user-menu {
+  left: calc(var(--cp-sidebar-collapsed-width) + 8px);
+  bottom: 0;
+  right: auto;
+  min-width: 180px;
+}
+
+.cp-user-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+  padding: 0.5625rem 0.875rem;
+  border-radius: var(--cp-radius);
+  font-size: 0.875rem;
+  color: var(--cp-text);
+  text-decoration: none;
+  transition: background var(--cp-transition);
+  background: none;
+  border: none;
+  width: 100%;
+  text-align: left;
+  cursor: pointer;
+  font-family: inherit;
+  white-space: nowrap;
+}
+
+.cp-user-menu-item:hover { background: var(--cp-surface-alt); }
+
+.cp-user-menu-item i {
+  color: var(--cp-primary);
+  width: 14px;
+  text-align: center;
+  flex-shrink: 0;
+}
+
+.cp-user-menu-logout { color: var(--cp-danger) !important; }
+.cp-user-menu-logout i { color: var(--cp-danger) !important; }
+.cp-user-menu-logout:hover { background: var(--cp-danger-bg) !important; }
+
+.cp-user-menu-divider {
+  border: none;
+  border-top: 1px solid var(--cp-border);
+  margin: 3px 0;
 }
 
 /* ── Main Content ─────────────────────────────────────────── */
@@ -213,6 +424,8 @@ p { color: var(--cp-text-secondary); line-height: 1.7; }
   min-height: 100vh;
   display: flex;
   flex-direction: column;
+  transition: margin-left var(--cp-sidebar-transition);
+  will-change: margin-left;
 }
 
 .cp-topbar {
@@ -1069,20 +1282,29 @@ p { color: var(--cp-text-secondary); line-height: 1.7; }
   .cp-sidebar {
     transform: translateX(-100%);
     box-shadow: var(--cp-shadow-lg);
+    width: var(--cp-sidebar-width) !important; /* 모바일에서는 항상 전체 너비 */
   }
 
   .cp-sidebar.open { transform: translateX(0); }
 
-  .cp-main { margin-left: 0; }
+  /* 모바일에서 접기 버튼 숨김 (드로어 방식 사용) */
+  .cp-sidebar-collapse-btn { display: none; }
+
+  .cp-main {
+    margin-left: 0 !important;
+  }
 
   .cp-content { padding: 1.25rem 1rem; }
 
-  .cp-mobile-menu-btn {
-    display: flex !important;
-  }
+  .cp-mobile-menu-btn { display: flex !important; }
 
   .cp-table { font-size: 0.8125rem; }
   .cp-table th, .cp-table td { padding: 0.625rem 0.75rem; }
+
+  /* 모바일에서 접힌 상태 tooltip 비활성 */
+  .cp-sidebar[data-collapsed="true"] .cp-sidebar-link:hover::after {
+    display: none;
+  }
 }
 
 @media (min-width: 769px) {
@@ -1176,16 +1398,6 @@ p { color: var(--cp-text-secondary); line-height: 1.7; }
 .font-mono      { font-family: 'Fira Code', 'JetBrains Mono', monospace; }
 .font-bold      { font-weight: 700; }
 .font-semibold  { font-weight: 600; }
-
-/* ── Dark mode for legacy dark-themed pages ───────────────── */
-body.dark-page {
-  --cp-bg:          #0F172A;
-  --cp-surface:     #1E293B;
-  --cp-border:      #334155;
-  --cp-text:        #F8FAFC;
-  --cp-text-secondary: #CBD5E1;
-  --cp-text-muted:  #64748B;
-}
 
 /* ── Scrollbar ────────────────────────────────────────────── */
 ::-webkit-scrollbar       { width: 6px; height: 6px; }

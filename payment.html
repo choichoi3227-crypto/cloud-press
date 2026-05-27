@@ -67,9 +67,84 @@
     <!-- 카드 추가 모달 -->
     <div id="addCardModal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm" onclick="if(event.target===this)closeAddCard()">
         <div class="bg-[#111] border border-white/10 rounded-2xl p-8 w-full max-w-md mx-4 shadow-2xl" onclick="event.stopPropagation()">
-            <div class="flex items-center justify-between mb-6">
+            <div class="flex items-center justify-between mb-5">
                 <h2 class="text-xl font-bold">결제 수단 추가</h2>
                 <button onclick="closeAddCard()" class="text-gray-500 hover:text-white transition text-2xl leading-none">&times;</button>
+            </div>
+
+            <!-- 결제 방법 탭 -->
+            <div class="flex gap-2 mb-6 p-1 bg-white/5 rounded-xl">
+                <button id="tab-toss" onclick="switchPayTab('toss')"
+                    class="flex-1 py-2.5 rounded-lg text-sm font-bold transition flex items-center justify-center gap-2"
+                    style="background:#3182F6;color:#fff;">
+                    <img src="https://static.tosspayments.com/icons/svg/toss.svg" alt="Toss" style="height:16px;" onerror="this.style.display='none'">
+                    토스페이먼츠
+                </button>
+                <button id="tab-paypal" onclick="switchPayTab('paypal')"
+                    class="flex-1 py-2.5 rounded-lg text-sm font-bold transition flex items-center justify-center gap-2 text-gray-400 hover:text-white">
+                    <img src="https://www.paypalobjects.com/webstatic/icon/favicon.ico" alt="PayPal" style="height:16px;border-radius:2px;" onerror="this.style.display='none'">
+                    PayPal
+                </button>
+            </div>
+
+            <!-- PayPal 패널 -->
+            <div id="paypal-panel" class="hidden space-y-4">
+                <div class="p-4 bg-blue-900/20 border border-blue-500/20 rounded-xl text-sm text-blue-300 flex items-start gap-3">
+                    <img src="https://www.paypalobjects.com/webstatic/mktg/logo/PP_AcceptanceMarkTray-NoMoneky_pie-SRGB.png"
+                        alt="PayPal" style="height:24px;" onerror="this.innerHTML='PayPal'">
+                    <div>
+                        <div class="font-semibold mb-1">PayPal로 결제</div>
+                        <div class="text-xs text-blue-400/80">PayPal 계정으로 안전하게 결제합니다. 신용카드, 직불카드, PayPal 잔액 모두 사용 가능합니다.</div>
+                    </div>
+                </div>
+
+                <div class="space-y-3">
+                    <div>
+                        <label class="text-sm text-gray-400 mb-1.5 block">상품 선택 *</label>
+                        <select id="paypal-product-type"
+                            class="w-full p-3.5 bg-white/5 border border-white/10 rounded-xl text-sm text-white focus:outline-none focus:border-blue-500 transition"
+                            onchange="updatePayPalAmount()">
+                            <option value="">상품을 선택하세요</option>
+                            <option value="hosting">WordPress 호스팅</option>
+                            <option value="cpdb">CloudPressDB</option>
+                            <option value="cp3">CP3 스토리지</option>
+                            <option value="cachecloud">CacheCloud</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="text-sm text-gray-400 mb-1.5 block">플랜 *</label>
+                        <select id="paypal-plan"
+                            class="w-full p-3.5 bg-white/5 border border-white/10 rounded-xl text-sm text-white focus:outline-none focus:border-blue-500 transition"
+                            onchange="updatePayPalAmount()">
+                            <option value="">플랜을 선택하세요</option>
+                            <option value="starter">스타터</option>
+                            <option value="standard">스탠다드</option>
+                            <option value="pro">프로</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="text-sm text-gray-400 mb-1.5 block">결제 주기</label>
+                        <div class="flex gap-2">
+                            <button id="cycle-monthly" onclick="selectCycle('monthly')"
+                                class="flex-1 py-2.5 rounded-xl text-sm font-bold border transition"
+                                style="background:#3182F6;color:#fff;border-color:#3182F6;">월간</button>
+                            <button id="cycle-yearly" onclick="selectCycle('yearly')"
+                                class="flex-1 py-2.5 rounded-xl text-sm font-bold border border-white/10 text-gray-400 hover:text-white transition">
+                                연간 <span class="text-green-400 text-xs">(-20%)</span>
+                            </button>
+                        </div>
+                    </div>
+                    <div id="paypal-amount-preview" class="hidden p-4 bg-white/5 rounded-xl">
+                        <div class="flex justify-between items-center">
+                            <span class="text-sm text-gray-400">결제 금액</span>
+                            <span id="paypal-amount-text" class="text-xl font-bold text-white"></span>
+                        </div>
+                        <div class="text-xs text-gray-500 mt-1" id="paypal-usd-text"></div>
+                    </div>
+                </div>
+
+                <div id="paypal-button-container" class="min-h-[50px]"></div>
+                <div id="paypal-alert" class="hidden p-3 rounded-xl text-sm"></div>
             </div>
 
             <!-- 로딩 상태 -->
@@ -458,6 +533,231 @@
         if (new URLSearchParams(location.search).get('error')) {
             showAlert('카드 추가에 실패했습니다. 다시 시도해주세요.');
         }
+
+        // ─── PayPal / Toss 탭 전환 ──────────────────────────────────────────────
+        let _payTab     = 'toss';
+        let _payCycle   = 'monthly';
+        let _paypalInited = false;
+
+        const PLAN_PRICES = {
+            hosting:    { starter: 13500, standard: 39000, pro:  99000 },
+            cpdb:       { starter:  4900, standard: 14900, pro:  29900 },
+            cp3:        { starter:  3900, standard:  9900, pro:  19900 },
+            cachecloud: { starter:  4900, standard: 12900, pro:  24900 },
+        };
+        const PRODUCT_LABELS = {
+            hosting: 'WordPress 호스팅', cpdb: 'CloudPressDB',
+            cp3: 'CP3 스토리지', cachecloud: 'CacheCloud',
+        };
+        const PLAN_LABELS = { starter: '스타터', standard: '스탠다드', pro: '프로' };
+
+        function switchPayTab(tab) {
+            _payTab = tab;
+            const tossActive   = tab === 'toss';
+            const tossBtn      = document.getElementById('tab-toss');
+            const ppBtn        = document.getElementById('tab-paypal');
+            const ppPanel      = document.getElementById('paypal-panel');
+            const loadingEl    = document.getElementById('modal-loading');
+            const tossWidget   = document.getElementById('toss-payment-widget');
+            const cardForm     = document.getElementById('card-form');
+            const modalActions = document.getElementById('modal-actions');
+
+            tossBtn.style.cssText = tossActive
+                ? 'background:#3182F6;color:#fff;'
+                : 'background:transparent;color:#9CA3AF;';
+            ppBtn.style.cssText  = !tossActive
+                ? 'background:#003087;color:#fff;'
+                : 'background:transparent;color:#9CA3AF;';
+
+            ppPanel.classList.toggle('hidden', tossActive);
+
+            // Toss 패널 표시 (기존 로직 재사용)
+            if (tossActive) {
+                loadingEl?.classList.remove('hidden');
+                tossWidget?.classList.add('hidden');
+                cardForm?.classList.add('hidden');
+                modalActions?.classList.remove('hidden');
+                loadTossPayments?.();
+            } else {
+                loadingEl?.classList.add('hidden');
+                tossWidget?.classList.add('hidden');
+                cardForm?.classList.add('hidden');
+                modalActions?.classList.add('hidden');
+                // PayPal SDK 로드
+                if (!_paypalInited) loadPayPalSDK();
+            }
+        }
+
+        function selectCycle(cycle) {
+            _payCycle = cycle;
+            const monthly = document.getElementById('cycle-monthly');
+            const yearly  = document.getElementById('cycle-yearly');
+            if (monthly) {
+                monthly.style.cssText = cycle === 'monthly'
+                    ? 'background:#3182F6;color:#fff;border-color:#3182F6;'
+                    : 'background:transparent;color:#9CA3AF;border-color:rgba(255,255,255,0.1);';
+            }
+            if (yearly) {
+                yearly.style.cssText = cycle === 'yearly'
+                    ? 'background:#3182F6;color:#fff;border-color:#3182F6;'
+                    : 'background:transparent;color:#9CA3AF;border-color:rgba(255,255,255,0.1);';
+            }
+            updatePayPalAmount();
+        }
+
+        function updatePayPalAmount() {
+            const product = document.getElementById('paypal-product-type')?.value;
+            const plan    = document.getElementById('paypal-plan')?.value;
+            if (!product || !plan) {
+                document.getElementById('paypal-amount-preview')?.classList.add('hidden');
+                return;
+            }
+            const baseKrw = PLAN_PRICES[product]?.[plan] || 0;
+            const krw     = _payCycle === 'yearly' ? Math.floor(baseKrw * 12 * 0.8) : baseKrw;
+            const usd     = (krw / 1350).toFixed(2);
+            const preview = document.getElementById('paypal-amount-preview');
+            const amtTxt  = document.getElementById('paypal-amount-text');
+            const usdTxt  = document.getElementById('paypal-usd-text');
+            if (preview) preview.classList.remove('hidden');
+            if (amtTxt)  amtTxt.textContent = `₩${krw.toLocaleString()} / ${_payCycle === 'monthly' ? '월' : '년'}`;
+            if (usdTxt)  usdTxt.textContent = `≈ $${usd} USD (PayPal 청구 금액)`;
+            // PayPal 버튼 재렌더
+            if (_paypalInited) renderPayPalButton();
+        }
+
+        async function loadPayPalSDK() {
+            const ppContainer = document.getElementById('paypal-button-container');
+            if (!ppContainer) return;
+            ppContainer.innerHTML = '<div style="text-align:center;padding:16px;color:#9CA3AF;font-size:0.875rem;"><i class="fas fa-spinner fa-spin mr-2"></i>PayPal 모듈 로딩 중...</div>';
+
+            try {
+                // 서버에서 PayPal 클라이언트 ID 가져오기
+                const res = await fetch('/api/payment/paypal-key', { headers: H() });
+                const data = await res.json();
+                const clientId = data.client_id || data.clientId;
+
+                if (!clientId) {
+                    ppContainer.innerHTML = '<div style="text-align:center;padding:16px;color:#F87171;font-size:0.875rem;"><i class="fas fa-exclamation-circle mr-2"></i>PayPal 설정이 완료되지 않았습니다.<br><span style="font-size:0.75rem;color:#9CA3AF;">관리자에게 문의해주세요.</span></div>';
+                    return;
+                }
+
+                if (window.paypal) {
+                    _paypalInited = true;
+                    renderPayPalButton();
+                    return;
+                }
+
+                const script = document.createElement('script');
+                script.src = `https://www.paypal.com/sdk/js?client-id=${clientId}&currency=USD&locale=ko_KR`;
+                script.addEventListener('load', () => {
+                    _paypalInited = true;
+                    renderPayPalButton();
+                });
+                script.addEventListener('error', () => {
+                    ppContainer.innerHTML = '<div style="text-align:center;padding:16px;color:#F87171;font-size:0.875rem;"><i class="fas fa-exclamation-circle mr-2"></i>PayPal SDK를 불러올 수 없습니다.</div>';
+                });
+                document.head.appendChild(script);
+            } catch (e) {
+                ppContainer.innerHTML = `<div style="text-align:center;padding:16px;color:#F87171;font-size:0.875rem;">오류: ${e.message}</div>`;
+            }
+        }
+
+        function renderPayPalButton() {
+            const container = document.getElementById('paypal-button-container');
+            if (!container || !window.paypal) return;
+            container.innerHTML = '';
+
+            window.paypal.Buttons({
+                style: {
+                    shape:  'rect',
+                    color:  'blue',
+                    layout: 'vertical',
+                    label:  'pay',
+                    height: 45,
+                },
+
+                createOrder: async () => {
+                    const product = document.getElementById('paypal-product-type')?.value;
+                    const plan    = document.getElementById('paypal-plan')?.value;
+                    if (!product || !plan) {
+                        showPayPalAlert('상품과 플랜을 선택해주세요.', 'warning');
+                        return Promise.reject(new Error('상품/플랜 미선택'));
+                    }
+                    try {
+                        const res = await fetch('/api/payment/paypal-create', {
+                            method: 'POST',
+                            headers: H(),
+                            body: JSON.stringify({ product_type: product, plan, billing_cycle: _payCycle }),
+                        });
+                        const data = await res.json();
+                        if (!res.ok || !data.paypalOrderId) throw new Error(data.error || '주문 생성 실패');
+                        return data.paypalOrderId;
+                    } catch (e) {
+                        showPayPalAlert('결제 준비 중 오류: ' + e.message, 'error');
+                        throw e;
+                    }
+                },
+
+                onApprove: async (data) => {
+                    showPayPalAlert('결제 승인 처리 중...', 'info');
+                    try {
+                        const res = await fetch('/api/payment/paypal-capture', {
+                            method: 'POST',
+                            headers: H(),
+                            body: JSON.stringify({ paypal_order_id: data.orderID }),
+                        });
+                        const result = await res.json();
+                        if (!res.ok || !result.success) throw new Error(result.error || '결제 캡처 실패');
+                        closeAddCard();
+                        showAlert(`🎉 ${result.message}`, 'success');
+                        loadCards();
+                        loadBillingHistory?.();
+                    } catch (e) {
+                        showPayPalAlert('결제 처리 오류: ' + e.message, 'error');
+                    }
+                },
+
+                onError: (err) => {
+                    console.error('PayPal 오류:', err);
+                    showPayPalAlert('PayPal 결제 중 오류가 발생했습니다. 다시 시도해주세요.', 'error');
+                },
+
+                onCancel: () => {
+                    showPayPalAlert('결제가 취소되었습니다.', 'warning');
+                },
+
+            }).render('#paypal-button-container');
+        }
+
+        function showPayPalAlert(msg, type = 'info') {
+            const el = document.getElementById('paypal-alert');
+            if (!el) return;
+            const styles = {
+                info:    'background:rgba(49,130,246,0.15);color:#93C5FD;border:1px solid rgba(49,130,246,0.3);',
+                success: 'background:rgba(16,185,129,0.15);color:#6EE7B7;border:1px solid rgba(16,185,129,0.3);',
+                warning: 'background:rgba(245,158,11,0.15);color:#FCD34D;border:1px solid rgba(245,158,11,0.3);',
+                error:   'background:rgba(239,68,68,0.15);color:#FCA5A5;border:1px solid rgba(239,68,68,0.3);',
+            };
+            el.style.cssText = styles[type] || styles.info;
+            el.textContent = msg;
+            el.classList.remove('hidden');
+            if (type === 'success' || type === 'info') setTimeout(() => el.classList.add('hidden'), 4000);
+        }
+
+        // ─── 모달 openAddCard 확장 (탭 초기화) ─────────────────────────────────
+        const _origOpenAddCard = window.openAddCard;
+        window.openAddCard = function() {
+            _payTab = 'toss';
+            _payCycle = 'monthly';
+            _paypalInited = false;
+            // 탭 버튼 초기 상태
+            const tossBtn = document.getElementById('tab-toss');
+            const ppBtn   = document.getElementById('tab-paypal');
+            if (tossBtn) tossBtn.style.cssText = 'background:#3182F6;color:#fff;';
+            if (ppBtn)   ppBtn.style.cssText   = 'background:transparent;color:#9CA3AF;';
+            document.getElementById('paypal-panel')?.classList.add('hidden');
+            if (_origOpenAddCard) _origOpenAddCard();
+        };
 
         loadCards();
     </script>

@@ -599,6 +599,82 @@
         </button>
     </div>
 
+    <!-- ── PayPal 결제 설정 ── -->
+    <div class="p-6 bg-[#111] rounded-2xl border border-white/5 space-y-5">
+        <div class="flex items-center justify-between flex-wrap gap-2">
+            <h2 class="font-bold flex items-center gap-2">
+                <i class="fab fa-paypal text-blue-400 text-lg"></i>
+                PayPal 결제 설정
+            </h2>
+            <div class="flex items-center gap-2">
+                <span class="text-xs text-gray-500">글로벌 결제 지원</span>
+                <label class="flex items-center gap-1.5 cursor-pointer select-none">
+                    <span class="text-xs text-gray-500" id="paypal-mode-label">샌드박스</span>
+                    <div class="relative" onclick="togglePaypalMode()">
+                        <div id="paypal-mode-track"
+                            class="w-10 h-5 rounded-full transition-colors duration-200"
+                            style="background:#374151;"></div>
+                        <div id="paypal-mode-thumb"
+                            class="absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform duration-200"></div>
+                    </div>
+                    <span class="text-xs text-gray-500">라이브</span>
+                </label>
+            </div>
+        </div>
+
+        <div class="p-3 bg-blue-900/20 border border-blue-500/20 rounded-xl text-xs text-blue-300 flex items-start gap-2">
+            <i class="fab fa-paypal mt-0.5 flex-shrink-0 text-base"></i>
+            <div>
+                <strong>PayPal Developer</strong>에서 앱을 생성하고 Client ID와 Secret을 발급받으세요.
+                <a href="https://developer.paypal.com/dashboard/" target="_blank" rel="noopener"
+                    class="text-blue-400 hover:underline ml-1">PayPal 개발자 대시보드 →</a>
+            </div>
+        </div>
+
+        <div class="grid md:grid-cols-2 gap-4">
+            <div class="space-y-2">
+                <label class="text-xs text-gray-500 block font-bold">
+                    Client ID <span class="text-blue-400">(프론트엔드 공개키)</span>
+                </label>
+                <input id="set-paypal-client-id" type="text" placeholder="AY... (샌드박스) 또는 AZ... (라이브)"
+                    class="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-blue-500 transition font-mono" />
+                <p class="text-xs text-gray-600">PayPal 개발자 앱 → Credentials → Client ID</p>
+            </div>
+            <div class="space-y-2">
+                <label class="text-xs text-gray-500 block font-bold">
+                    Secret Key <span class="text-red-400">(서버사이드 비밀키)</span>
+                </label>
+                <input id="set-paypal-secret" type="password" placeholder="EL..."
+                    class="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-blue-500 transition font-mono" />
+                <p class="text-xs text-gray-600">PayPal 개발자 앱 → Credentials → Secret</p>
+            </div>
+        </div>
+
+        <div class="p-4 bg-white/3 rounded-xl text-xs space-y-2 text-gray-400">
+            <p class="font-bold text-gray-300 uppercase tracking-wider mb-2">PayPal 결제 흐름</p>
+            <div class="grid md:grid-cols-3 gap-3">
+                <div class="p-3 bg-white/5 rounded-lg">
+                    <div class="text-blue-400 font-bold mb-1">1. 주문 생성</div>
+                    <div class="text-gray-500">서버에서 PayPal 주문 ID 발급</div>
+                </div>
+                <div class="p-3 bg-white/5 rounded-lg">
+                    <div class="text-yellow-400 font-bold mb-1">2. 결제 승인</div>
+                    <div class="text-gray-500">사용자가 PayPal에서 결제 승인</div>
+                </div>
+                <div class="p-3 bg-white/5 rounded-lg">
+                    <div class="text-green-400 font-bold mb-1">3. 캡처 완료</div>
+                    <div class="text-gray-500">서버에서 결제 캡처 후 플랜 활성화</div>
+                </div>
+            </div>
+        </div>
+
+        <div id="paypal-save-alert" class="hidden p-3 rounded-xl text-sm"></div>
+        <button onclick="savePaypalSettings()"
+            class="bg-blue-700 hover:bg-blue-600 text-white font-bold px-6 py-2.5 rounded-xl transition flex items-center gap-2">
+            <i class="fab fa-paypal"></i> PayPal 설정 저장
+        </button>
+    </div>
+
     <!-- ── Google Drive 서비스 계정 설정 ── -->
     <div class="p-6 bg-[#111] rounded-2xl border border-white/5 space-y-5">
         <div class="flex items-center justify-between flex-wrap gap-2">
@@ -1044,11 +1120,68 @@ async function saveTossSettings() {
         });
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || '오류');
-        showAlert(alertEl, data.message, 'success');
+        showAlert(alertEl, data.message || '✅ Toss 결제 설정이 저장되었습니다.', 'success');
     } catch (e) {
         showAlert(alertEl, e.message, 'error');
     }
 }
+
+// ── PayPal 설정 ──────────────────────────────────────────────────────────────
+
+let _paypalLiveMode = false;
+
+function togglePaypalMode() {
+    _paypalLiveMode = !_paypalLiveMode;
+    const track = document.getElementById('paypal-mode-track');
+    const thumb = document.getElementById('paypal-mode-thumb');
+    const label = document.getElementById('paypal-mode-label');
+    if (track) track.style.background = _paypalLiveMode ? '#2563EB' : '#374151';
+    if (thumb) thumb.style.transform  = _paypalLiveMode ? 'translateX(20px)' : 'translateX(0)';
+    if (label) label.textContent      = _paypalLiveMode ? '라이브 모드' : '샌드박스';
+}
+
+async function loadPaypalSettings() {
+    try {
+        const res  = await fetch('/api/admin/settings?keys=paypal_client_id,paypal_secret,paypal_sandbox', { headers: HEADERS() });
+        const data = await res.json();
+        if (!res.ok) return;
+        const s = data.settings || {};
+        if (s.paypal_client_id) document.getElementById('set-paypal-client-id').value = s.paypal_client_id;
+        if (s.paypal_secret)    document.getElementById('set-paypal-secret').value    = '••••••••';
+        if (s.paypal_sandbox === 'false') {
+            _paypalLiveMode = true;
+            togglePaypalMode();
+        }
+    } catch {}
+}
+
+async function savePaypalSettings() {
+    const alertEl  = document.getElementById('paypal-save-alert');
+    const clientId = document.getElementById('set-paypal-client-id').value.trim();
+    const secret   = document.getElementById('set-paypal-secret').value.trim();
+
+    if (!clientId && !secret) {
+        showAlert(alertEl, 'Client ID 또는 Secret Key를 입력해주세요.', 'warning'); return;
+    }
+
+    const payload = { paypal_sandbox: String(!_paypalLiveMode) };
+    if (clientId) payload.paypal_client_id = clientId;
+    if (secret && secret !== '••••••••') payload.paypal_secret = secret;
+
+    try {
+        const res  = await fetch('/api/admin/settings', {
+            method: 'PUT', headers: HEADERS(),
+            body: JSON.stringify(payload),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || '저장 실패');
+        showAlert(alertEl, `✅ PayPal 설정이 저장되었습니다. (${_paypalLiveMode ? '라이브' : '샌드박스'} 모드)`, 'success');
+    } catch (e) {
+        showAlert(alertEl, e.message, 'error');
+    }
+}
+
+loadPaypalSettings();
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // CMS 설정

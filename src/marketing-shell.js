@@ -1,347 +1,277 @@
 /**
- * 마케팅/공개 페이지 공통 헤더 + 상품 드롭다운 + 로그인 프로필 (pricing.html 동일)
+ * marketing-shell.js v2.1
+ * 마케팅/공개 페이지 공통 헤더 (라이트 모드 전용)
+ * index.html, pricing.html, features.html, about.html, faq.html, contact.html 등에서 사용
  */
 (function () {
   const PRODUCTS = [
-    { href: "/pricing", label: "WordPress 호스팅", icon: "fa-server" },
-    { href: "/product-cachecloud", label: "CacheCloud", icon: "fa-bolt" },
-    { href: "/product-cp3", label: "CP3", icon: "fa-cube" },
-    { href: "/product-cloudpressdb", label: "CloudPressDB", icon: "fa-database" },
+    { href: '/pricing',              label: 'WordPress 호스팅', icon: 'fa-server'   },
+    { href: '/product-cachecloud',   label: 'CacheCloud',       icon: 'fa-bolt'     },
+    { href: '/product-cp3',          label: 'CP3 스토리지',     icon: 'fa-cube'     },
+    { href: '/product-cloudpressdb', label: 'CloudPressDB',     icon: 'fa-database' },
   ];
 
   const NAV_LINKS = [
-    { href: "/features", label: "기능" },
-    { href: "/pricing", label: "상품", isProducts: true },
-    { href: "/about", label: "소개" },
-    { href: "/faq", label: "FAQ" },
-    { href: "/contact", label: "문의하기" },
-    { href: "/notices", label: "공지사항", optional: true },
+    { href: '/features', label: '기능'    },
+    { href: '/pricing',  label: '상품',    isProducts: true },
+    { href: '/about',    label: '소개'    },
+    { href: '/faq',      label: 'FAQ'     },
+    { href: '/contact',  label: '문의하기' },
   ];
 
-  function injectStyles() {
-    if (document.getElementById("cp-marketing-styles")) return;
-    const s = document.createElement("style");
-    s.id = "cp-marketing-styles";
-    s.textContent = `
-      #profile-dropdown { display: none; }
-      #profile-dropdown.open { display: block; }
-      #cp-top-profile-bar #profile-dropdown { display: none; }
-      #cp-top-profile-bar #profile-dropdown.open { display: block; }
-    `;
-    document.head.appendChild(s);
-  }
+  const path = window.location.pathname;
 
-  function productDropdownHtml(isActive) {
-    return `
-    <div class="relative group" id="nav-products-wrap">
-      <button type="button" class="flex items-center gap-1 hover:text-white transition ${isActive ? "text-white" : ""}">
-        상품 <i class="fas fa-chevron-down text-[10px] opacity-60"></i>
-      </button>
-      <div class="absolute left-0 top-full pt-2 hidden group-hover:block z-[100] min-w-[220px]">
-        <div class="bg-[#111] border border-white/10 rounded-xl shadow-2xl py-2 overflow-hidden">
-          ${PRODUCTS.map((p) => `
-            <a href="${p.href}" class="flex items-center gap-3 px-4 py-2.5 text-sm text-gray-300 hover:bg-white/5 hover:text-white transition">
-              <i class="fas ${p.icon} w-4 text-blue-400"></i>${p.label}
-            </a>`).join("")}
-        </div>
-      </div>
-    </div>`;
-  }
+  function navbarHtml() {
+    const links = NAV_LINKS.map(link => {
+      if (link.isProducts) {
+        const isAct = PRODUCTS.some(p => path === p.href);
+        return `
+        <div class="cp-nav-dropdown-wrap" style="position:relative;">
+          <button type="button" class="cp-nav-dropdown-btn"
+            style="background:none;border:none;cursor:pointer;font-family:inherit;
+              display:flex;align-items:center;gap:4px;
+              color:${isAct ? '#2563EB' : '#475569'};
+              font-size:0.9rem;font-weight:500;padding:0;transition:color 150ms;"
+            aria-haspopup="true" aria-expanded="false"
+            onmouseover="this.style.color='#0F172A'"
+            onmouseout="this.style.color='${isAct ? '#2563EB' : '#475569'}'">
+            상품 <i class="fas fa-chevron-down" style="font-size:0.625rem;opacity:0.55;"></i>
+          </button>
+          <div class="cp-nav-dropdown" style="display:none;position:absolute;left:0;top:calc(100%+10px);
+            min-width:220px;background:#fff;border:1px solid #E2E8F0;
+            border-radius:12px;box-shadow:0 8px 24px rgba(0,0,0,0.1);
+            padding:6px;z-index:200;">
+            ${PRODUCTS.map(p => `
+              <a href="${p.href}"
+                style="display:flex;align-items:center;gap:10px;padding:9px 12px;
+                  border-radius:8px;font-size:0.875rem;color:#334155;text-decoration:none;
+                  transition:background 120ms;"
+                onmouseover="this.style.background='#F8FAFC'"
+                onmouseout="this.style.background=''">
+                <i class="fas ${p.icon}" style="color:#2563EB;width:16px;text-align:center;font-size:0.875rem;"></i>
+                ${p.label}
+              </a>`).join('')}
+          </div>
+        </div>`;
+      }
+      const isAct = path === link.href;
+      return `<a href="${link.href}"
+        style="font-size:0.9rem;font-weight:500;color:${isAct ? '#2563EB' : '#475569'};
+          text-decoration:none;transition:color 150ms;"
+        onmouseover="this.style.color='#0F172A'"
+        onmouseout="this.style.color='${isAct ? '#2563EB' : '#475569'}'"
+        >${link.label}</a>`;
+    }).join('');
 
-  function authBlockHtml() {
     return `
-    <div id="nav-guest" class="flex items-center gap-3">
-      <a href="/login" class="hover:text-white transition">로그인</a>
-      <a href="/signup" class="bg-blue-600 px-5 py-2 rounded-full text-white font-bold hover:bg-blue-500 transition">무료 시작</a>
-    </div>
-    <div id="nav-user" class="hidden relative">
-      <button id="profile-btn" type="button"
-        class="flex items-center gap-2 bg-white/5 hover:bg-white/10 border border-white/10 rounded-full pl-3 pr-4 py-2 transition">
-        <div id="avatar-circle"
-          class="w-7 h-7 rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center text-xs font-bold text-white flex-shrink-0"></div>
-        <span id="nav-email" class="text-sm text-white max-w-[120px] truncate"></span>
-        <i class="fas fa-chevron-down text-xs text-gray-400 ml-1"></i>
-      </button>
-      <div id="profile-dropdown"
-        class="absolute right-0 top-full mt-2 w-52 bg-[#111] border border-white/10 rounded-2xl shadow-2xl overflow-hidden z-[200]">
-        <div class="px-4 py-3 border-b border-white/5">
-          <div class="text-xs text-gray-500">로그인됨</div>
-          <div id="dropdown-email" class="text-sm font-medium text-white mt-0.5 truncate"></div>
+    <header id="cp-marketing-header" role="banner"
+      style="background:#fff;border-bottom:1px solid #E2E8F0;
+        position:sticky;top:0;z-index:100;">
+      <nav style="max-width:1280px;margin:0 auto;padding:0 1.5rem;
+        height:68px;display:flex;align-items:center;justify-content:space-between;"
+        role="navigation" aria-label="메인 네비게이션">
+
+        <!-- 로고 -->
+        <a href="/" style="font-size:1.35rem;font-weight:900;letter-spacing:-0.03em;
+          color:#0F172A;text-decoration:none;flex-shrink:0;" aria-label="CloudPress 홈">
+          CLOUD<span style="color:#2563EB;">PRESS</span>
+        </a>
+
+        <!-- 데스크탑 링크 -->
+        <div id="cp-nav-desktop" style="display:flex;align-items:center;gap:1.75rem;">
+          ${links}
         </div>
-        <div class="py-1">
-          <a href="/dashboard" class="flex items-center gap-3 px-4 py-2.5 text-sm text-gray-300 hover:bg-white/5 hover:text-white transition">
-            <i class="fas fa-tachometer-alt w-4 text-blue-400"></i> 콘솔 이동하기
-          </a>
-          <a href="/services" class="flex items-center gap-3 px-4 py-2.5 text-sm text-gray-300 hover:bg-white/5 hover:text-white transition">
-            <i class="fas fa-th-large w-4 text-violet-400"></i> 전체 서비스
-          </a>
-          <a href="/account" class="flex items-center gap-3 px-4 py-2.5 text-sm text-gray-300 hover:bg-white/5 hover:text-white transition">
-            <i class="fas fa-user-circle w-4 text-gray-400"></i> 내 정보 관리
-          </a>
-          <a href="/payment" class="flex items-center gap-3 px-4 py-2.5 text-sm text-gray-300 hover:bg-white/5 hover:text-white transition">
-            <i class="fas fa-credit-card w-4 text-gray-400"></i> 결제수단 관리
-          </a>
-        </div>
-        <div class="border-t border-white/5 py-1">
-          <button type="button" id="cp-logout-btn"
-            class="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-red-400 hover:bg-red-900/20 transition">
-            <i class="fas fa-sign-out-alt w-4"></i> 로그아웃
+
+        <!-- 우측: 인증 버튼 -->
+        <div style="display:flex;align-items:center;gap:0.75rem;flex-shrink:0;">
+
+          <!-- 비로그인 -->
+          <div id="nav-guest" style="display:flex;align-items:center;gap:0.5rem;">
+            <a href="/login"
+              style="font-size:0.875rem;font-weight:600;color:#475569;
+                padding:7px 14px;border-radius:8px;text-decoration:none;transition:background 150ms;"
+              onmouseover="this.style.background='#F1F5F9'"
+              onmouseout="this.style.background=''">로그인</a>
+            <a href="/signup"
+              style="font-size:0.875rem;font-weight:700;color:#fff;
+                background:#2563EB;padding:8px 18px;border-radius:8px;
+                text-decoration:none;transition:background 150ms;box-shadow:0 1px 3px rgba(37,99,235,0.3);"
+              onmouseover="this.style.background='#1D4ED8'"
+              onmouseout="this.style.background='#2563EB'">무료 시작</a>
+          </div>
+
+          <!-- 로그인 후 프로필 -->
+          <div id="nav-user" style="display:none;position:relative;">
+            <button id="mkt-profile-btn" type="button"
+              onclick="window.cpMktToggleProfile()"
+              aria-haspopup="true" aria-expanded="false"
+              style="display:flex;align-items:center;gap:8px;padding:5px 10px 5px 5px;
+                border-radius:24px;border:1px solid #E2E8F0;background:#F8FAFC;
+                cursor:pointer;font-family:inherit;transition:background 150ms;"
+              onmouseover="this.style.background='#F1F5F9'"
+              onmouseout="this.style.background='#F8FAFC'">
+              <div id="mkt-avatar" style="width:28px;height:28px;border-radius:50%;
+                background:#2563EB;color:#fff;font-size:0.75rem;font-weight:700;
+                display:flex;align-items:center;justify-content:center;flex-shrink:0;">U</div>
+              <span id="mkt-username" style="font-size:0.875rem;font-weight:600;color:#334155;
+                max-width:90px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"></span>
+              <i class="fas fa-chevron-down" style="font-size:0.625rem;color:#94A3B8;"></i>
+            </button>
+
+            <div id="mkt-profile-dropdown" style="display:none;position:absolute;right:0;top:calc(100%+8px);
+              min-width:188px;background:#fff;border:1px solid #E2E8F0;
+              border-radius:12px;box-shadow:0 8px 24px rgba(0,0,0,0.1);padding:5px;z-index:200;">
+              <a href="/dashboard" style="display:flex;align-items:center;gap:8px;padding:9px 12px;
+                border-radius:8px;font-size:0.875rem;color:#334155;text-decoration:none;transition:background 120ms;"
+                onmouseover="this.style.background='#F8FAFC'"
+                onmouseout="this.style.background=''">
+                <i class="fas fa-chart-pie" style="color:#2563EB;width:14px;text-align:center;"></i>대시보드
+              </a>
+              <a href="/account" style="display:flex;align-items:center;gap:8px;padding:9px 12px;
+                border-radius:8px;font-size:0.875rem;color:#334155;text-decoration:none;transition:background 120ms;"
+                onmouseover="this.style.background='#F8FAFC'"
+                onmouseout="this.style.background=''">
+                <i class="fas fa-user-circle" style="color:#2563EB;width:14px;text-align:center;"></i>내 정보
+              </a>
+              <hr style="border:none;border-top:1px solid #F1F5F9;margin:3px 0;">
+              <button onclick="window.cpLogout()"
+                style="display:flex;align-items:center;gap:8px;padding:9px 12px;border-radius:8px;
+                  font-size:0.875rem;color:#EF4444;width:100%;text-align:left;background:none;
+                  border:none;cursor:pointer;font-family:inherit;transition:background 120ms;"
+                onmouseover="this.style.background='#FEF2F2'"
+                onmouseout="this.style.background=''">
+                <i class="fas fa-sign-out-alt" style="width:14px;text-align:center;"></i>로그아웃
+              </button>
+            </div>
+          </div>
+
+          <!-- 모바일 햄버거 -->
+          <button id="cp-mkt-mobile-btn" onclick="window.cpMktToggleMobile()"
+            aria-label="모바일 메뉴"
+            style="display:none;background:none;border:none;cursor:pointer;
+              color:#475569;font-size:1.125rem;padding:6px;border-radius:6px;transition:background 150ms;"
+            onmouseover="this.style.background='#F1F5F9'"
+            onmouseout="this.style.background=''">
+            <i class="fas fa-bars"></i>
           </button>
         </div>
-      </div>
-    </div>`;
-  }
+      </nav>
 
-  function buildHeaderHtml(activePath) {
-    const isProductActive = PRODUCTS.some((p) => activePath === p.href || activePath.startsWith(p.href));
-    const navItems = NAV_LINKS.filter((l) => !l.optional || activePath === "/notices").map((l) => {
-      if (l.isProducts) return productDropdownHtml(isProductActive);
-      const active = activePath === l.href ? "text-white" : "hover:text-white transition";
-      return `<a href="${l.href}" class="${active}">${l.label}</a>`;
-    }).join("");
-
-    return `
-    <header class="cp-marketing-header p-5 border-b border-white/10 sticky top-0 bg-[#050505]/90 backdrop-blur-lg z-50">
-      <div class="max-w-7xl mx-auto flex justify-between items-center">
-        <a href="/" class="text-2xl font-black tracking-tighter text-blue-500">CLOUD<span class="text-white">PRESS</span></a>
-        <nav class="hidden md:flex gap-8 items-center text-sm font-medium text-gray-400">
-          ${navItems}
-          ${authBlockHtml()}
-        </nav>
-        <button id="mobileMenuBtn" type="button" class="md:hidden text-gray-400 hover:text-white p-2" aria-label="메뉴">
-          <i class="fas fa-bars text-xl"></i>
-        </button>
-      </div>
-      <div id="mobileMenu" class="hidden md:hidden border-t border-white/10 mt-3 pt-3 pb-2 px-4 space-y-1">
-        <a href="/features" class="block px-3 py-2 rounded-lg text-sm text-gray-400 hover:text-white hover:bg-white/5">기능</a>
-        <a href="/pricing" class="block px-3 py-2 rounded-lg text-sm text-gray-400 hover:text-white hover:bg-white/5">WordPress 호스팅</a>
-        <a href="/product-cachecloud" class="block px-3 py-2 rounded-lg text-sm text-gray-400 hover:text-white hover:bg-white/5">CacheCloud</a>
-        <a href="/product-cp3" class="block px-3 py-2 rounded-lg text-sm text-gray-400 hover:text-white hover:bg-white/5">CP3</a>
-        <a href="/product-cloudpressdb" class="block px-3 py-2 rounded-lg text-sm text-gray-400 hover:text-white hover:bg-white/5">CloudPressDB</a>
-        <a href="/about" class="block px-3 py-2 rounded-lg text-sm text-gray-400 hover:text-white hover:bg-white/5">소개</a>
-        <a href="/faq" class="block px-3 py-2 rounded-lg text-sm text-gray-400 hover:text-white hover:bg-white/5">FAQ</a>
-        <a href="/contact" class="block px-3 py-2 rounded-lg text-sm text-gray-400 hover:text-white hover:bg-white/5">문의하기</a>
-        <a href="/notices" class="block px-3 py-2 rounded-lg text-sm text-gray-400 hover:text-white hover:bg-white/5">공지사항</a>
-        <div class="border-t border-white/10 pt-2 mt-2 space-y-1" id="mobile-guest">
-          <a href="/login" class="block px-3 py-2 text-gray-400 hover:text-white text-sm">로그인</a>
-          <a href="/signup" class="block px-3 py-2 bg-blue-600 text-white rounded-xl font-bold text-center text-sm">무료 시작</a>
-        </div>
-        <div class="border-t border-white/10 pt-2 mt-2 space-y-1 hidden" id="mobile-user">
-          <a href="/dashboard" class="block px-3 py-2 text-gray-300 text-sm"><i class="fas fa-tachometer-alt mr-2 text-blue-400"></i>콘솔</a>
-          <a href="/services" class="block px-3 py-2 text-gray-300 text-sm"><i class="fas fa-th-large mr-2 text-violet-400"></i>전체 서비스</a>
-          <a href="/account" class="block px-3 py-2 text-gray-300 text-sm"><i class="fas fa-user-circle mr-2"></i>내 정보</a>
-          <a href="/payment" class="block px-3 py-2 text-gray-300 text-sm"><i class="fas fa-credit-card mr-2"></i>결제수단</a>
-          <button type="button" id="cp-mobile-logout" class="w-full text-left px-3 py-2 text-red-400 text-sm"><i class="fas fa-sign-out-alt mr-2"></i>로그아웃</button>
+      <!-- 모바일 드롭다운 메뉴 -->
+      <div id="cp-mkt-mobile-menu" style="display:none;border-top:1px solid #F1F5F9;
+        background:#fff;padding:0.75rem 1.5rem 1.25rem;">
+        ${NAV_LINKS.filter(l => !l.isProducts).map(l => `
+          <a href="${l.href}" style="display:block;padding:10px 0;font-size:0.9rem;
+            font-weight:500;color:#475569;text-decoration:none;
+            border-bottom:1px solid #F8FAFC;"
+          >${l.label}</a>`).join('')}
+        <div style="margin-top:0.875rem;display:grid;grid-template-columns:1fr 1fr;gap:0.625rem;">
+          <a href="/login" style="text-align:center;padding:10px;border-radius:8px;
+            border:1px solid #E2E8F0;font-size:0.875rem;font-weight:600;color:#475569;
+            text-decoration:none;">로그인</a>
+          <a href="/signup" style="text-align:center;padding:10px;border-radius:8px;
+            background:#2563EB;font-size:0.875rem;font-weight:700;color:#fff;
+            text-decoration:none;">무료 시작</a>
         </div>
       </div>
     </header>`;
   }
 
-  function upgradeExistingHeader(header, path) {
-    const nav = header.querySelector("nav.hidden.md\\:flex, nav.md\\:flex");
-    if (!nav) return false;
-    if (!nav.querySelector("#nav-guest")) {
-      const loginLink = nav.querySelector('a[href="/login"]');
-      const signupLink = nav.querySelector('a[href="/signup"]');
-      if (loginLink) loginLink.remove();
-      if (signupLink) signupLink.remove();
-      nav.insertAdjacentHTML("beforeend", authBlockHtml());
-    }
-    if (!nav.querySelector("#nav-products-wrap")) {
-      const pricingLink = nav.querySelector('a[href="/pricing"]');
-      if (pricingLink) {
-        const wrap = document.createElement("div");
-        wrap.innerHTML = productDropdownHtml(PRODUCTS.some((p) => path.startsWith(p.href)));
-        pricingLink.replaceWith(wrap.firstElementChild);
-      }
-    }
-    if (!header.querySelector("#mobileMenu")) {
-      const btn = header.querySelector("#mobileMenuBtn");
-      if (btn) {
-        btn.insertAdjacentHTML("afterend", document.createElement("div").innerHTML); // skip complex
-      }
+  function inject() {
+    const mount = document.getElementById('cp-nav-mount');
+    if (mount) {
+      mount.innerHTML = navbarHtml();
     } else {
-      upgradeMobileMenu(header);
+      document.body.insertAdjacentHTML('afterbegin', navbarHtml());
     }
-    if (!header.querySelector("#mobileMenuBtn")) {
-      const inner = header.querySelector(".max-w-7xl, .flex.justify-between");
-      if (inner) {
-        inner.insertAdjacentHTML("beforeend",
-          '<button id="mobileMenuBtn" type="button" class="md:hidden text-gray-400 hover:text-white p-2"><i class="fas fa-bars text-xl"></i></button>');
-      }
-    }
-    header.classList.add("cp-marketing-header");
-    return true;
+    initDropdowns();
+    checkAuth();
+    handleResize();
+    window.addEventListener('resize', handleResize);
   }
 
-  function upgradeMobileMenu(header) {
-    const menu = header.querySelector("#mobileMenu");
-    if (!menu || menu.querySelector("#mobile-guest")) return;
-    menu.insertAdjacentHTML("beforeend", `
-      <div class="border-t border-white/10 pt-2 mt-2 space-y-1" id="mobile-guest">
-        <a href="/login" class="block px-3 py-2 text-gray-400 text-sm">로그인</a>
-        <a href="/signup" class="block px-3 py-2 bg-blue-600 text-white rounded-xl font-bold text-center text-sm">무료 시작</a>
-      </div>
-      <div class="border-t border-white/10 pt-2 mt-2 space-y-1 hidden" id="mobile-user">
-        <a href="/dashboard" class="block px-3 py-2 text-gray-300 text-sm">콘솔 이동</a>
-        <a href="/account" class="block px-3 py-2 text-gray-300 text-sm">내 정보</a>
-        <button type="button" id="cp-mobile-logout" class="w-full text-left px-3 py-2 text-red-400 text-sm">로그아웃</button>
-      </div>`);
-  }
-
-  function replaceHeader(path) {
-    const old = document.querySelector("header.cp-marketing-header, body > header:first-of-type");
-    if (!old) return;
-    const tmp = document.createElement("div");
-    tmp.innerHTML = buildHeaderHtml(path);
-    old.replaceWith(tmp.firstElementChild);
-  }
-
-  function setupMobileMenu() {
-    const btn = document.getElementById("mobileMenuBtn");
-    const menu = document.getElementById("mobileMenu");
-    if (btn && menu) {
-      btn.addEventListener("click", () => menu.classList.toggle("hidden"));
-    }
-  }
-
-  function bindProfileEvents() {
-    const btn = document.getElementById("profile-btn");
-    const menu = document.getElementById("profile-dropdown");
-    if (btn && menu) {
-      btn.addEventListener("click", (e) => {
-        e.stopPropagation();
-        menu.classList.toggle("open");
+  function initDropdowns() {
+    document.querySelectorAll('.cp-nav-dropdown-btn').forEach(btn => {
+      const wrap = btn.closest('.cp-nav-dropdown-wrap');
+      const dd   = wrap?.querySelector('.cp-nav-dropdown');
+      if (!dd) return;
+      btn.addEventListener('click', () => {
+        const open = dd.style.display === 'block';
+        dd.style.display = open ? 'none' : 'block';
+        btn.setAttribute('aria-expanded', String(!open));
       });
-    }
-    document.addEventListener("click", (e) => {
-      if (!menu || !btn) return;
-      if (!btn.contains(e.target) && !menu.contains(e.target)) {
-        menu.classList.remove("open");
-      }
+      document.addEventListener('click', e => {
+        if (!wrap.contains(e.target)) {
+          dd.style.display = 'none';
+          btn.setAttribute('aria-expanded', 'false');
+        }
+      });
     });
-    document.getElementById("cp-logout-btn")?.addEventListener("click", doLogout);
-    document.getElementById("cp-mobile-logout")?.addEventListener("click", doLogout);
   }
 
-  window.toggleProfileMenu = function () {
-    document.getElementById("profile-dropdown")?.classList.toggle("open");
-  };
-
-  window.doLogout = async function () {
-    const token = localStorage.getItem("admin_token");
-    try {
-      if (token) {
-        await fetch("/api/logout", {
-          method: "POST",
-          headers: { Authorization: `Bearer ${token}` },
-        });
-      }
-    } catch {}
-    localStorage.removeItem("admin_token");
-    sessionStorage.clear();
-    window.location.href = "/login";
-  };
-
-  function showLoggedIn(email) {
-    document.getElementById("nav-guest")?.classList.add("hidden");
-    document.getElementById("nav-user")?.classList.remove("hidden");
-    const e = email || "";
-    document.getElementById("nav-email") && (document.getElementById("nav-email").textContent = e);
-    document.getElementById("dropdown-email") && (document.getElementById("dropdown-email").textContent = e);
-    const av = document.getElementById("avatar-circle");
-    if (av) av.textContent = e ? e[0].toUpperCase() : "?";
-    document.getElementById("mobile-guest")?.classList.add("hidden");
-    document.getElementById("mobile-user")?.classList.remove("hidden");
-    syncTopProfileBar(email);
-  }
-
-  function syncTopProfileBar(email) {
-    const bar = document.getElementById("cp-top-profile-bar");
-    if (!bar) return;
-    bar.querySelector("#nav-guest")?.classList.add("hidden");
-    bar.querySelector("#nav-user")?.classList.remove("hidden");
-    const e = email || "";
-    const ne = bar.querySelector("#nav-email");
-    const de = bar.querySelector("#dropdown-email");
-    const av = bar.querySelector("#avatar-circle");
-    if (ne) ne.textContent = e;
-    if (de) de.textContent = e;
-    if (av) av.textContent = e ? e[0].toUpperCase() : "?";
+  function handleResize() {
+    const mobile    = window.innerWidth < 768;
+    const desktop   = document.getElementById('cp-nav-desktop');
+    const mobileBtn = document.getElementById('cp-mkt-mobile-btn');
+    if (desktop)   desktop.style.display   = mobile ? 'none' : 'flex';
+    if (mobileBtn) mobileBtn.style.display = mobile ? 'block' : 'none';
   }
 
   async function checkAuth() {
-    const token = localStorage.getItem("admin_token");
+    const token = localStorage.getItem('admin_token');
     if (!token) return;
     try {
-      const res = await fetch("/api/me", {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const res = await fetch('/api/me', { headers: { Authorization: `Bearer ${token}` } });
       if (!res.ok) return;
-      const data = await res.json();
-      if (data?.email || data?.id) showLoggedIn(data.email || "");
+      const user = await res.json();
+      const name = user.name || user.email?.split('@')[0] || '사용자';
+      const guestEl = document.getElementById('nav-guest');
+      const userEl  = document.getElementById('nav-user');
+      if (guestEl) guestEl.style.display = 'none';
+      if (userEl)  userEl.style.display  = 'block';
+      const avatar   = document.getElementById('mkt-avatar');
+      const username = document.getElementById('mkt-username');
+      if (avatar)   avatar.textContent   = name.charAt(0).toUpperCase();
+      if (username) username.textContent = name;
     } catch {}
   }
 
-  function isConsoleLayout() {
-    return document.body.classList.contains("cp-console")
-      || /^\/(dashboard|hosting|traffic|storage|account|payment|payments|domains|dns|services|hosting-create|hosting-detail)(\/|$)/.test(location.pathname);
-  }
-
-  function isAdminLayout() {
-    return document.body.classList.contains("cp-admin")
-      || /^\/admin/.test(location.pathname);
-  }
-
-  function injectConsoleTopProfile() {
-    if (!isConsoleLayout() && !isAdminLayout()) return;
-    if (document.getElementById("cp-top-profile-bar")) return;
-    const wrap = document.createElement("div");
-    wrap.id = "cp-top-profile-bar";
-    wrap.className = "hidden md:block fixed top-4 right-6 z-[60]";
-    wrap.innerHTML = `<div class="relative">${authBlockHtml()}</div>`;
-    document.body.appendChild(wrap);
-    bindProfileEvents();
-    checkAuth();
-  }
-
-  function init() {
-    injectStyles();
-    const path = window.location.pathname;
-
-    const authOnlyPages = /^\/(login|signup|payment-success)(\/|$)/.test(path);
-
-    if (isConsoleLayout() || isAdminLayout() || authOnlyPages) {
-      injectConsoleTopProfile();
-      if (isConsoleLayout() || isAdminLayout() || authOnlyPages) return;
+  window.cpMktToggleProfile = function () {
+    const dd  = document.getElementById('mkt-profile-dropdown');
+    const btn = document.getElementById('mkt-profile-btn');
+    if (!dd) return;
+    const open = dd.style.display === 'block';
+    dd.style.display = open ? 'none' : 'block';
+    btn?.setAttribute('aria-expanded', String(!open));
+    if (!open) {
+      const close = e => {
+        if (!dd.contains(e.target) && !btn?.contains(e.target)) {
+          dd.style.display = 'none';
+          btn?.setAttribute('aria-expanded', 'false');
+          document.removeEventListener('click', close);
+        }
+      };
+      setTimeout(() => document.addEventListener('click', close), 0);
     }
+  };
 
-    if (document.body.dataset.cpMarketing === "false") return;
+  window.cpMktToggleMobile = function () {
+    const menu = document.getElementById('cp-mkt-mobile-menu');
+    if (!menu) return;
+    menu.style.display = menu.style.display === 'block' ? 'none' : 'block';
+  };
 
-    const header = document.querySelector("body > header:first-of-type");
-    const simpleNav = header && !header.querySelector("#nav-guest") && header.querySelector('a[href="/login"]');
-
-    if (simpleNav || document.body.dataset.cpMarketing === "replace-header") {
-      replaceHeader(path);
-    } else if (header) {
-      upgradeExistingHeader(header, path);
-      upgradeMobileMenu(header);
-    } else if (document.body.dataset.cpMarketing === "true") {
-      document.body.insertAdjacentHTML("afterbegin", buildHeaderHtml(path));
-    }
-
-    setupMobileMenu();
-    bindProfileEvents();
-    checkAuth();
+  if (!window.cpLogout) {
+    window.cpLogout = async function () {
+      localStorage.removeItem('admin_token');
+      localStorage.removeItem('user_data');
+      window.location.href = '/login';
+    };
   }
 
-  if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", init);
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', inject);
   } else {
-    init();
+    inject();
   }
-
-  window.addEventListener("load", () => {
-    setTimeout(injectConsoleTopProfile, 100);
-  });
 })();

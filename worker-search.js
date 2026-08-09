@@ -15,11 +15,18 @@ const CORS_HEADERS = {
 const ENGINES = {
   google: {
     label: "Google",
-    buildUrl: ({ q, start }) => `https://www.google.com/search?q=${encodeURIComponent(q)}&num=10&start=${start}&hl=ko&gl=kr&pws=0`,
+    endpoints: ({ q, start }) => [
+      { type: "web", url: `https://www.google.com/search?q=${encodeURIComponent(q)}&num=10&start=${start}&hl=ko&gl=kr&pws=0` },
+      { type: "news-rss", url: `https://news.google.com/rss/search?q=${encodeURIComponent(q)}&hl=ko&gl=KR&ceid=KR:ko` },
+    ],
   },
   naver: {
     label: "Naver",
-    buildUrl: ({ q, start }) => `https://search.naver.com/search.naver?where=web&query=${encodeURIComponent(q)}&start=${start + 1}`,
+    endpoints: ({ q, start }) => [
+      { type: "web", url: `https://search.naver.com/search.naver?where=web&query=${encodeURIComponent(q)}&start=${start + 1}` },
+      { type: "mobile", url: `https://m.search.naver.com/search.naver?query=${encodeURIComponent(q)}&where=m` },
+      { type: "news", url: `https://search.naver.com/search.naver?where=news&query=${encodeURIComponent(q)}` },
+    ],
   },
 };
 
@@ -61,27 +68,36 @@ function unwrapGoogleUrl(rawUrl = "") {
 
 function parseGoogle(html) {
   const results = [];
-  const blocks = html.match(/<a href="(?:\/url\?q=|https?:\/\/)[\s\S]*?<\/a>/g) || [];
+  const blocks = html.match(/<div class="g[\s\S]*?(?=<div class="g|<\/body>)/g) || [];
   for (const block of blocks) {
+    const href = block.match(/href="([^"]+)"/)?.[1];
+    const title = decodeHtml(block.match(/<h3[^>]*>([\s\S]*?)<\/h3>/)?.[1]);
+    const snippet = decodeHtml(block.match(/<div[^>]+(?:VwiC3b|yXK7lf|kb0PBd)[^>]*>([\s\S]*?)<\/div>/)?.[1] || "");
+    const url = unwrapGoogleUrl(decodeHtml(href));
+    if (title && url.startsWith("http") && !url.includes("google.com/search")) results.push({ title, url, snippet });
+  }
+  if (results.length) return dedupe(results);
+  const linkBlocks = html.match(/<a href="(?:\/url\?q=|https?:\/\/)[\s\S]*?<\/a>/g) || [];
+  for (const block of linkBlocks) {
     if (!block.includes("<h3")) continue;
     const href = block.match(/href="([^"]+)"/)?.[1];
     const title = decodeHtml(block.match(/<h3[^>]*>([\s\S]*?)<\/h3>/)?.[1]);
     const url = unwrapGoogleUrl(decodeHtml(href));
-    if (title && url.startsWith("http") && !url.includes("google.com/search")) {
-      results.push({ title, url, snippet: "" });
-    }
+    if (title && url.startsWith("http") && !url.includes("google.com/search")) results.push({ title, url, snippet: "" });
   }
   return dedupe(results);
 }
 
 function parseNaver(html) {
   const results = [];
-  const linkRe = /<a[^>]+class="[^"]*(?:total_tit|link_tit|title_link)[^"]*"[^>]+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/g;
+  const linkRe = /<a[^>]+class="[^"]*(?:total_tit|link_tit|title_link|name_link|api_txt_lines)[^"]*"[^>]+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/g;
   let match;
   while ((match = linkRe.exec(html)) !== null) {
     const url = decodeHtml(match[1]);
     const title = decodeHtml(match[2]);
-    if (title && url.startsWith("http")) results.push({ title, url, snippet: "" });
+    const tail = html.slice(match.index, match.index + 1200);
+    const snippet = decodeHtml(tail.match(/<(?:div|p|span)[^>]+class="[^"]*(?:dsc|desc|api_txt_lines|total_dsc)[^"]*"[^>]*>([\s\S]*?)<\/(?:div|p|span)>/)?.[1] || "");
+    if (title && url.startsWith("http")) results.push({ title, url, snippet });
   }
   return dedupe(results);
 }
@@ -96,23 +112,57 @@ function dedupe(results) {
   }).slice(0, 10);
 }
 
+function parseGoogleNewsRss(xml) {
+  const items = xml.match(/<item>[\s\S]*?<\/item>/g) || [];
+  return dedupe(items.map((item) => ({
+    title: decodeHtml(item.match(/<title>([\s\S]*?)<\/title>/)?.[1]),
+    url: decodeHtml(item.match(/<link>([\s\S]*?)<\/link>/)?.[1]),
+    snippet: decodeHtml(item.match(/<description>([\s\S]*?)<\/description>/)?.[1]),
+  })).filter((item) => item.title && item.url));
+}
+
+function scoreResults(results) {
+  const withSnippet = results.filter((item) => item.snippet).length;
+  return Math.min(1, Number(((results.length / 10) * 0.7 + (withSnippet / Math.max(results.length, 1)) * 0.3).toFixed(2)));
+}
+
+async function fetchWithTimeout(url) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort("upstream_timeout"), 8000);
+  try {
+    return await fetch(url, { headers: FETCH_HEADERS, signal: controller.signal, cf: { cacheTtl: 0, cacheEverything: false } });
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 async function fetchEngine(engine, q, start) {
   const provider = ENGINES[engine];
-  const endpoint = provider.buildUrl({ q, start });
-  const startedAt = Date.now();
-  const response = await fetch(endpoint, {
-    headers: FETCH_HEADERS,
-    cf: { cacheTtl: 0, cacheEverything: false },
-  });
-  const html = await response.text();
   const parser = engine === "google" ? parseGoogle : parseNaver;
+  const attempts = [];
+  const startedAt = Date.now();
+  let bestResults = [];
+  for (const endpoint of provider.endpoints({ q, start })) {
+    try {
+      const response = await fetchWithTimeout(endpoint.url);
+      const text = await response.text();
+      const results = response.ok
+        ? endpoint.type === "news-rss" ? parseGoogleNewsRss(text) : parser(text)
+        : [];
+      attempts.push({ type: endpoint.type, upstream_endpoint: endpoint.url, upstream_status: response.status, result_count: results.length });
+      if (results.length > bestResults.length) bestResults = results;
+      if (bestResults.length >= 5) break;
+    } catch (error) {
+      attempts.push({ type: endpoint.type, upstream_endpoint: endpoint.url, upstream_status: 502, result_count: 0, error: String(error?.message || error) });
+    }
+  }
   return {
     engine,
     label: provider.label,
-    upstream_endpoint: endpoint,
-    upstream_status: response.status,
     latency_ms: Date.now() - startedAt,
-    results: response.ok ? parser(html) : [],
+    grounding_score: scoreResults(bestResults),
+    attempts,
+    results: bestResults,
   };
 }
 
@@ -140,7 +190,8 @@ async function handleSearch(request) {
     api_key_required: false,
     cache: "disabled; every request fetches upstream search pages at call time",
     cloudflare_ready: true,
-    notice: "Cloudflare 무료 Worker에 배포할 수 있지만, 외부 검색 사이트의 자동화 차단·약관·HTML 변경으로 영구 무료/100% 실시간/항상 성공은 보장할 수 없습니다.",
+    grounding_target: "Gemini Search grounding에 가까운 검색 근거 품질을 목표로 provider별 다중 upstream, snippet 추출, latency/status/grounding_score를 제공합니다.",
+    notice: "공식 Google/Naver API 또는 Gemini grounding API가 아니므로 외부 검색 사이트의 자동화 차단·약관·HTML 변경 시 동일 품질을 보장할 수 없습니다.",
     providers,
   });
 }

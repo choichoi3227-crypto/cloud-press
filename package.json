@@ -1,17 +1,14 @@
 {
   "name": "cloud-press",
   "version": "5.0.0",
-  "description": "서버리스 WordPress 호스팅 — WordPress→Astro SSR 자동 변환 + Cloudflare Workers 순수 미러링 + GitHub SQLite DB",
+  "description": "Cloudflare Workers 무료 검색 스크래핑 API — Google+Naver, API 키 없는 URL 요청 기반 엔드포인트",
   "private": true,
   "type": "module",
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
-    "db:init": "wrangler d1 execute cloudpress-db --file=schema.sql",
-    "db:migrate": "wrangler d1 execute cloudpress-db --file=schema-migrate.sql",
-    "db:remote": "wrangler d1 execute cloudpress-db --remote --file=schema.sql",
-    "logs": "wrangler tail",
-    "setup": "node setup.mjs"
+    "deploy:search": "wrangler deploy",
+    "check": "node --check worker-search.js"
   },
   "devDependencies": {
     "wrangler": "^4.0.0"

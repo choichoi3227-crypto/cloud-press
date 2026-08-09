@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>무료 검색 스크래핑 엔드포인트 | CloudPress</title>
+  <meta name="description" content="API 키 없이 URL 요청만으로 Google과 네이버 검색 결과를 JSON으로 확인하는 무료 CloudPress 검색 엔드포인트 안내입니다.">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body class="bg-[#050505] text-white font-sans">
+  <main class="max-w-5xl mx-auto px-6 py-16">
+    <a href="/" class="text-2xl font-black tracking-tighter text-blue-500">CLOUD<span class="text-white">PRESS</span></a>
+    <section class="mt-16 rounded-3xl border border-white/10 bg-white/[0.03] p-8 md:p-12">
+      <p class="text-blue-300 font-bold uppercase tracking-[0.3em] text-xs">Free Search Endpoint</p>
+      <h1 class="mt-4 text-4xl md:text-6xl font-black tracking-tight">Google + 네이버 검색을 URL 하나로 호출</h1>
+      <p class="mt-6 text-gray-300 text-lg leading-8">API 키 없이 GET 요청만으로 동작하는 공개 JSON 엔드포인트입니다. Cloudflare 무료 배포 환경에서 별도 서버 운영비 없이 실행되도록 구성했습니다.</p>
+      <div class="mt-8 rounded-2xl bg-black/60 border border-white/10 p-5 font-mono text-sm overflow-x-auto">
+        <code>GET /api/search?q=cloudpress&amp;engine=all</code>
+      </div>
+      <div class="mt-8 grid md:grid-cols-3 gap-4 text-sm">
+        <div class="rounded-2xl border border-white/10 p-5"><b>지원</b><p class="mt-2 text-gray-400">engine=google, naver, all</p></div>
+        <div class="rounded-2xl border border-white/10 p-5"><b>인증</b><p class="mt-2 text-gray-400">로그인·API 키 불필요</p></div>
+        <div class="rounded-2xl border border-white/10 p-5"><b>캐시</b><p class="mt-2 text-gray-400">요청 시점에 원본 검색 페이지 호출</p></div>
+      </div>
+    </section>
+
+    <section class="mt-10 rounded-3xl border border-amber-400/20 bg-amber-400/5 p-6">
+      <h2 class="text-xl font-bold text-amber-200">정확한 엔드포인트</h2>
+      <ul class="mt-4 space-y-2 text-gray-300">
+        <li><code class="text-white">/api/search?q={검색어}&amp;engine=all</code> — Google과 네이버 동시 조회</li>
+        <li><code class="text-white">/api/search?q={검색어}&amp;engine=google</code> — Google만 조회</li>
+        <li><code class="text-white">/api/search?q={검색어}&amp;engine=naver</code> — 네이버만 조회</li>
+        <li><code class="text-white">start=0</code> — 페이지 시작 위치 옵션</li>
+      </ul>
+      <p class="mt-4 text-sm text-amber-100/80">중요: “영원히 무료”, “100% 실시간”, “항상 동일한 결과”는 외부 검색 사이트의 정책·차단·HTML 변경에 의존하므로 기술적으로 보장할 수 없습니다. 이 구현은 플랫폼 비용과 인증키 요구를 없애고 캐시를 비활성화해 가능한 한 실시간으로 요청합니다.</p>
+    </section>
+
+    <section class="mt-10 rounded-3xl border border-white/10 bg-white/[0.03] p-6">
+      <h2 class="text-xl font-bold">Cloudflare Workers 단독 배포</h2>
+      <p class="mt-3 text-gray-300">이 기능만 독립 서비스로 운영하려면 저장소의 <code class="text-white">wrangler-search.toml</code> 설정을 사용하세요.</p>
+      <pre class="mt-4 rounded-2xl bg-black/60 border border-white/10 p-5 overflow-auto text-sm">npx wrangler deploy -c wrangler-search.toml</pre>
+    </section>
+
+    <section class="mt-10">
+      <form id="demo" class="flex flex-col md:flex-row gap-3">
+        <input id="q" value="cloudpress" class="flex-1 rounded-xl bg-white/10 border border-white/10 px-4 py-3" placeholder="검색어">
+        <select id="engine" class="rounded-xl bg-white/10 border border-white/10 px-4 py-3"><option value="all">all</option><option value="google">google</option><option value="naver">naver</option></select>
+        <button class="rounded-xl bg-blue-600 hover:bg-blue-500 px-6 py-3 font-bold">테스트 호출</button>
+      </form>
+      <pre id="out" class="mt-5 min-h-48 rounded-2xl bg-black/60 border border-white/10 p-5 overflow-auto text-xs text-gray-200"></pre>
+    </section>
+  </main>
+  <script>
+    document.getElementById('demo').addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const q = encodeURIComponent(document.getElementById('q').value.trim());
+      const engine = document.getElementById('engine').value;
+      const endpoint = `/api/search?q=${q}&engine=${engine}`;
+      document.getElementById('out').textContent = `GET ${endpoint}\nLoading...`;
+      const res = await fetch(endpoint);
+      document.getElementById('out').textContent = JSON.stringify(await res.json(), null, 2);
+    });
+  </script>
+</body>
+</html>

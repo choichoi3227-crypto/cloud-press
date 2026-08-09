@@ -61,6 +61,29 @@ function unwrapGoogleUrl(rawUrl = "") {
   }
 }
 
+function extractGenericLinks(html, { engine }) {
+  const results = [];
+  const anchorRe = /<a\b[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;
+  let match;
+  while ((match = anchorRe.exec(html)) !== null) {
+    const rawHref = decodeHtml(match[1]);
+    const url = engine === "google" ? unwrapGoogleUrl(rawHref) : rawHref;
+    if (!url.startsWith("http")) continue;
+    const host = (() => { try { return new URL(url).hostname.replace(/^www\./, ""); } catch { return ""; } })();
+    if (!host) continue;
+    if (engine === "google" && /(^|\.)(accounts|support|policies|maps)\.google\./.test(host)) continue;
+    if (engine === "naver" && /^(search|m\.search)\.naver\.com$/.test(host)) continue;
+    if (/(^|\.)gstatic\.com$|(^|\.)pstatic\.net$/.test(host)) continue;
+    const title = decodeHtml(match[2]);
+    if (title.length < 4 || title.length > 140) continue;
+    if (/^(더보기|보기|이미지|동영상|뉴스|지도|쇼핑|로그인|캐시됨)$/i.test(title)) continue;
+    const tail = html.slice(match.index, match.index + 1600);
+    const snippet = decodeHtml(tail.match(/<(?:div|p|span)[^>]*(?:class=["'][^"']*(?:snippet|dsc|desc|api_txt_lines|total_dsc|sub_txt|detail)[^"']*["'])?[^>]*>([\s\S]{20,500}?)<\/(?:div|p|span)>/i)?.[1] || "");
+    results.push({ title, url, snippet });
+  }
+  return dedupe(results);
+}
+
 function parseGoogle(html) {
   const results = [];
   const blocks = html.match(/<div class="g[\s\S]*?(?=<div class="g|<\/body>)/g) || [];
@@ -80,7 +103,8 @@ function parseGoogle(html) {
     const url = unwrapGoogleUrl(decodeHtml(href));
     if (title && url.startsWith("http") && !url.includes("google.com/search")) results.push({ title, url, snippet: "" });
   }
-  return dedupe(results);
+  const deduped = dedupe(results);
+  return deduped.length ? deduped : extractGenericLinks(html, { engine: "google" });
 }
 
 function parseNaver(html) {
@@ -94,7 +118,8 @@ function parseNaver(html) {
     const snippet = decodeHtml(tail.match(/<(?:div|p|span)[^>]+class="[^"]*(?:dsc|desc|api_txt_lines|total_dsc)[^"]*"[^>]*>([\s\S]*?)<\/(?:div|p|span)>/)?.[1] || "");
     if (title && url.startsWith("http")) results.push({ title, url, snippet });
   }
-  return dedupe(results);
+  const deduped = dedupe(results);
+  return deduped.length ? deduped : extractGenericLinks(html, { engine: "naver" });
 }
 
 function dedupe(results) {

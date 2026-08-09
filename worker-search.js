@@ -15,10 +15,19 @@ const CORS_HEADERS = {
 const ENGINES = {
   google: {
     label: "Google",
+    // 2026-08: www.google.com/search를 Cloudflare Worker(공유 IP)에서 직접
+    // fetch하면 Google이 이를 자동화 트래픽으로 탐지해 사실상 항상 429를
+    // 반환한다. 이는 파싱 로직 문제가 아니라 요청 자체가 차단되는 것이라
+    // User-Agent나 파서를 아무리 고쳐도 해결되지 않는다. 반면
+    // news.google.com/rss/search는 공개 RSS 피드라 이런 차단이 거의 없고
+    // 안정적으로 동작한다. 그래서 RSS를 1차(주력)로 승격하고, 일반 웹검색은
+    // "되면 보너스"인 마지막 보조 시도로 순서를 내린다.
     endpoints: ({ q, start }) => [
-      { type: "web", url: `https://www.google.com/search?q=${encodeURIComponent(q)}&num=10&start=${start}&hl=ko&gl=kr&pws=0` },
       { type: "news-rss", url: `https://news.google.com/rss/search?q=${encodeURIComponent(q)}&hl=ko&gl=KR&ceid=KR:ko` },
+      { type: "web", url: `https://www.google.com/search?q=${encodeURIComponent(q)}&num=10&start=${start}&hl=ko&gl=kr&pws=0` },
     ],
+    // engine=google 응답에 안내 문구를 넣기 위한 메타 정보.
+    notice: "Google 일반 웹검색(www.google.com)은 서버 환경에서 자동화 차단(HTTP 429)이 구조적으로 발생해 안정적으로 제공하기 어렵습니다. 이 대신 Google 뉴스 RSS(news.google.com)를 기본 소스로 사용하며, 이 경우 결과는 뉴스 기사로 한정됩니다.",
   },
   naver: {
     label: "Naver",
@@ -185,6 +194,7 @@ async function fetchEngine(engine, q, start) {
   const attempts = [];
   const startedAt = Date.now();
   let bestResults = [];
+  let bestType = null;
   for (const endpoint of provider.endpoints({ q, start })) {
     try {
       const response = await fetchWithTimeout(endpoint.url);
@@ -193,7 +203,10 @@ async function fetchEngine(engine, q, start) {
         ? endpoint.type === "news-rss" ? parseGoogleNewsRss(text) : parser(text)
         : [];
       attempts.push({ type: endpoint.type, upstream_endpoint: endpoint.url, upstream_status: response.status, result_count: results.length });
-      if (results.length > bestResults.length) bestResults = results;
+      if (results.length > bestResults.length) {
+        bestResults = results;
+        bestType = endpoint.type;
+      }
       if (bestResults.length >= 5) break;
     } catch (error) {
       attempts.push({ type: endpoint.type, upstream_endpoint: endpoint.url, upstream_status: 502, result_count: 0, error: String(error?.message || error) });
@@ -202,6 +215,8 @@ async function fetchEngine(engine, q, start) {
   return {
     engine,
     label: provider.label,
+    source_type: bestType,
+    ...(provider.notice ? { notice: provider.notice } : {}),
     latency_ms: Date.now() - startedAt,
     grounding_score: scoreResults(bestResults),
     attempts,
@@ -240,7 +255,7 @@ async function handleSearch(request) {
 }
 
 function docs() {
-  return new Response(`<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Cloudflare Search Endpoint</title><style>body{font-family:system-ui,sans-serif;background:#050505;color:#fff;margin:0;padding:48px}.card{max-width:840px;margin:auto;border:1px solid #263044;border-radius:28px;padding:36px;background:#0d111a}code,pre{background:#000;border:1px solid #263044;border-radius:12px;padding:12px;display:block;overflow:auto}.warn{color:#fcd34d}</style></head><body><main class="card"><h1>Google + 네이버 무료 검색 엔드포인트</h1><p>Cloudflare Workers 무료 플랜에 바로 배포 가능한 API 키 없는 URL 요청 기반 엔드포인트입니다.</p><pre>GET /api/search?q=cloudpress&engine=all</pre><ul><li><code>engine=all</code> Google + 네이버</li><li><code>engine=google</code> Google</li><li><code>engine=naver</code> 네이버</li><li><code>start=0</code> 시작 위치</li></ul><p class="warn">외부 검색 사이트 정책과 차단에 따라 결과가 제한될 수 있습니다.</p></main></body></html>`, {
+  return new Response(`<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Cloudflare Search Endpoint</title><style>body{font-family:system-ui,sans-serif;background:#050505;color:#fff;margin:0;padding:48px}.card{max-width:840px;margin:auto;border:1px solid #263044;border-radius:28px;padding:36px;background:#0d111a}code,pre{background:#000;border:1px solid #263044;border-radius:12px;padding:12px;display:block;overflow:auto}.warn{color:#fcd34d}</style></head><body><main class="card"><h1>Google + 네이버 무료 검색 엔드포인트</h1><p>Cloudflare Workers 무료 플랜에 바로 배포 가능한 API 키 없는 URL 요청 기반 엔드포인트입니다.</p><pre>GET /api/search?q=cloudpress&engine=all</pre><ul><li><code>engine=all</code> Google + 네이버</li><li><code>engine=google</code> Google (뉴스 RSS 기반, 일반 웹검색은 보조 시도)</li><li><code>engine=naver</code> 네이버</li><li><code>start=0</code> 시작 위치</li></ul><p class="warn">Google은 자동화 차단(429)으로 일반 웹검색이 제한적이라 뉴스 RSS를 기본 소스로 사용합니다. 그 외 외부 검색 사이트 정책과 차단에 따라 결과가 제한될 수 있습니다.</p></main></body></html>`, {
     headers: { "Content-Type": "text/html; charset=utf-8", ...CORS_HEADERS },
   });
 }

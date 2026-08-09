@@ -1,0 +1,12 @@
+name = "cloudpress-search-endpoint"
+main = "worker-search.js"
+compatibility_date = "2026-05-14"
+
+# Cloudflare Workers 무료 플랜 배포용 독립 설정입니다.
+# 배포:
+#   npx wrangler deploy -c wrangler-search.toml
+# 로컬 테스트:
+#   npx wrangler dev -c wrangler-search.toml
+
+[observability]
+enabled = false

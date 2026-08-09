@@ -1254,6 +1254,7 @@ import {
   onRequestGet    as editorGet,
   onRequestPost   as editorPost,
 } from "./functions/api/editor.js";
+import { onRequestGet as searchGet } from "./functions/api/search.js";
 import { onRequest as middlewareHandler } from "./functions/_middleware.js";
 
 // Pages-Functions 스타일의 context 객체 생성
@@ -1309,6 +1310,9 @@ async function handleApiRequest(request, env, _workerCtx = null) {
 
   // ── 헬스체크
   if (path === "/api/health") return runWithMiddleware(healthHandler);
+
+  // ── 공개 검색 스크래핑 엔드포인트
+  if (path === "/api/search") return runWithMiddleware(method === "GET" ? searchGet : () => jsonErr("Method Not Allowed", 405));
 
   // ── 사이트 관리
   if (path === "/api/sites") {
@@ -1617,7 +1621,7 @@ export default {
       '/services', '/product-cachecloud', '/product-cp3', '/product-cloudpressdb',
       '/login', '/signup', '/admin', '/admin-users', '/admin-sites',
       '/admin-inquiries', '/admin-notices', '/admin-settings', '/about', '/contact',
-      '/features', '/faq', '/notices', '/chat',
+      '/features', '/faq', '/notices', '/chat', '/search',
     ];
 
     // 루트 / → index.html

@@ -1,5 +1,11 @@
 // functions/api/search.js → GET /api/search
-import { jsonOk, jsonErr, sanitizeString, sanitizeInt } from "../_shared.js";
+// Standalone Pages Functions-compatible handler for the same Cloudflare search API.
+
+const CORS = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "GET, OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type",
+};
 
 const ENGINES = {
   google: {
@@ -17,6 +23,17 @@ const FETCH_HEADERS = {
   "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
   "Accept-Language": "ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7",
 };
+
+function json(data, status = 200) {
+  return new Response(JSON.stringify(data, null, 2), {
+    status,
+    headers: { "Content-Type": "application/json; charset=utf-8", ...CORS },
+  });
+}
+
+function sanitizeString(value, maxLen = 200) {
+  return String(value || "").replace(/[\x00-\x1f\x7f]/g, "").trim().slice(0, maxLen);
+}
 
 function decodeHtml(value = "") {
   return value
@@ -49,9 +66,7 @@ function parseGoogle(html) {
     const href = block.match(/href="([^"]+)"/)?.[1];
     const title = decodeHtml(block.match(/<h3[^>]*>([\s\S]*?)<\/h3>/)?.[1]);
     const url = unwrapGoogleUrl(decodeHtml(href));
-    if (title && url.startsWith("http") && !url.includes("google.com/search")) {
-      results.push({ title, url, snippet: "" });
-    }
+    if (title && url.startsWith("http") && !url.includes("google.com/search")) results.push({ title, url, snippet: "" });
   }
   return dedupe(results);
 }
@@ -88,8 +103,8 @@ async function fetchEngine(engine, q, start) {
   return {
     engine,
     label: provider.label,
-    endpoint,
-    status: response.status,
+    upstream_endpoint: endpoint,
+    upstream_status: response.status,
     latency_ms: Date.now() - startedAt,
     results: response.ok ? parser(html) : [],
   };
@@ -99,26 +114,31 @@ export async function onRequestGet({ request }) {
   const url = new URL(request.url);
   const q = sanitizeString(url.searchParams.get("q"), 200);
   const engine = sanitizeString(url.searchParams.get("engine") || "all", 20).toLowerCase();
-  const start = Math.max(0, sanitizeInt(url.searchParams.get("start"), 0));
+  const start = Math.max(0, parseInt(url.searchParams.get("start") || "0", 10) || 0);
 
-  if (!q) return jsonErr("q 파라미터가 필요합니다. 예: /api/search?q=cloudpress&engine=all", 400);
-  if (!["all", ...Object.keys(ENGINES)].includes(engine)) return jsonErr("engine은 all, google, naver 중 하나여야 합니다.", 400);
+  if (!q) return json({ error: "q 파라미터가 필요합니다.", endpoint: "/api/search?q=cloudpress&engine=all" }, 400);
+  if (!["all", ...Object.keys(ENGINES)].includes(engine)) return json({ error: "engine은 all, google, naver 중 하나여야 합니다." }, 400);
 
-  const engines = engine === "all" ? Object.keys(ENGINES) : [engine];
-  const settled = await Promise.allSettled(engines.map((name) => fetchEngine(name, q, start)));
+  const selectedEngines = engine === "all" ? Object.keys(ENGINES) : [engine];
+  const settled = await Promise.allSettled(selectedEngines.map((name) => fetchEngine(name, q, start)));
   const providers = settled.map((item, index) => item.status === "fulfilled"
     ? item.value
-    : { engine: engines[index], label: ENGINES[engines[index]].label, status: 502, latency_ms: 0, results: [], error: "검색 공급자 응답을 가져오지 못했습니다." });
+    : { engine: selectedEngines[index], label: ENGINES[selectedEngines[index]].label, upstream_status: 502, latency_ms: 0, results: [], error: "검색 공급자 응답을 가져오지 못했습니다." });
 
-  return jsonOk({
+  return json({
     query: q,
     engine,
     start,
     endpoint: "/api/search?q={검색어}&engine=all|google|naver&start=0",
     auth_required: false,
     api_key_required: false,
-    cache: "disabled; upstream search pages are requested at call time",
-    notice: "외부 검색 결과 페이지의 구조 변경, 자동화 차단, 약관 또는 네트워크 정책에 따라 결과 수와 실시간성이 달라질 수 있습니다.",
+    cache: "disabled; every request fetches upstream search pages at call time",
+    cloudflare_ready: true,
+    notice: "Cloudflare 무료 Worker에 배포할 수 있지만, 외부 검색 사이트의 자동화 차단·약관·HTML 변경으로 영구 무료/100% 실시간/항상 성공은 보장할 수 없습니다.",
     providers,
   });
+}
+
+export async function onRequestOptions() {
+  return new Response(null, { status: 204, headers: CORS });
 }

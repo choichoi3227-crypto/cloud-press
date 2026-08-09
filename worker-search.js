@@ -114,15 +114,33 @@ function parseGoogle(html) {
 
 function parseNaver(html) {
   const results = [];
-  const linkRe = /<a[^>]+class="[^"]*(?:total_tit|link_tit|title_link|name_link|api_txt_lines)[^"]*"[^>]+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/g;
+  // 2026-08: 네이버가 SERP를 "Fender" 컴포넌트 프레임워크로 교체하면서
+  // total_tit/link_tit 등 옛 클래스명이 전부 사라지고, 대신 의미 없는 해시
+  // 클래스(fender-ui_*, sds-comps-*)로 렌더링된다. 유일하게 버전을 넘어
+  // 안정적으로 남아있는 앵커는 디자인시스템 타입 클래스인
+  // sds-comps-text-type-headline1(제목)과 sds-comps-text-type-body1(본문)이므로
+  // 이를 기준으로 파싱한다.
+  const titleRe = /sds-comps-text-type-headline1[^"]*"[^>]*>([\s\S]*?)<\/span>/;
+  const bodyRe = /sds-comps-text-type-body1[^"]*"[^>]*>([\s\S]*?)<\/span>\s*<span class="fender-ui_0cb57fb2">/;
+
+  // 제목 앵커(headline1을 포함하는 <a>)를 우선 순서대로 훑고, 같은 문서 블록
+  // 안에서 뒤따르는 body1 스니펫을 매칭시킨다.
+  const anchorRe = /<a\b[^>]+href="(https?:\/\/[^"]+)"[^>]*>([\s\S]{0,2000}?)<\/a>/g;
   let match;
-  while ((match = linkRe.exec(html)) !== null) {
+  while ((match = anchorRe.exec(html)) !== null) {
+    const inner = match[2];
+    if (!/sds-comps-text-type-headline1/.test(inner)) continue;
     const url = decodeHtml(match[1]);
-    const title = decodeHtml(match[2]);
-    const tail = html.slice(match.index, match.index + 1200);
-    const snippet = decodeHtml(tail.match(/<(?:div|p|span)[^>]+class="[^"]*(?:dsc|desc|api_txt_lines|total_dsc)[^"]*"[^>]*>([\s\S]*?)<\/(?:div|p|span)>/)?.[1] || "");
-    if (title && url.startsWith("http")) results.push({ title, url, snippet });
+    if (/^https?:\/\/(m\.)?search\.naver\.com/.test(url)) continue;
+    if (/(^|\.)pstatic\.net$/.test((() => { try { return new URL(url).hostname; } catch { return ""; } })())) continue;
+    const title = decodeHtml((inner.match(titleRe) || [])[1] || "").replace(/\s+/g, " ").trim();
+    if (!title || title.length < 2) continue;
+    // 제목 뒤 최대 3000자 안에서 본문(body1) 스니펫을 찾는다.
+    const tail = html.slice(match.index, match.index + 3000);
+    const snippet = decodeHtml((tail.match(bodyRe) || [])[1] || "").replace(/\s+/g, " ").trim();
+    results.push({ title, url, snippet });
   }
+
   const deduped = dedupe(results);
   return deduped.length ? deduped : extractGenericLinks(html, { engine: "naver" });
 }

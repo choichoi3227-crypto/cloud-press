@@ -17,6 +17,12 @@ import { CORS_HEADERS, json } from "./search-core.js";
 
 const SUPPORTED_LANGUAGES = ["ko", "en", "ja", "zh", "es", "fr", "de", "pt", "vi", "th", "id", "ar", "hi", "ru"];
 const DEFAULT_GRID = 256;
+const QUALITY_PRESETS = {
+  speed: { maxSize: 256, steps: 2, detailBoost: 0.85 },
+  balanced: { maxSize: 512, steps: 4, detailBoost: 1 },
+  detail: { maxSize: 768, steps: 6, detailBoost: 1.22 },
+  ultra: { maxSize: 1024, steps: 8, detailBoost: 1.45 },
+};
 const MAX_TRAINING_EXAMPLES = 16;
 const MAX_SOURCE_IMAGE_BYTES = 1_000_000;
 
@@ -161,7 +167,7 @@ function hexToRgb(hex) {
   return [0, 2, 4].map((index) => parseInt(clean.slice(index, index + 2), 16));
 }
 
-function sampleBitmapPixels(weights, latent, palette, width, height, steps = 3) {
+function sampleBitmapPixels(weights, latent, palette, width, height, steps = 3, detailBoost = 1) {
   const rgbPalette = palette.map(hexToRgb);
   const pixels = new Uint8Array(width * height * 3);
   let offset = 0;
@@ -176,13 +182,15 @@ function sampleBitmapPixels(weights, latent, palette, width, height, steps = 3) 
         g0 = Math.tanh(g0 * 0.72 + refinement[1] * 0.38);
         b0 = Math.tanh(b0 * 0.72 + refinement[2] * 0.38);
       }
-      const wave = Math.sin((x * latent[2] + y * latent[3]) * 18 + r0 * 6) * 0.5 + 0.5;
+      const wave = Math.sin((x * latent[2] + y * latent[3]) * 18 * detailBoost + r0 * 6) * 0.5 + 0.5;
+      const micro = Math.sin((x * 97.31 + y * 53.17 + latent[9] * 11) * detailBoost) * Math.cos((x * 41.7 - y * 88.9 + latent[10] * 7) * detailBoost);
       const base = rgbPalette[Math.abs(Math.floor((r0 + g0 + b0 + 3) * 3.7)) % rgbPalette.length];
       const accent = rgbPalette[Math.abs(Math.floor((wave + b0 + 2) * 4.1)) % rgbPalette.length];
       const shade = 0.34 + Math.abs(r0 * g0) * 0.66;
-      pixels[offset] = clamp(base[0] * shade + accent[0] * (1 - shade));
-      pixels[offset + 1] = clamp(base[1] * shade + accent[1] * (1 - shade));
-      pixels[offset + 2] = clamp(base[2] * shade + accent[2] * (1 - shade));
+      const crisp = 1 + micro * 0.09 * detailBoost;
+      pixels[offset] = clamp((base[0] * shade + accent[0] * (1 - shade)) * crisp);
+      pixels[offset + 1] = clamp((base[1] * shade + accent[1] * (1 - shade)) * crisp);
+      pixels[offset + 2] = clamp((base[2] * shade + accent[2] * (1 - shade)) * crisp);
       offset += 3;
     }
   }
@@ -289,11 +297,13 @@ async function readSourceImageFromUrl(rawUrl) {
 
 export function generatePromptImage(prompt, options = {}) {
   const cleanPrompt = sanitizePrompt(prompt);
+  const quality = String(options.quality || options.preset || "balanced").toLowerCase();
+  const preset = QUALITY_PRESETS[quality] || QUALITY_PRESETS.balanced;
   const width = Math.max(256, Math.min(2048, parseInt(options.width, 10) || 1024));
   const height = Math.max(256, Math.min(2048, parseInt(options.height, 10) || 1024));
   const requestedDetail = parseInt(options.detail, 10) || DEFAULT_GRID;
-  const bitmapWidth = Math.max(64, Math.min(512, parseInt(options.bitmap_width || options.pixel_width, 10) || Math.min(width, requestedDetail)));
-  const bitmapHeight = Math.max(64, Math.min(512, parseInt(options.bitmap_height || options.pixel_height, 10) || Math.min(height, requestedDetail)));
+  const bitmapWidth = Math.max(64, Math.min(preset.maxSize, parseInt(options.bitmap_width || options.pixel_width, 10) || Math.min(width, requestedDetail, preset.maxSize)));
+  const bitmapHeight = Math.max(64, Math.min(preset.maxSize, parseInt(options.bitmap_height || options.pixel_height, 10) || Math.min(height, requestedDetail, preset.maxSize)));
   const tokens = tokenize(cleanPrompt);
   const seed = hashString(`${cleanPrompt}|${width}x${height}|autonomous-neural-field-v2`);
   const latent = latentFromPrompt(cleanPrompt, tokens, options);
@@ -301,8 +311,9 @@ export function generatePromptImage(prompt, options = {}) {
   const palette = makePalette(baseColor, latent);
   const weights = neuralWeights(seed, latent);
   const trainingExamples = Array.isArray(options.training_examples) ? Math.min(options.training_examples.length, MAX_TRAINING_EXAMPLES) : 0;
-  const steps = Math.max(1, Math.min(8, parseInt(options.steps, 10) || 4));
-  const pixels = sampleBitmapPixels(weights, latent, palette, bitmapWidth, bitmapHeight, steps);
+  const steps = Math.max(1, Math.min(12, parseInt(options.steps, 10) || preset.steps));
+  const startedAt = Date.now();
+  const pixels = sampleBitmapPixels(weights, latent, palette, bitmapWidth, bitmapHeight, steps, preset.detailBoost);
   const bmpBytes = encodeBmp(bitmapWidth, bitmapHeight, pixels);
   const imageBase64 = bytesToBase64(bmpBytes);
 
@@ -324,12 +335,16 @@ export function generatePromptImage(prompt, options = {}) {
     bitmap_height: bitmapHeight,
     tokens,
     palette,
+    quality,
+    quality_profile: preset,
     steps,
     prompt_adherence: "full_prompt_conditioning",
     negative_prompt: sanitizePrompt(options.negative_prompt || ""),
     source_image: options.source_image ? { url: options.source_image.url, content_type: options.source_image.content_type, byte_length: options.source_image.byte_length, hash: options.source_image.hash } : null,
     url_conditioning_used: Boolean(options.source_image),
     training_examples_applied: trainingExamples,
+    generation_time_ms: Date.now() - startedAt,
+    quality_capabilities: { photorealism: "best_effort_neural_field", fine_detail: "micro_texture_enhanced", speed: "bounded_by_bitmap_size_and_steps", guaranteed: ["valid BMP output", "no external AI dependency", "deterministic prompt conditioning"] },
     format: "bmp",
     mime_type: "image/bmp",
     encoding: "base64",
@@ -349,7 +364,7 @@ export async function handleImage(request) {
   }
   const prompt = sanitizePrompt(payload.prompt || payload.q || "");
   const imageUrl = sanitizePrompt(payload.image_url || payload.source_url || payload.url || "");
-  if (!prompt && !imageUrl) return json({ error: "prompt 또는 image_url이 필요합니다.", endpoint: "POST /api/image { prompt?, image_url?, negative_prompt?, steps?, bitmap_width?, bitmap_height?, training_examples? }" }, 400);
+  if (!prompt && !imageUrl) return json({ error: "prompt 또는 image_url이 필요합니다.", endpoint: "POST /api/image { prompt?, image_url?, quality?, negative_prompt?, steps?, bitmap_width?, bitmap_height?, training_examples? }" }, 400);
   try {
     const sourceImage = imageUrl ? await readSourceImageFromUrl(imageUrl) : null;
     return json(generatePromptImage(prompt || "source image variation", { ...payload, source_image: sourceImage }));

@@ -27,12 +27,26 @@
 
     <section class="mt-10 rounded-3xl border border-amber-400/20 bg-amber-400/5 p-6">
       <h2 class="text-xl font-bold text-amber-200">정확한 엔드포인트</h2>
-      <ul class="mt-4 space-y-2 text-gray-300">
-        <li><code class="text-white">/api/search?q={검색어}&amp;engine=all</code> — Google과 네이버 동시 조회</li>
-        <li><code class="text-white">/api/search?q={검색어}&amp;engine=google</code> — Google만 조회</li>
-        <li><code class="text-white">/api/search?q={검색어}&amp;engine=naver</code> — 네이버만 조회</li>
-        <li><code class="text-white">start=0</code> — 페이지 시작 위치 옵션</li>
-      </ul>
+      <div class="mt-4 grid md:grid-cols-2 gap-5 text-gray-300">
+        <div class="rounded-2xl border border-white/10 bg-black/20 p-5">
+          <h3 class="font-bold text-white">검색 경로</h3>
+          <ul class="mt-3 space-y-2">
+            <li><code class="text-white">/api/search?q={검색어}&amp;engine=all</code> — Google과 네이버 동시 조회</li>
+            <li><code class="text-white">/api/search?q={검색어}&amp;engine=google</code> — Google만 조회</li>
+            <li><code class="text-white">/api/search?q={검색어}&amp;engine=naver</code> — 네이버만 조회</li>
+            <li><code class="text-white">start=0</code> — 페이지 시작 위치 옵션</li>
+          </ul>
+        </div>
+        <div class="rounded-2xl border border-fuchsia-400/20 bg-fuchsia-400/5 p-5">
+          <h3 class="font-bold text-fuchsia-100">이미지 생성 경로</h3>
+          <ul class="mt-3 space-y-2">
+            <li><code class="text-white">POST /api/image</code> — 프롬프트 기반 BMP 이미지 생성</li>
+            <li><code class="text-white">GET /api/image?prompt={프롬프트}</code> — 브라우저/간단 호출용 이미지 생성</li>
+            <li><code class="text-white">image_url</code> / <code class="text-white">source_url</code> — URL 참조 이미지 조건부 생성</li>
+            <li><code class="text-white">quality</code>, <code class="text-white">negative_prompt</code>, <code class="text-white">steps</code>, <code class="text-white">bitmap_width</code>, <code class="text-white">bitmap_height</code> — 품질/세밀도/속도 제어 옵션</li>
+          </ul>
+        </div>
+      </div>
       <p class="mt-4 text-sm text-amber-100/80">중요: “영원히 무료”, “100% 실시간”, “항상 동일한 결과”는 외부 검색 사이트의 정책·차단·HTML 변경에 의존하므로 기술적으로 보장할 수 없습니다. 이 구현은 플랫폼 비용과 인증키 요구를 없애고 캐시를 비활성화해 가능한 한 실시간으로 요청합니다.</p>
     </section>
 
@@ -55,12 +69,12 @@
 
     <section class="mt-10 rounded-3xl border border-fuchsia-400/20 bg-fuchsia-400/5 p-6">
       <h2 class="text-xl font-bold text-fuchsia-200">자체 이미지 생성 엔드포인트</h2>
-      <p class="mt-3 text-gray-300"><code class="text-white">/api/image</code>는 프롬프트와 선택적 image_url을 latent vector로 변환하고 요청 내부의 coordinate neural field를 여러 step으로 샘플링해 매번 코드가 아닌 실제 BMP 비트맵 이미지를 만듭니다. 외부 API, Cloudflare AI 바인딩, 유료 모델을 호출하지 않습니다.</p>
+      <p class="mt-3 text-gray-300"><code class="text-white">/api/image</code>는 프롬프트와 선택적 image_url을 latent vector로 변환하고 요청 내부의 coordinate neural field를 quality 프리셋과 여러 step으로 샘플링해 매번 코드가 아닌 실제 BMP 비트맵 이미지를 만듭니다. 외부 API, Cloudflare AI 바인딩, 유료 모델을 호출하지 않습니다.</p>
       <pre class="mt-4 rounded-2xl bg-black/60 border border-white/10 p-5 overflow-auto text-sm">POST /api/image
 Content-Type: application/json
 
-{ "prompt": "네온빛 서울 야경과 고양이 로봇", "image_url": "https://example.com/reference.jpg", "steps": 5, "bitmap_width": 256, "bitmap_height": 256 }</pre>
-      <p class="mt-4 text-sm text-fuchsia-100/80">지원 언어 키워드: 한국어, 영어, 일본어, 중국어, 스페인어, 프랑스어, 독일어, 포르투갈어, 베트남어, 태국어, 인도네시아어, 아랍어, 힌디어, 러시아어. 단, 무료 엣지 런타임에서 대형 학습형 모델을 무료 엣지 런타임만으로 능가한다고 검증할 수는 없습니다.</p>
+{ "prompt": "네온빛 서울 야경과 고양이 로봇", "image_url": "https://example.com/reference.jpg", "quality": "ultra", "steps": 8, "bitmap_width": 768, "bitmap_height": 768 }</pre>
+      <p class="mt-4 text-sm text-fuchsia-100/80">지원 언어 키워드: 한국어, 영어, 일본어, 중국어, 스페인어, 프랑스어, 독일어, 포르투갈어, 베트남어, 태국어, 인도네시아어, 아랍어, 힌디어, 러시아어. ultra는 세밀도와 해상도를 높이지만, 무료 엣지 런타임만으로 대형 학습형 모델 대비 절대적 우월성을 검증·보장할 수는 없습니다.</p>
     </section>
 
     <section class="mt-10">

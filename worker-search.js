@@ -6,6 +6,7 @@
  * Routes:
  *   GET  /api/search?q={query}&engine=all|google|naver&start=0
  *   POST /api/research   { query, max_results?, country? }  (X-AIBP-Secret optional)
+ *   GET/POST /api/image   { prompt, width?, height? } self-contained SVG generation
  *   GET  / or /search    - minimal endpoint documentation
  *
  * Optional Cloudflare Workers AI:
@@ -17,6 +18,7 @@
 
 import { CORS_HEADERS, json, handleSearch, docsHtml } from "./search-core.js";
 import { handleResearch } from "./research-handler.js";
+import { handleImage } from "./image-core.js";
 
 export default {
   async fetch(request, env) {
@@ -33,8 +35,13 @@ export default {
       return handleResearch(request, env);
     }
 
+    if (url.pathname === "/api/image") {
+      if (!["GET", "POST"].includes(request.method)) return json({ error: "Method Not Allowed" }, 405);
+      return handleImage(request);
+    }
+
     if (request.method !== "GET") return json({ error: "Method Not Allowed" }, 405);
     if (url.pathname === "/" || url.pathname === "/search") return docsHtml();
-    return json({ error: "Not Found", endpoint: "/api/search?q=cloudpress&engine=all" }, 404);
+    return json({ error: "Not Found", endpoints: ["/api/search?q=cloudpress&engine=all", "/api/research", "/api/image?prompt=..."] }, 404);
   },
 };

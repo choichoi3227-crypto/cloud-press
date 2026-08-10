@@ -1,14 +1,14 @@
 {
   "name": "cloud-press",
   "version": "5.0.0",
-  "description": "Cloudflare Workers 무료 검색 스크래핑 + 주제조사 API — Google+Naver, API 키 없는 URL 요청 기반 엔드포인트. AI 바인딩 없이 100% 동작(옵션으로 최소 사용 가능).",
+  "description": "Cloudflare Workers 무료 검색 스크래핑 + 주제조사 + 자체 BMP 비트맵 이미지 생성 API — Google+Naver, API 키 없는 URL 요청 기반 엔드포인트. AI 바인딩 없이 100% 동작(옵션으로 최소 사용 가능).",
   "private": true,
   "type": "module",
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
     "deploy:search": "wrangler deploy",
-    "check": "node --check search-core.js && node --check research-core.js && node --check research-handler.js && node --check worker-search.js && node --check functions/api/search.js && node --check functions/api/research.js"
+    "check": "node --check search-core.js && node --check research-core.js && node --check research-handler.js && node --check image-core.js && node --check worker-search.js && node --check functions/api/search.js && node --check functions/api/research.js && node --check functions/api/image.js"
   },
   "devDependencies": {
     "wrangler": "^4.0.0"

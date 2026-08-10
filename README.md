@@ -1,15 +1,26 @@
 # cloud-press
 
-Cloudflare Workers / Pages Functions 무료 플랜에 배포 가능한, API 키 없는 **검색 스크래핑 + 주제 조사** 엔드포인트입니다.
+Cloudflare Workers / Pages Functions 무료 플랜에 배포 가능한, API 키 없는 **검색 스크래핑 + 주제 조사 + 자체 이미지 생성** 엔드포인트입니다.
 
 - Google + 네이버 검색 결과를 URL 요청만으로 JSON으로 반환
 - 검색 결과를 바탕으로 한 "주제 조사" JSON(`/api/research`) — WordPress 플러그인 등에서 기존 Groq 기반 워커를 대체
+- `/api/image`는 외부 API·Cloudflare AI 바인딩·유료 모델 없이 프롬프트를 자율형 neural-field가 직접 샘플링한 실제 BMP 비트맵 이미지로 변환합니다. 한국어를 포함해 10개 이상의 언어 키워드를 처리하며 플랫폼 비용은 0원입니다.
 - 기본값은 **완전히 AI 바인딩 없이** 동작 (규칙 기반). Cloudflare Workers AI 바인딩은 선택 사항이며, 켜더라도 요청당 최대 1회만 짧게 호출하도록 설계되어 있습니다.
 
 ## 엔드포인트
 
 ### `GET /api/search?q={검색어}&engine=all|google|naver&start=0`
 Google/네이버 검색 결과를 스크래핑해 JSON으로 반환합니다. 인증·API 키 불필요.
+
+
+### `GET/POST /api/image`
+```json
+{ "prompt": "네온빛 서울 야경과 고양이 로봇", "image_url": "https://example.com/reference.jpg", "negative_prompt": "흐림", "quality": "ultra", "steps": 8, "bitmap_width": 768, "bitmap_height": 768 }
+```
+- 응답은 `format: "bmp"`, 원본 `image`/`image_base64` 문자열, 브라우저에서 바로 표시 가능한 `data:image/bmp;base64,...` 형식의 `data_url`, `template_used: false`, `generation_mode`, `prompt_adherence`, `url_conditioning_used` 메타데이터를 포함합니다.
+- 외부/Cloudflare AI 바인딩을 전혀 쓰지 않는 자체 템플릿 없는 자율형 소형 neural-field 비트맵 생성기(`self_contained_autonomous_neural_bitmap_v3`)라 개발자 관리 비용과 호출 비용이 없습니다.
+- 한국어, 영어, 일본어, 중국어, 스페인어, 프랑스어, 독일어, 포르투갈어, 베트남어, 태국어, 인도네시아어, 아랍어, 힌디어, 러시아어 키워드를 인식합니다. `image_url`/`source_url`을 넘기면 REST API가 URL 이미지를 가져와 해시·평균색으로 조건부 생성을 수행하고, `quality`(`speed`/`balanced`/`detail`/`ultra`), `negative_prompt`, `steps`로 사진감·세밀도·속도 우선순위를 조정하며, `training_examples`를 넘기면 요청 내부 latent vector를 가볍게 적응시킵니다.
+- `ultra` 품질은 최대 1024px 비트맵, 더 많은 refinement step, micro-texture 보강을 제공합니다. 단, 무료 엣지 런타임의 자체 소형 neural-field만으로 대형 학습형 이미지 모델 대비 절대적 우월성을 검증·보장할 수는 없습니다.
 
 ### `POST /api/research`
 ```json
@@ -44,9 +55,10 @@ binding = "AI"
 
 - `search-core.js` — 검색 스크래핑 공통 로직(파서, 엔진 정의, CORS 등). Worker와 Pages Functions가 공유합니다.
 - `research-core.js` — 규칙 기반 주제 조사 로직 + 선택적 Workers AI 보강 로직.
+- `image-core.js` — 외부 의존성 없이 프롬프트를 자율형 neural-field BMP 비트맵 이미지로 생성하는 자체 이미지 엔진.
 - `research-handler.js` — `/api/research` 요청 처리(인증, 검증, 응답 조립).
 - `worker-search.js` — Cloudflare Workers 진입점(`/api/search`, `/api/research`, 문서 페이지).
-- `functions/api/search.js`, `functions/api/research.js` — Cloudflare Pages Functions 진입점.
+- `functions/api/search.js`, `functions/api/research.js`, `functions/api/image.js` — Cloudflare Pages Functions 진입점.
 - `search.html` — 사람이 보는 안내/데모 페이지.
 
 ## 주의사항

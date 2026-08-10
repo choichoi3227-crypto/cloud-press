@@ -2,7 +2,7 @@ name = "cloudpress-search-endpoint"
 main = "worker-search.js"
 compatibility_date = "2026-05-14"
 
-# Cloudflare Workers 무료 플랜 배포용 독립 설정입니다.
+# Cloudflare Workers 무료 플랜 배포용 독립 설정입니다(검색 + 주제조사).
 # 배포:
 #   npx wrangler deploy -c wrangler-search.toml
 # 로컬 테스트:
@@ -10,3 +10,12 @@ compatibility_date = "2026-05-14"
 
 [observability]
 enabled = false
+
+# ── (선택) X-AIBP-Secret 인증 ──
+#   npx wrangler secret put AIBP_SHARED_SECRET -c wrangler-search.toml
+
+# ── (선택, 비추천) Cloudflare Workers AI 바인딩 ──
+# /api/research는 이 바인딩 없이도 100% 동작합니다. 켜면 요청당 최대 1회만
+# 짧게 호출해 결과를 보강합니다. 특별한 이유가 없다면 켜지 마세요.
+# [ai]
+# binding = "AI"

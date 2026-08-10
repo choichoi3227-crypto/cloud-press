@@ -42,6 +42,16 @@
       <pre class="mt-4 rounded-2xl bg-black/60 border border-white/10 p-5 overflow-auto text-sm">npx wrangler deploy -c wrangler-search.toml</pre>
     </section>
 
+    <section class="mt-10 rounded-3xl border border-white/10 bg-white/[0.03] p-6">
+      <h2 class="text-xl font-bold">주제 조사(Research) 엔드포인트</h2>
+      <p class="mt-3 text-gray-300">워드프레스 플러그인(zorlinq32) 등 외부 도구에서 검색 그라운딩·AI 썸네일 주제 조사에 사용할 수 있는 JSON 조사 API입니다. 기존 Groq 기반 워커를 완전히 대체합니다.</p>
+      <div class="mt-4 rounded-2xl bg-black/60 border border-white/10 p-5 font-mono text-sm overflow-x-auto">
+        <code>POST /api/research<br>Content-Type: application/json<br>X-AIBP-Secret: (선택, wrangler secret 등록 시에만 검사)<br><br>{ "query": "다이어트 식단", "max_results": 8 }</code>
+      </div>
+      <p class="mt-4 text-sm text-gray-400">응답은 <code class="text-white">providers</code>(검색 원본), <code class="text-white">summary</code>/<code class="text-white">results</code>(그라운딩용), <code class="text-white">research</code>(actual_meaning · visual_context · hero_shot · color_mood · key_visuals · category · emotional_tone · text_color_hex · accent_color_hex)를 포함합니다.</p>
+      <p class="mt-2 text-sm text-amber-100/80">기본적으로 Cloudflare AI 바인딩 없이 규칙 기반으로 동작합니다. 바인딩을 추가하면 요청당 최대 1회, 짧은 프롬프트로만 결과를 보강하도록 설계되어 있으며 이 바인딩은 선택 사항입니다.</p>
+    </section>
+
     <section class="mt-10">
       <form id="demo" class="flex flex-col md:flex-row gap-3">
         <input id="q" value="cloudpress" class="flex-1 rounded-xl bg-white/10 border border-white/10 px-4 py-3" placeholder="검색어">

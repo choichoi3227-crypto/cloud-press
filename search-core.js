@@ -93,7 +93,7 @@ function extractGenericLinks(html, { engine }) {
     if (title.length < 4 || title.length > 140) continue;
     if (/^(더보기|보기|이미지|동영상|뉴스|지도|쇼핑|로그인|캐시됨)$/i.test(title)) continue;
     const tail = html.slice(match.index, match.index + 1600);
-    const snippet = decodeHtml(tail.match(/<(?:div|p|span)[^>]*(?:class=["'][^"']*(?:snippet|dsc|desc|api_txt_lines|total_dsc|sub_txt|detail)[^"']*["'])?[^>]*>([\s\S]{20,500}?)<\/(?:div|p|span)>/i)?.[1] || "");
+    const snippet = decodeHtml(tail.match(/<(?:div|p|span)[^>]*(?:class=["'][^"']*(?:snippet|dsc|desc|api_txt_lines|total_dsc|sub_txt|bitmap size)[^"']*["'])?[^>]*>([\s\S]{20,500}?)<\/(?:div|p|span)>/i)?.[1] || "");
     results.push({ title, url, snippet });
   }
   return dedupe(results);
@@ -261,7 +261,7 @@ export async function handleSearch(request) {
 }
 
 export function docsHtml() {
-  return new Response(`<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Cloudflare Search Endpoint</title><style>body{font-family:system-ui,sans-serif;background:#050505;color:#fff;margin:0;padding:48px}.card{max-width:840px;margin:auto;border:1px solid #263044;border-radius:28px;padding:36px;background:#0d111a}code,pre{background:#000;border:1px solid #263044;border-radius:12px;padding:12px;display:block;overflow:auto}.warn{color:#fcd34d}</style></head><body><main class="card"><h1>Google + 네이버 무료 검색 엔드포인트</h1><p>Cloudflare Workers 무료 플랜에 바로 배포 가능한 API 키 없는 URL 요청 기반 엔드포인트입니다.</p><pre>GET /api/search?q=cloudpress&engine=all</pre><ul><li><code>engine=all</code> Google + 네이버</li><li><code>engine=google</code> Google (뉴스 RSS 기반, 일반 웹검색은 보조 시도)</li><li><code>engine=naver</code> 네이버</li><li><code>start=0</code> 시작 위치</li></ul><p>주제 조사(JSON) 엔드포인트: <code>POST /api/research</code> — body <code>{"query":"...","max_results":8}</code></p><p class="warn">Google은 자동화 차단(429)으로 일반 웹검색이 제한적이라 뉴스 RSS를 기본 소스로 사용합니다. 그 외 외부 검색 사이트 정책과 차단에 따라 결과가 제한될 수 있습니다.</p></main></body></html>`, {
+  return new Response(`<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Cloudflare Search Endpoint</title><style>body{font-family:system-ui,sans-serif;background:#050505;color:#fff;margin:0;padding:48px}.card{max-width:840px;margin:auto;border:1px solid #263044;border-radius:28px;padding:36px;background:#0d111a}code,pre{background:#000;border:1px solid #263044;border-radius:12px;padding:12px;display:block;overflow:auto}.warn{color:#fcd34d}</style></head><body><main class="card"><h1>Google + 네이버 무료 검색 엔드포인트</h1><p>Cloudflare Workers 무료 플랜에 바로 배포 가능한 API 키 없는 URL 요청 기반 엔드포인트입니다.</p><pre>GET /api/search?q=cloudpress&engine=all</pre><ul><li><code>engine=all</code> Google + 네이버</li><li><code>engine=google</code> Google (뉴스 RSS 기반, 일반 웹검색은 보조 시도)</li><li><code>engine=naver</code> 네이버</li><li><code>start=0</code> 시작 위치</li></ul><p>주제 조사(JSON) 엔드포인트: <code>POST /api/research</code> — body <code>{"query":"...","max_results":8}</code></p><p>자체 이미지 생성(JSON) 엔드포인트: <code>POST /api/image</code> — body <code>{"prompt":"네온빛 서울 야경","image_url":"https://example.com/reference.jpg","bitmap_width":256,"bitmap_height":256}</code></p><p class="warn">Google은 자동화 차단(429)으로 일반 웹검색이 제한적이라 뉴스 RSS를 기본 소스로 사용합니다. 이미지 생성은 외부 AI 없이 자율형 neural-field BMP 비트맵 이미지를 반환하므로 대형 학습형 모델의 사진 사실성은 보장하지 않습니다.</p></main></body></html>`, {
     headers: { "Content-Type": "text/html; charset=utf-8", ...CORS_HEADERS },
   });
 }

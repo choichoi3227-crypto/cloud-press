@@ -3,8 +3,8 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>무료 검색 스크래핑 엔드포인트 | CloudPress</title>
-  <meta name="description" content="API 키 없이 URL 요청만으로 Google과 네이버 검색 결과를 JSON으로 확인하는 무료 CloudPress 검색 엔드포인트 안내입니다.">
+  <title>무료 검색 + 이미지 생성 엔드포인트 | CloudPress</title>
+  <meta name="description" content="API 키 없이 검색 결과와 자체 BMP 비트맵 이미지 생성을 JSON으로 확인하는 무료 CloudPress 엔드포인트 안내입니다.">
   <script src="https://cdn.tailwindcss.com"></script>
   <link rel="stylesheet" href="/style.css">
 </head>
@@ -12,16 +12,16 @@
   <main class="max-w-5xl mx-auto px-6 py-16">
     <a href="/" class="text-2xl font-black tracking-tighter text-blue-500">CLOUD<span class="text-white">PRESS</span></a>
     <section class="mt-16 rounded-3xl border border-white/10 bg-white/[0.03] p-8 md:p-12">
-      <p class="text-blue-300 font-bold uppercase tracking-[0.3em] text-xs">Free Search Endpoint</p>
-      <h1 class="mt-4 text-4xl md:text-6xl font-black tracking-tight">Google + 네이버 검색을 URL 하나로 호출</h1>
-      <p class="mt-6 text-gray-300 text-lg leading-8">API 키 없이 GET 요청만으로 동작하는 공개 JSON 엔드포인트입니다. Cloudflare 무료 배포 환경에서 별도 서버 운영비 없이 실행되도록 구성했습니다.</p>
+      <p class="text-blue-300 font-bold uppercase tracking-[0.3em] text-xs">Free Search + Image Endpoint</p>
+      <h1 class="mt-4 text-4xl md:text-6xl font-black tracking-tight">검색 스크래핑과 자체 이미지 생성을 URL 하나로 호출</h1>
+      <p class="mt-6 text-gray-300 text-lg leading-8">API 키 없이 GET/POST 요청만으로 동작하는 공개 JSON 엔드포인트입니다. 검색 스크래핑뿐 아니라 외부 AI 바인딩 없는 프롬프트 기반 BMP 비트맵 이미지 생성을 Cloudflare 무료 배포 환경에서 실행하도록 구성했습니다.</p>
       <div class="mt-8 rounded-2xl bg-black/60 border border-white/10 p-5 font-mono text-sm overflow-x-auto">
-        <code>GET /api/search?q=cloudpress&amp;engine=all</code>
+        <code>GET /api/search?q=cloudpress&amp;engine=all<br>POST /api/image { "prompt": "네온빛 서울 야경" }</code>
       </div>
       <div class="mt-8 grid md:grid-cols-3 gap-4 text-sm">
         <div class="rounded-2xl border border-white/10 p-5"><b>지원</b><p class="mt-2 text-gray-400">engine=google, naver, all</p></div>
         <div class="rounded-2xl border border-white/10 p-5"><b>인증</b><p class="mt-2 text-gray-400">로그인·API 키 불필요</p></div>
-        <div class="rounded-2xl border border-white/10 p-5"><b>캐시</b><p class="mt-2 text-gray-400">요청 시점에 원본 검색 페이지 호출</p></div>
+        <div class="rounded-2xl border border-white/10 p-5"><b>이미지</b><p class="mt-2 text-gray-400">외부 AI 없이 자체 BMP 생성</p></div>
       </div>
     </section>
 
@@ -50,6 +50,17 @@
       </div>
       <p class="mt-4 text-sm text-gray-400">응답은 <code class="text-white">providers</code>(검색 원본), <code class="text-white">summary</code>/<code class="text-white">results</code>(그라운딩용), <code class="text-white">research</code>(actual_meaning · visual_context · hero_shot · color_mood · key_visuals · category · emotional_tone · text_color_hex · accent_color_hex)를 포함합니다.</p>
       <p class="mt-2 text-sm text-amber-100/80">기본적으로 Cloudflare AI 바인딩 없이 규칙 기반으로 동작합니다. 바인딩을 추가하면 요청당 최대 1회, 짧은 프롬프트로만 결과를 보강하도록 설계되어 있으며 이 바인딩은 선택 사항입니다.</p>
+    </section>
+
+
+    <section class="mt-10 rounded-3xl border border-fuchsia-400/20 bg-fuchsia-400/5 p-6">
+      <h2 class="text-xl font-bold text-fuchsia-200">자체 이미지 생성 엔드포인트</h2>
+      <p class="mt-3 text-gray-300"><code class="text-white">/api/image</code>는 프롬프트와 선택적 image_url을 latent vector로 변환하고 요청 내부의 coordinate neural field를 여러 step으로 샘플링해 매번 코드가 아닌 실제 BMP 비트맵 이미지를 만듭니다. 외부 API, Cloudflare AI 바인딩, 유료 모델을 호출하지 않습니다.</p>
+      <pre class="mt-4 rounded-2xl bg-black/60 border border-white/10 p-5 overflow-auto text-sm">POST /api/image
+Content-Type: application/json
+
+{ "prompt": "네온빛 서울 야경과 고양이 로봇", "image_url": "https://example.com/reference.jpg", "steps": 5, "bitmap_width": 256, "bitmap_height": 256 }</pre>
+      <p class="mt-4 text-sm text-fuchsia-100/80">지원 언어 키워드: 한국어, 영어, 일본어, 중국어, 스페인어, 프랑스어, 독일어, 포르투갈어, 베트남어, 태국어, 인도네시아어, 아랍어, 힌디어, 러시아어. 단, 무료 엣지 런타임에서 대형 학습형 모델을 무료 엣지 런타임만으로 능가한다고 검증할 수는 없습니다.</p>
     </section>
 
     <section class="mt-10">

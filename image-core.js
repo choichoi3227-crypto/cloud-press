@@ -1,46 +1,53 @@
 /**
  * image-core.js
- * Self-contained prompt-to-bitmap neural-field image generator.
+ * /api/image — 썸네일/포스터 이미지 생성 엔드포인트.
  *
- * This module does not call external APIs, Cloudflare AI bindings, hosted models,
- * paid services, or static image templates. It builds a tiny coordinate-based
- * neural field inside the request: the prompt is tokenized, converted into a
- * deterministic latent vector, optionally adapted by caller-provided lightweight
- * feedback/training examples, and sampled into original bitmap pixels.
+ * ⚠️ 2026-08(v6) 전면 재작성:
+ * 이전 버전(v3~v5)은 외부 의존성 없이 프롬프트를 해시값으로 바꿔 좌표별로
+ * sin/cos/tanh 수식을 계산하는 "절차적 노이즈 비트맵" 생성기였다. 이는
+ * 텍스트·레이아웃이 있는 실제 카드가 아니라 의미 없는 추상 색상 패턴만
+ * 만들어낼 뿐이라, zorlinq32 플러그인의 "헤드리스 브라우저(HTML/CSS 카드를
+ * 그대로 스크린샷)" 방식과는 결과물이 근본적으로 달랐다. 이번 개편에서
+ * 완전히 새로운 2단계 파이프라인으로 교체한다.
  *
- * Important honesty note: a zero-cost edge function cannot train or run a giant
- * diffusion/foundation model, so this is an autonomous local neural/procedural
- * generator rather than a claim of real frontier-model superiority.
+ * 우선순위:
+ *   ① AI 이용 — Cloudflare Workers AI 바인딩(env.AI)이 설정되어 있으면
+ *      @cf/black-forest-labs/flux-1-schnell(무료 티어에서 가장 가벼운 이미지
+ *      모델)을 요청당 딱 1회만 호출해 실제 텍스트-투-이미지 생성을 시도한다.
+ *      실패(바인딩 없음/오류/타임아웃)하면 즉시 ②로 폴백한다.
+ *      뉴런 남용 방지: 재시도 없이 1회만 호출하고, 스텝 수도 schnell 모델의
+ *      권장값(4 steps)을 넘기지 않는다.
+ *   ② 헤드리스 브라우저 방식 — zorlinq32 플러그인이 로컬 Chrome/Chromium으로
+ *      HTML/CSS 카드를 스크린샷 찍던 것과 동일한 레이아웃(배경 그라디언트,
+ *      블러 처리된 원형/캡슐 도형, 유리질(glassmorphism) 패널, 상단 배지,
+ *      제목/부제목 타이포그래피)을 이 워커 안에서 SVG로 직접 합성한다.
+ *      외부 API·브라우저 바인딩이 전혀 필요 없어 항상 성공한다.
+ *
+ * 응답은 항상 { success, provider, format, mime_type, data_url, ... } 형태이며,
+ * WordPress 플러그인은 provider 필드로 어느 경로에서 만들어졌는지 판별한다.
  */
 
 import { CORS_HEADERS, json } from "./search-core.js";
 
-const SUPPORTED_LANGUAGES = ["ko", "en", "ja", "zh", "es", "fr", "de", "pt", "vi", "th", "id", "ar", "hi", "ru"];
-const DEFAULT_GRID = 256;
-const QUALITY_PRESETS = {
-  speed: { maxSize: 256, steps: 2, detailBoost: 0.85 },
-  balanced: { maxSize: 512, steps: 4, detailBoost: 1 },
-  detail: { maxSize: 768, steps: 6, detailBoost: 1.22 },
-  ultra: { maxSize: 1024, steps: 8, detailBoost: 1.45 },
-};
-const MAX_TRAINING_EXAMPLES = 16;
-const MAX_SOURCE_IMAGE_BYTES = 1_000_000;
+const MAX_PROMPT_LENGTH = 900;
 
-const STOPWORDS = new Set([
-  "the", "and", "for", "with", "from", "that", "this", "into", "about", "image", "picture", "generate",
-  "이미지", "생성", "사진", "그림", "그리고", "있는", "없는", "으로", "에서", "에게", "처럼", "만들어",
-]);
+/* ────────────────────────────────────────────────────────────
+   공통 유틸
+──────────────────────────────────────────────────────────── */
 
-const COLOR_WORDS = [
-  { words: ["빨강", "레드", "red", "rojo", "rouge", "rot", "vermelho", "красный"], rgb: [230, 54, 62] },
-  { words: ["파랑", "블루", "blue", "azul", "bleu", "blau", "синий"], rgb: [48, 112, 232] },
-  { words: ["초록", "그린", "green", "verde", "vert", "grün", "зелёный"], rgb: [46, 180, 98] },
-  { words: ["노랑", "옐로", "yellow", "amarillo", "jaune", "gelb", "жёлтый"], rgb: [250, 210, 50] },
-  { words: ["보라", "퍼플", "purple", "violet", "morado", "lila", "фиолетовый"], rgb: [139, 92, 246] },
-  { words: ["핑크", "분홍", "pink", "rose", "rosa", "розовый"], rgb: [244, 114, 182] },
-  { words: ["검정", "블랙", "black", "noir", "negro", "schwarz", "чёрный"], rgb: [16, 18, 28] },
-  { words: ["흰색", "화이트", "white", "blanc", "blanco", "weiß", "белый"], rgb: [244, 248, 255] },
-];
+function sanitizePrompt(prompt) {
+  return String(prompt || "")
+    .replace(/[\x00-\x1f\x7f]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, MAX_PROMPT_LENGTH);
+}
+
+function escapeXml(value = "") {
+  return String(value).replace(/[&<>"']/g, (c) => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&apos;",
+  }[c]));
+}
 
 function hashString(input) {
   let hash = 2166136261;
@@ -49,199 +56,6 @@ function hashString(input) {
     hash = Math.imul(hash, 16777619);
   }
   return hash >>> 0;
-}
-
-function seeded(seed) {
-  let state = seed >>> 0;
-  return () => {
-    state = Math.imul(1664525, state) + 1013904223;
-    return ((state >>> 0) / 4294967296);
-  };
-}
-
-function escapeXml(value = "") {
-  return String(value).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
-}
-
-function sanitizePrompt(prompt) {
-  return String(prompt || "").replace(/[\x00-\x1f\x7f]/g, " ").replace(/\s+/g, " ").trim().slice(0, 800);
-}
-
-function tokenize(prompt) {
-  return Array.from(new Set((prompt.toLowerCase().match(/[\p{L}\p{N}]{2,}/gu) || [])
-    .filter((word) => !STOPWORDS.has(word)).slice(0, 24)));
-}
-
-function clamp(value, min = 0, max = 255) {
-  return Math.max(min, Math.min(max, value));
-}
-
-function rgbToHex(rgb) {
-  return `#${rgb.map((v) => clamp(Math.round(v)).toString(16).padStart(2, "0")).join("")}`;
-}
-
-function mix(a, b, t) {
-  return a.map((v, i) => v * (1 - t) + b[i] * t);
-}
-
-function promptColorBias(prompt, seed, sourceImage = null) {
-  const lower = prompt.toLowerCase();
-  const explicit = COLOR_WORDS.find((entry) => entry.words.some((word) => lower.includes(word.toLowerCase())));
-  if (explicit) return explicit.rgb;
-  if (sourceImage?.average_rgb) return sourceImage.average_rgb;
-  const hue = seed % 360;
-  const c = 0.62;
-  const x = c * (1 - Math.abs(((hue / 60) % 2) - 1));
-  const m = 0.22;
-  const [r, g, b] = hue < 60 ? [c, x, 0] : hue < 120 ? [x, c, 0] : hue < 180 ? [0, c, x] : hue < 240 ? [0, x, c] : hue < 300 ? [x, 0, c] : [c, 0, x];
-  return [(r + m) * 255, (g + m) * 255, (b + m) * 255];
-}
-
-function latentFromPrompt(prompt, tokens, options) {
-  const source = options.source_image || null;
-  const sourceKey = source ? `${source.hash}:${source.byte_length}:${source.content_type || ""}` : "no-source";
-  const negative = sanitizePrompt(options.negative_prompt || "");
-  const latent = Array.from({ length: 32 }, (_, i) => ((hashString(`${prompt}|${negative}|${sourceKey}|latent|${i}`) % 20000) / 10000) - 1);
-  tokens.forEach((token, tokenIndex) => {
-    for (let i = 0; i < latent.length; i += 1) {
-      latent[i] += Math.sin(hashString(`${token}:${i}`) * 0.00001 + tokenIndex) * 0.18;
-    }
-  });
-
-  if (negative) {
-    tokenize(negative).forEach((token, tokenIndex) => {
-      for (let i = 0; i < latent.length; i += 1) {
-        latent[i] -= Math.sin(hashString(`negative:${token}:${i}`) * 0.00001 + tokenIndex) * 0.14;
-      }
-    });
-  }
-
-  if (source) {
-    for (let i = 0; i < latent.length; i += 1) {
-      latent[i] += Math.sin(hashString(`${sourceKey}:source:${i}`) * 0.000013) * 0.32;
-    }
-  }
-
-  const examples = Array.isArray(options.training_examples) ? options.training_examples.slice(0, MAX_TRAINING_EXAMPLES) : [];
-  examples.forEach((example, exampleIndex) => {
-    const text = sanitizePrompt(`${example.prompt || ""} ${example.feedback || ""} ${example.label || ""}`);
-    const strength = Math.max(-1, Math.min(1, Number(example.weight ?? example.rating ?? 0.35)));
-    for (let i = 0; i < latent.length; i += 1) {
-      latent[i] += Math.cos(hashString(`${text}|${i}`) * 0.00002 + exampleIndex) * 0.08 * strength;
-    }
-  });
-
-  return latent.map((v) => Math.tanh(v));
-}
-
-function neuralWeights(seed, latent) {
-  const rand = seeded(seed);
-  const hidden = 12;
-  const input = 6;
-  const output = 3;
-  const w1 = Array.from({ length: hidden }, (_, h) => Array.from({ length: input }, (_, i) => (rand() * 2 - 1) * (0.7 + Math.abs(latent[(h + i) % latent.length]))));
-  const b1 = Array.from({ length: hidden }, (_, h) => latent[h % latent.length] + rand() * 0.4 - 0.2);
-  const w2 = Array.from({ length: output }, (_, o) => Array.from({ length: hidden }, (_, h) => (rand() * 2 - 1) * (0.85 + Math.abs(latent[(o * 7 + h) % latent.length]))));
-  const b2 = Array.from({ length: output }, (_, o) => latent[(o * 5 + 3) % latent.length]);
-  return { w1, b1, w2, b2 };
-}
-
-function evaluateField(weights, latent, x, y) {
-  const r = Math.hypot(x, y);
-  const a = Math.atan2(y, x) / Math.PI;
-  const inputs = [x, y, r, a, Math.sin((x + latent[0]) * 6.283), Math.cos((y - latent[1]) * 6.283)];
-  const hidden = weights.w1.map((row, h) => Math.tanh(row.reduce((sum, w, i) => sum + w * inputs[i], weights.b1[h])));
-  return weights.w2.map((row, o) => Math.tanh(row.reduce((sum, w, h) => sum + w * hidden[h], weights.b2[o])));
-}
-
-function makePalette(base, latent) {
-  const dark = mix(base, [5, 8, 16], 0.68);
-  const light = mix(base, [255, 255, 255], 0.45);
-  const accent = [base[2], base[0], base[1]].map((v, i) => clamp(v + latent[i] * 70));
-  const warm = mix(base, [255, 196, 87], 0.35);
-  return [dark, base, light, accent, warm].map(rgbToHex);
-}
-
-function hexToRgb(hex) {
-  const clean = hex.replace("#", "");
-  return [0, 2, 4].map((index) => parseInt(clean.slice(index, index + 2), 16));
-}
-
-function sampleBitmapPixels(weights, latent, palette, width, height, steps = 3, detailBoost = 1) {
-  const rgbPalette = palette.map(hexToRgb);
-  const pixels = new Uint8Array(width * height * 3);
-  let offset = 0;
-  for (let py = 0; py < height; py += 1) {
-    for (let px = 0; px < width; px += 1) {
-      const x = (px + 0.5) / width * 2 - 1;
-      const y = (py + 0.5) / height * 2 - 1;
-      let [r0, g0, b0] = evaluateField(weights, latent, x, y);
-      for (let step = 1; step < steps; step += 1) {
-        const refinement = evaluateField(weights, latent, x + r0 * 0.08 / step, y + g0 * 0.08 / step);
-        r0 = Math.tanh(r0 * 0.72 + refinement[0] * 0.38);
-        g0 = Math.tanh(g0 * 0.72 + refinement[1] * 0.38);
-        b0 = Math.tanh(b0 * 0.72 + refinement[2] * 0.38);
-      }
-      const wave = Math.sin((x * latent[2] + y * latent[3]) * 18 * detailBoost + r0 * 6) * 0.5 + 0.5;
-      const micro = Math.sin((x * 97.31 + y * 53.17 + latent[9] * 11) * detailBoost) * Math.cos((x * 41.7 - y * 88.9 + latent[10] * 7) * detailBoost);
-      const base = rgbPalette[Math.abs(Math.floor((r0 + g0 + b0 + 3) * 3.7)) % rgbPalette.length];
-      const accent = rgbPalette[Math.abs(Math.floor((wave + b0 + 2) * 4.1)) % rgbPalette.length];
-      const shade = 0.34 + Math.abs(r0 * g0) * 0.66;
-      const crisp = 1 + micro * 0.09 * detailBoost;
-      pixels[offset] = clamp((base[0] * shade + accent[0] * (1 - shade)) * crisp);
-      pixels[offset + 1] = clamp((base[1] * shade + accent[1] * (1 - shade)) * crisp);
-      pixels[offset + 2] = clamp((base[2] * shade + accent[2] * (1 - shade)) * crisp);
-      offset += 3;
-    }
-  }
-  return pixels;
-}
-
-function writeAscii(bytes, offset, text) {
-  for (let i = 0; i < text.length; i += 1) bytes[offset + i] = text.charCodeAt(i);
-}
-
-function writeU16LE(bytes, offset, value) {
-  bytes[offset] = value & 0xff;
-  bytes[offset + 1] = (value >> 8) & 0xff;
-}
-
-function writeU32LE(bytes, offset, value) {
-  bytes[offset] = value & 0xff;
-  bytes[offset + 1] = (value >> 8) & 0xff;
-  bytes[offset + 2] = (value >> 16) & 0xff;
-  bytes[offset + 3] = (value >> 24) & 0xff;
-}
-
-function encodeBmp(width, height, pixels) {
-  const rowStride = Math.ceil((width * 3) / 4) * 4;
-  const pixelBytes = rowStride * height;
-  const fileSize = 54 + pixelBytes;
-  const out = new Uint8Array(fileSize);
-  writeAscii(out, 0, "BM");
-  writeU32LE(out, 2, fileSize);
-  writeU32LE(out, 10, 54);
-  writeU32LE(out, 14, 40);
-  writeU32LE(out, 18, width);
-  writeU32LE(out, 22, height);
-  writeU16LE(out, 26, 1);
-  writeU16LE(out, 28, 24);
-  writeU32LE(out, 34, pixelBytes);
-  writeU32LE(out, 38, 2835);
-  writeU32LE(out, 42, 2835);
-
-  for (let y = 0; y < height; y += 1) {
-    const srcY = height - 1 - y;
-    const destRow = 54 + y * rowStride;
-    for (let x = 0; x < width; x += 1) {
-      const src = (srcY * width + x) * 3;
-      const dest = destRow + x * 3;
-      out[dest] = pixels[src + 2];
-      out[dest + 1] = pixels[src + 1];
-      out[dest + 2] = pixels[src];
-    }
-  }
-  return out;
 }
 
 function bytesToBase64(bytes) {
@@ -254,122 +68,294 @@ function bytesToBase64(bytes) {
   return btoa(binary);
 }
 
+/**
+ * 긴 텍스트를 카드 폭에 맞춰 여러 줄로 나눈다. 한글/영문 혼용을 고려해
+ * 글자 수 기준(대략치)으로 감아준다 — 워커 안에는 실제 폰트 metrics를
+ * 측정할 방법이 없으므로, 폰트 크기 대비 평균 문자 폭을 근사값으로 사용한다.
+ */
+function wrapText(text, maxCharsPerLine, maxLines) {
+  const words = String(text || "").split(/\s+/).filter(Boolean);
+  const lines = [];
+  let current = "";
+  for (const word of words) {
+    const candidate = current ? `${current} ${word}` : word;
+    if ([...candidate].length > maxCharsPerLine && current) {
+      lines.push(current);
+      current = word;
+    } else {
+      current = candidate;
+    }
+    if (lines.length >= maxLines) break;
+  }
+  if (current && lines.length < maxLines) lines.push(current);
+  if (lines.length === 0) lines.push("");
+  // 마지막 줄이 잘렸으면 말줄임표 표기
+  if (words.join(" ").length > lines.join(" ").length) {
+    const last = lines[lines.length - 1];
+    if (!last.endsWith("…")) lines[lines.length - 1] = last.replace(/.{1,3}$/, "…");
+  }
+  return lines;
+}
 
-async function readSourceImageFromUrl(rawUrl) {
-  const sourceUrl = sanitizePrompt(rawUrl);
-  if (!sourceUrl) return null;
-  let parsed;
-  try {
-    parsed = new URL(sourceUrl);
-  } catch {
-    throw new Error("image_url은 유효한 URL이어야 합니다.");
-  }
-  if (!["http:", "https:"].includes(parsed.protocol)) {
-    throw new Error("image_url은 http 또는 https URL만 지원합니다.");
-  }
-  const response = await fetch(parsed.toString(), {
-    headers: { "User-Agent": "CloudPress-ImageConditioner/1.0", "Accept": "image/*,*/*;q=0.4" },
-    cf: { cacheTtl: 300, cacheEverything: false },
+/* ────────────────────────────────────────────────────────────
+   ② 헤드리스 브라우저 방식(카드 SVG 합성)
+   — zorlinq32 플러그인 build_headless_image_html()과 동일한 디자인 언어
+──────────────────────────────────────────────────────────── */
+
+const STYLE_THEMES = {
+  poster: {
+    background: "#0f172a", accent: "#38bdf8", accent2: "#f97316",
+    text: "#f8fafc", panel: "rgba(255,255,255,0.08)", shape: "rgba(56,189,248,0.28)",
+  },
+  minimal: {
+    background: "#f8fafc", accent: "#2563eb", accent2: "#111827",
+    text: "#111827", panel: "rgba(17,24,39,0.05)", shape: "rgba(37,99,235,0.16)",
+  },
+  typography: {
+    background: "#111827", accent: "#fb923c", accent2: "#f8fafc",
+    text: "#f8fafc", panel: "rgba(255,255,255,0.08)", shape: "rgba(251,146,60,0.24)",
+  },
+  branding: {
+    background: "#090e18", accent: "#f43f5e", accent2: "#a855f7",
+    text: "#ffffff", panel: "rgba(255,255,255,0.08)", shape: "rgba(244,63,94,0.22)",
+  },
+  photo_realistic: {
+    background: "#1f2937", accent: "#22c55e", accent2: "#38bdf8",
+    text: "#ecfccb", panel: "rgba(255,255,255,0.08)", shape: "rgba(34,197,94,0.2)",
+  },
+};
+
+function pickTheme(style) {
+  return STYLE_THEMES[style] || STYLE_THEMES.poster;
+}
+
+// 한글이 네모(□)로 깨지지 않도록, 서버/브라우저에 흔히 설치되어 있는 한글
+// 웹폰트를 우선순위대로 나열한다. 시스템 폰트 렌더러(SVG rasterizer, 브라우저,
+// WordPress 미디어 라이브러리 썸네일 등)는 목록의 첫 번째로 발견되는 폰트를
+// 사용하므로, 하나라도 있으면 깨지지 않는다.
+const FONT_STACK = "'Noto Sans CJK KR', 'Noto Sans KR', 'Malgun Gothic', '맑은 고딕', 'Apple SD Gothic Neo', 'Segoe UI', sans-serif";
+
+/**
+ * 헤드리스 브라우저(HTML/CSS 카드)와 시각적으로 동일한 결과를 내는 SVG를
+ * 직접 합성한다. Cloudflare Workers 런타임에는 실제 브라우저 렌더링 엔진이
+ * 없으므로, blur 필터·둥근 도형·유리질 패널·타이포그래피를 SVG 프리미티브로
+ * 재현해 사실상 동일한 레이아웃을 만든다. SVG는 img 태그로 바로 표시되고
+ * WordPress 미디어 라이브러리에도 그대로 업로드할 수 있다.
+ */
+function renderCardSvg({ topic, subtitle, style, width = 1600, height = 900 }) {
+  const theme = pickTheme(style);
+  const seed = hashString(`${topic}|${style}`);
+
+  const titleLines = wrapText(topic, 16, 3);
+  const subtitleLines = wrapText(subtitle && subtitle !== topic ? subtitle : `Visual concept for ${topic}`, 44, 2);
+
+  const titleFontSize = titleLines.length >= 3 ? 64 : titleLines.length === 2 ? 76 : 92;
+  const titleLineHeight = titleFontSize * 1.08;
+
+  const badgeLabel = `${style.charAt(0).toUpperCase()}${style.slice(1)} style thumbnail`;
+
+  // shape 위치는 seed로 살짝 변주해 스타일이 같아도 매번 완전히 동일하진 않게 한다.
+  const shapeOffsetX = -120 + (seed % 60);
+  const shapeOffsetY = 120 + ((seed >> 4) % 60);
+
+  const panelX = 80, panelY = 80, panelW = width - 160, panelH = height - 160;
+  const panelInnerPad = 48;
+
+  const titleTspans = titleLines
+    .map((line, i) => `<tspan x="${panelX + panelInnerPad}" dy="${i === 0 ? 0 : titleLineHeight}">${escapeXml(line)}</tspan>`)
+    .join("");
+
+  const subtitleY = panelY + panelH - panelInnerPad - (subtitleLines.length - 1) * 44 - 40;
+  const subtitleTspans = subtitleLines
+    .map((line, i) => `<tspan x="${panelX + panelInnerPad}" dy="${i === 0 ? 0 : 44}">${escapeXml(line)}</tspan>`)
+    .join("");
+
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">
+  <defs>
+    <filter id="blurLg" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="55"/></filter>
+    <filter id="blurMd" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="36"/></filter>
+    <filter id="panelShadow" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="24" stdDeviation="34" flood-color="#000000" flood-opacity="0.28"/>
+    </filter>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="${theme.background}"/>
+      <stop offset="100%" stop-color="${theme.background}" stop-opacity="0.92"/>
+    </linearGradient>
+  </defs>
+
+  <rect x="0" y="0" width="${width}" height="${height}" fill="url(#bgGrad)"/>
+
+  <circle cx="${shapeOffsetX}" cy="${shapeOffsetY}" r="340" fill="${theme.shape}" filter="url(#blurLg)"/>
+  <ellipse cx="${width - 100}" cy="${height - 80}" rx="260" ry="240" fill="${theme.accent}" opacity="0.22" filter="url(#blurMd)" transform="rotate(22 ${width - 100} ${height - 80})"/>
+  <rect x="220" y="${height * 0.58}" width="660" height="220" rx="120" fill="${theme.accent2}" opacity="0.14" filter="url(#blurMd)"/>
+
+  <rect x="${width - 320}" y="80" width="240" height="60" rx="28" fill="rgba(255,255,255,0.1)"/>
+  <text x="${width - 200}" y="118" text-anchor="middle" font-family="${FONT_STACK}" font-size="16" letter-spacing="2" fill="${theme.text}" fill-opacity="0.9" font-weight="600">${escapeXml(badgeLabel.toUpperCase())}</text>
+
+  <g filter="url(#panelShadow)">
+    <rect x="${panelX}" y="${panelY}" width="${panelW}" height="${panelH}" rx="36" fill="${theme.panel}" stroke="rgba(255,255,255,0.08)" stroke-width="1"/>
+  </g>
+
+  <rect x="${panelX + panelInnerPad}" y="${panelY + panelInnerPad}" width="${Math.min(360, [...topic].length * 22 + 60)}" height="52" rx="26" fill="rgba(255,255,255,0.08)"/>
+  <text x="${panelX + panelInnerPad + 20}" y="${panelY + panelInnerPad + 34}" font-family="${FONT_STACK}" font-size="18" letter-spacing="1" fill="${theme.text}" fill-opacity="0.9">${escapeXml(topic.slice(0, 24))}</text>
+
+  <text x="${panelX + panelInnerPad}" y="${panelY + panelInnerPad + 130}" font-family="${FONT_STACK}" font-size="${titleFontSize}" font-weight="800" letter-spacing="-1" fill="${theme.text}">${titleTspans}</text>
+
+  <text x="${panelX + panelInnerPad}" y="${subtitleY}" font-family="${FONT_STACK}" font-size="30" fill="${theme.text}" fill-opacity="0.85">${subtitleTspans}</text>
+
+  <text x="${panelX + panelInnerPad}" y="${panelY + panelH - 20}" font-family="${FONT_STACK}" font-size="15" fill="${theme.text}" fill-opacity="0.6">cloud-press · headless card renderer</text>
+</svg>`;
+
+  return svg;
+}
+
+function generateHeadlessCard({ prompt, topic, subtitle, style, width, height }) {
+  const effectiveTopic = sanitizePrompt(topic || prompt).slice(0, 80) || "Untitled";
+  const svg = renderCardSvg({
+    topic: effectiveTopic,
+    subtitle: sanitizePrompt(subtitle || "").slice(0, 140),
+    style: style || "poster",
+    width: width || 1600,
+    height: height || 900,
   });
-  if (!response.ok) throw new Error(`image_url을 가져오지 못했습니다: HTTP ${response.status}`);
-  const contentType = response.headers.get("content-type") || "application/octet-stream";
-  const buffer = new Uint8Array(await response.arrayBuffer());
-  if (buffer.byteLength > MAX_SOURCE_IMAGE_BYTES) throw new Error(`image_url은 최대 ${MAX_SOURCE_IMAGE_BYTES} bytes까지만 지원합니다.`);
-  let r = 0;
-  let g = 0;
-  let b = 0;
-  let samples = 0;
-  for (let i = 0; i + 2 < buffer.length; i += Math.max(3, Math.floor(buffer.length / 4096))) {
-    r += buffer[i];
-    g += buffer[i + 1];
-    b += buffer[i + 2];
-    samples += 1;
-  }
-  const averageRgb = samples ? [r / samples, g / samples, b / samples] : null;
-  return {
-    url: parsed.toString(),
-    content_type: contentType,
-    byte_length: buffer.byteLength,
-    hash: hashString(Array.from(buffer.slice(0, 8192)).join(",")),
-    average_rgb: averageRgb,
-  };
-}
-
-export function generatePromptImage(prompt, options = {}) {
-  const cleanPrompt = sanitizePrompt(prompt);
-  const quality = String(options.quality || options.preset || "balanced").toLowerCase();
-  const preset = QUALITY_PRESETS[quality] || QUALITY_PRESETS.balanced;
-  const width = Math.max(256, Math.min(2048, parseInt(options.width, 10) || 1024));
-  const height = Math.max(256, Math.min(2048, parseInt(options.height, 10) || 1024));
-  const requestedDetail = parseInt(options.detail, 10) || DEFAULT_GRID;
-  const bitmapWidth = Math.max(64, Math.min(preset.maxSize, parseInt(options.bitmap_width || options.pixel_width, 10) || Math.min(width, requestedDetail, preset.maxSize)));
-  const bitmapHeight = Math.max(64, Math.min(preset.maxSize, parseInt(options.bitmap_height || options.pixel_height, 10) || Math.min(height, requestedDetail, preset.maxSize)));
-  const tokens = tokenize(cleanPrompt);
-  const seed = hashString(`${cleanPrompt}|${width}x${height}|autonomous-neural-field-v2`);
-  const latent = latentFromPrompt(cleanPrompt, tokens, options);
-  const baseColor = promptColorBias(cleanPrompt, seed, options.source_image);
-  const palette = makePalette(baseColor, latent);
-  const weights = neuralWeights(seed, latent);
-  const trainingExamples = Array.isArray(options.training_examples) ? Math.min(options.training_examples.length, MAX_TRAINING_EXAMPLES) : 0;
-  const steps = Math.max(1, Math.min(12, parseInt(options.steps, 10) || preset.steps));
-  const startedAt = Date.now();
-  const pixels = sampleBitmapPixels(weights, latent, palette, bitmapWidth, bitmapHeight, steps, preset.detailBoost);
-  const bmpBytes = encodeBmp(bitmapWidth, bitmapHeight, pixels);
-  const imageBase64 = bytesToBase64(bmpBytes);
+  const svgBase64 = bytesToBase64(new TextEncoder().encode(svg));
 
   return {
-    prompt: cleanPrompt,
-    engine: "self_contained_autonomous_neural_bitmap_v3",
-    generation_mode: "prompt_conditioned_coordinate_neural_field",
-    template_used: false,
-    cost_usd: 0,
+    success: true,
+    provider: "headless-card",
+    engine: "cloud-press-svg-card-renderer",
+    generation_mode: "headless_browser_equivalent_svg_card",
+    model: "local-svg-card",
     external_ai_used: false,
-    cloudflare_ai_binding_used: false,
-    supported_languages: SUPPORTED_LANGUAGES,
-    seed,
-    width,
-    height,
-    display_width: width,
-    display_height: height,
-    bitmap_width: bitmapWidth,
-    bitmap_height: bitmapHeight,
-    tokens,
-    palette,
-    quality,
-    quality_profile: preset,
-    steps,
-    prompt_adherence: "full_prompt_conditioning",
-    negative_prompt: sanitizePrompt(options.negative_prompt || ""),
-    source_image: options.source_image ? { url: options.source_image.url, content_type: options.source_image.content_type, byte_length: options.source_image.byte_length, hash: options.source_image.hash } : null,
-    url_conditioning_used: Boolean(options.source_image),
-    training_examples_applied: trainingExamples,
-    generation_time_ms: Date.now() - startedAt,
-    quality_capabilities: { photorealism: "best_effort_neural_field", fine_detail: "micro_texture_enhanced", speed: "bounded_by_bitmap_size_and_steps", guaranteed: ["valid BMP output", "no external AI dependency", "deterministic prompt conditioning"] },
-    format: "bmp",
-    mime_type: "image/bmp",
+    cost_usd: 0,
+    format: "svg",
+    mime_type: "image/svg+xml",
     encoding: "base64",
-    image: imageBase64,
-    image_base64: imageBase64,
-    data_url: `data:image/bmp;base64,${imageBase64}`,
-    limitations: "외부 모델·바인딩 없이 요청 내부에서 생성되는 자율형 소형 neural-field 비트맵 이미지 엔진입니다. 무료 엣지 런타임만으로 대형 학습형 diffusion/foundation 모델을 능가한다고 검증할 수는 없습니다.",
+    width: width || 1600,
+    height: height || 900,
+    image: svgBase64,
+    image_base64: svgBase64,
+    data_url: `data:image/svg+xml;base64,${svgBase64}`,
+    svg,
+    style: style || "poster",
+    prompt: sanitizePrompt(prompt || effectiveTopic),
   };
 }
 
-export async function handleImage(request) {
+/* ────────────────────────────────────────────────────────────
+   ① AI 이용 — Cloudflare Workers AI (flux-1-schnell)
+──────────────────────────────────────────────────────────── */
+
+const FLUX_MODEL = "@cf/black-forest-labs/flux-1-schnell";
+
+/**
+ * env.AI 바인딩으로 flux-1-schnell을 딱 1회 호출한다. 실패하면 null을
+ * 반환해 헤드리스 카드 폴백으로 넘어가게 한다(예외를 던지지 않음).
+ * 뉴런 남용 방지를 위해 재시도하지 않고, schnell 모델 권장 스텝(4)을
+ * 그대로 사용한다.
+ */
+async function tryFluxImage(env, prompt) {
+  if (!env || !env.AI || typeof env.AI.run !== "function") return null;
+
+  const cleanPrompt = sanitizePrompt(prompt);
+  if (!cleanPrompt) return null;
+
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 25000);
+
+    const result = await env.AI.run(
+      FLUX_MODEL,
+      { prompt: cleanPrompt, steps: 4 },
+      { signal: controller.signal }
+    );
+    clearTimeout(timeout);
+
+    // Workers AI의 flux-1-schnell은 { image: "<base64 jpeg>" } 형태이거나
+    // 런타임에 따라 ReadableStream/Uint8Array로 올 수도 있어 방어적으로 처리한다.
+    let base64 = null;
+    if (result && typeof result.image === "string" && result.image.length > 100) {
+      base64 = result.image;
+    } else if (result instanceof Uint8Array || result instanceof ArrayBuffer) {
+      base64 = bytesToBase64(result instanceof ArrayBuffer ? new Uint8Array(result) : result);
+    } else if (result && result.response && typeof result.response === "string") {
+      base64 = result.response;
+    }
+
+    if (!base64) return null;
+
+    return {
+      success: true,
+      provider: "workers-ai-flux",
+      engine: FLUX_MODEL,
+      generation_mode: "text_to_image_ai_model",
+      model: FLUX_MODEL,
+      external_ai_used: true,
+      cloudflare_ai_binding_used: true,
+      cost_usd: 0,
+      format: "jpeg",
+      mime_type: "image/jpeg",
+      encoding: "base64",
+      image: base64,
+      image_base64: base64,
+      data_url: `data:image/jpeg;base64,${base64}`,
+      prompt: cleanPrompt,
+    };
+  } catch (err) {
+    // AI 바인딩이 없거나, 무료 티어 뉴런 한도 초과, 타임아웃 등 — 조용히 폴백.
+    return null;
+  }
+}
+
+/* ────────────────────────────────────────────────────────────
+   진입점
+──────────────────────────────────────────────────────────── */
+
+export async function generatePromptImage(payload = {}, env = null) {
+  const prompt = sanitizePrompt(payload.prompt || payload.q || "");
+  const topic = sanitizePrompt(payload.topic || prompt);
+  const subtitle = sanitizePrompt(payload.subtitle || payload.hero_shot || payload.visual_context || "");
+  const style = String(payload.style || "poster").toLowerCase();
+  const width = Math.max(512, Math.min(2048, parseInt(payload.width, 10) || 1600));
+  const height = Math.max(512, Math.min(2048, parseInt(payload.height, 10) || 900));
+
+  // ① AI 이용 우선 시도 (flux-1-schnell, 요청당 1회만)
+  const preferHeadless = payload.provider === "headless" || payload.force_headless === true || payload.force_headless === "true";
+  if (!preferHeadless) {
+    const fluxResult = await tryFluxImage(env, prompt || topic);
+    if (fluxResult) return fluxResult;
+  }
+
+  // ② 헤드리스 브라우저 방식(SVG 카드) — 항상 성공하는 최종 경로
+  return generateHeadlessCard({ prompt, topic, subtitle, style, width, height });
+}
+
+export async function handleImage(request, env) {
   let payload = {};
   try {
-    payload = request.method === "GET" ? Object.fromEntries(new URL(request.url).searchParams) : await request.json();
+    payload = request.method === "GET"
+      ? Object.fromEntries(new URL(request.url).searchParams)
+      : await request.json();
   } catch {
     return json({ error: "요청 본문이 유효한 JSON이 아닙니다." }, 400);
   }
+
   const prompt = sanitizePrompt(payload.prompt || payload.q || "");
-  const imageUrl = sanitizePrompt(payload.image_url || payload.source_url || payload.url || "");
-  if (!prompt && !imageUrl) return json({ error: "prompt 또는 image_url이 필요합니다.", endpoint: "POST /api/image { prompt?, image_url?, quality?, negative_prompt?, steps?, bitmap_width?, bitmap_height?, training_examples? }" }, 400);
+  const topic = sanitizePrompt(payload.topic || "");
+  if (!prompt && !topic) {
+    return json({
+      error: "prompt 또는 topic이 필요합니다.",
+      endpoint: "POST /api/image { prompt, topic?, subtitle?, style?, width?, height? }",
+    }, 400);
+  }
+
   try {
-    const sourceImage = imageUrl ? await readSourceImageFromUrl(imageUrl) : null;
-    return json(generatePromptImage(prompt || "source image variation", { ...payload, source_image: sourceImage }));
+    const result = await generatePromptImage(payload, env);
+    return json(result);
   } catch (error) {
-    return json({ error: String(error?.message || error) }, 400);
+    // 예외적인 경우에도 최종적으로 헤드리스 카드는 성공해야 하므로, 여기까지
+    // 오면 그 자체가 심각한 버그다 — 원인을 그대로 노출한다.
+    return json({ error: String(error?.message || error), success: false }, 500);
   }
 }
 

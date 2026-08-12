@@ -1,19 +1,20 @@
 /**
  * Cloudflare Worker deploy target for a keyless Google + Naver search endpoint,
- * plus an optional topic-research endpoint used by the zorlinq32 WordPress plugin
- * in place of the old Groq-based worker.
+ * a topic-research endpoint, and a thumbnail/poster image endpoint used by the
+ * zorlinq32 WordPress plugin.
  *
  * Routes:
  *   GET  /api/search?q={query}&engine=all|google|naver&start=0
  *   POST /api/research   { query, max_results?, country? }  (X-AIBP-Secret optional)
- *   GET/POST /api/image   { prompt, width?, height? } self-contained SVG generation
+ *   GET/POST /api/image   { prompt, topic?, subtitle?, style?, width?, height? }
  *   GET  / or /search    - minimal endpoint documentation
  *
- * Optional Cloudflare Workers AI:
- *   /api/research works fully without any AI binding (rule-based). If you bind
- *   Workers AI as `AI` in wrangler.toml, /api/research will additionally make at
- *   most ONE short AI call per request to lightly polish the research fields.
- *   This is entirely optional and off by default (no binding = no AI usage).
+ * Cloudflare Workers AI (recommended, see wrangler.toml [ai] binding):
+ *   - /api/research works fully without the AI binding (rule-based). If bound,
+ *     it makes at most ONE short AI call per request to lightly polish results.
+ *   - /api/image tries flux-1-schnell once per request when the AI binding is
+ *     present; on any failure (or when not bound) it falls back to a
+ *     self-contained SVG "headless card" renderer that always succeeds.
  */
 
 import { CORS_HEADERS, json, handleSearch, docsHtml } from "./search-core.js";
@@ -37,11 +38,11 @@ export default {
 
     if (url.pathname === "/api/image") {
       if (!["GET", "POST"].includes(request.method)) return json({ error: "Method Not Allowed" }, 405);
-      return handleImage(request);
+      return handleImage(request, env);
     }
 
     if (request.method !== "GET") return json({ error: "Method Not Allowed" }, 405);
     if (url.pathname === "/" || url.pathname === "/search") return docsHtml();
-    return json({ error: "Not Found", endpoints: ["/api/search?q=cloudpress&engine=all", "/api/research", "/api/image?prompt=..."] }, 404);
+    return json({ error: "Not Found", endpoints: ["/api/search?q=cloudpress&engine=all", "/api/research", "/api/image?prompt=...&topic=...&style=poster"] }, 404);
   },
 };

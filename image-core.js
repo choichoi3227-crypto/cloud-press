@@ -69,31 +69,121 @@ function bytesToBase64(bytes) {
 }
 
 /**
- * 긴 텍스트를 카드 폭에 맞춰 여러 줄로 나눈다. 한글/영문 혼용을 고려해
- * 글자 수 기준(대략치)으로 감아준다 — 워커 안에는 실제 폰트 metrics를
- * 측정할 방법이 없으므로, 폰트 크기 대비 평균 문자 폭을 근사값으로 사용한다.
+ * 문자 1개의 대략적인 렌더 폭을 "em(폰트 크기 대비 배수)" 단위로 추정한다.
+ * Cloudflare Workers 런타임에는 실제 폰트 metrics를 측정할 방법이 없으므로,
+ * 문자 종류별 평균 폭을 근사값으로 사용한다.
+ *   - 한글(가-힣)·전각 기호: 대체로 정사각형에 가까움 → 1.05em
+ *   - 영문 대문자/숫자: 중간 폭 → 0.68em
+ *   - 영문 소문자: 조금 더 좁음 → 0.60em
+ *   - 공백: 0.30em
+ *   - 그 외(문장부호 등): 0.55em
+ * ⚠️ 2026-08(v7) 조정: 제목은 font-weight 800(볼드)로 렌더링되어 일반
+ * 굵기보다 실제 문자 폭이 넓다. 렌더러(SVG 래스터라이저)마다 폴백 폰트의
+ * 실제 glyph 폭이 이 추정치와 조금씩 다를 수 있으므로, 계산에 쓰는 값을
+ * 실제 평균보다 넉넉히 잡아 "폭 추정이 살짝 어긋나도 항상 넘치는 대신
+ * 한 줄이 조금 일찍 접히는" 방향으로만 오차가 나게 한다(안전 마진).
  */
-function wrapText(text, maxCharsPerLine, maxLines) {
+function estCharWidthEm(ch) {
+  if (/[가-힣]/.test(ch)) return 1.05;
+  if (/[A-Z0-9]/.test(ch)) return 0.68;
+  if (/[a-z]/.test(ch)) return 0.60;
+  if (ch === " ") return 0.30;
+  return 0.55;
+}
+
+function estTextWidthEm(text) {
+  let total = 0;
+  for (const ch of String(text || "")) total += estCharWidthEm(ch);
+  return total;
+}
+
+// 폭 추정치와 실제 렌더러(폰트/래스터라이저)의 오차를 흡수하기 위한 전역
+// 안전 계수. 계산된 사용 가능 폭에 곱해 실제보다 살짝 더 좁게 취급한다.
+const WIDTH_SAFETY_FACTOR = 0.92;
+
+/**
+ * 긴 텍스트를 "실제 폭(em)" 기준으로 여러 줄로 나눈다. maxWidthEm은 한 줄의
+ * 최대 폭(폰트 크기 배수, 예: 10.5 = 10.5em)이다. 단어 단위로 우선 나누고,
+ * 단어 하나가 이미 maxWidthEm을 넘으면(예: 공백 없는 긴 한글/URL) 문자
+ * 단위로 강제 절단해 절대 한 줄이 폭을 넘지 않도록 보장한다.
+ */
+function wrapTextByWidth(text, maxWidthEm, maxLines) {
   const words = String(text || "").split(/\s+/).filter(Boolean);
   const lines = [];
   let current = "";
+  let currentWidth = 0;
+  let truncated = false;
+
+  const pushLine = () => {
+    if (current) lines.push(current);
+    current = "";
+    currentWidth = 0;
+  };
+
+  outer:
   for (const word of words) {
-    const candidate = current ? `${current} ${word}` : word;
-    if ([...candidate].length > maxCharsPerLine && current) {
-      lines.push(current);
-      current = word;
-    } else {
-      current = candidate;
+    if (lines.length >= maxLines) { truncated = true; break; }
+
+    const wordWidth = estTextWidthEm(word);
+    const sepWidth = current ? estCharWidthEm(" ") : 0;
+
+    if (currentWidth + sepWidth + wordWidth <= maxWidthEm) {
+      current = current ? `${current} ${word}` : word;
+      currentWidth += sepWidth + wordWidth;
+      continue;
     }
-    if (lines.length >= maxLines) break;
+
+    // 현재 줄이 이미 차 있다면 줄바꿈부터 시도
+    if (current) {
+      pushLine();
+      if (lines.length >= maxLines) { truncated = true; break; }
+    }
+
+    // 단어 자체가 한 줄 폭을 넘는 경우(붙어있는 긴 한글 구절 등) → 문자 단위 강제 절단
+    if (wordWidth > maxWidthEm) {
+      let chunk = "";
+      let chunkWidth = 0;
+      for (const ch of word) {
+        const chW = estCharWidthEm(ch);
+        if (chunkWidth + chW > maxWidthEm && chunk) {
+          lines.push(chunk);
+          if (lines.length >= maxLines) { truncated = true; break outer; }
+          chunk = ch;
+          chunkWidth = chW;
+        } else {
+          chunk += ch;
+          chunkWidth += chW;
+        }
+      }
+      current = chunk;
+      currentWidth = chunkWidth;
+    } else {
+      current = word;
+      currentWidth = wordWidth;
+    }
   }
-  if (current && lines.length < maxLines) lines.push(current);
+
+  if (lines.length < maxLines) {
+    if (current) lines.push(current);
+  } else if (current) {
+    truncated = true;
+  }
+
   if (lines.length === 0) lines.push("");
-  // 마지막 줄이 잘렸으면 말줄임표 표기
-  if (words.join(" ").length > lines.join(" ").length) {
-    const last = lines[lines.length - 1];
-    if (!last.endsWith("…")) lines[lines.length - 1] = last.replace(/.{1,3}$/, "…");
+
+  // 원문이 다 들어가지 못했으면 마지막 줄 끝에 말줄임표 표기 (폭 초과 방지를
+  // 위해 마지막 줄 자체도 필요하면 살짝 잘라낸다).
+  const consumedLength = lines.join(" ").length;
+  const isTruncated = truncated || String(text || "").length > consumedLength + words.length;
+  if (isTruncated) {
+    let last = lines[lines.length - 1] || "";
+    const ellipsisWidth = estCharWidthEm("…");
+    while (last.length > 0 && estTextWidthEm(last) + ellipsisWidth > maxWidthEm) {
+      last = last.slice(0, -1);
+    }
+    lines[lines.length - 1] = last.replace(/[…\s]+$/, "") + "…";
   }
+
   return lines;
 }
 
@@ -136,21 +226,122 @@ function pickTheme(style) {
 const FONT_STACK = "'Noto Sans CJK KR', 'Noto Sans KR', 'Malgun Gothic', '맑은 고딕', 'Apple SD Gothic Neo', 'Segoe UI', sans-serif";
 
 /**
+ * ⚠️ 카테고리별 심볼(glyph) — 이 카드는 실제 사진/일러스트를 생성하지
+ * 못하는 최후의 안전망이므로, 최소한 주제의 "종류"를 시각적으로 구분되게
+ * 표시해 모든 주제가 완전히 동일한 카드로 보이는 문제를 완화한다. 각 항목은
+ * SVG path 데이터(24x24 grid 기준)이며 카드 우측 하단에 큼직하게 배치된다.
+ */
+const CATEGORY_GLYPHS = {
+  messenger: "M4 4h16a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H10l-5 4v-4H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z",
+  device: "M6 3h9a2 2 0 0 1 2 2v13H4V5a2 2 0 0 1 2-2zM3 20h16M9 6h3",
+  finance: "M4 19V10M10 19V5M16 19v-7M2 19h20M4 10l6-5 6 4 4-4",
+  food: "M6 3v7a3 3 0 0 0 6 0V3M9 10v11M17 3c-2 2-2 5 0 8v10",
+  travel: "M2 16l7-2 4-9 2 1-3 8 6-1 2 2-8 4-2 5-2-1 1-5-7 2-1-2 3-2z",
+  health: "M12 21s-7-4.4-9.5-8.6C.6 8.8 2.4 5 6 5c2 0 3.4 1.1 4 2.3C10.6 6.1 12 5 14 5c3.6 0 5.4 3.8 3.5 7.4C19 16.6 12 21 12 21z",
+  education: "M2 8l10-4 10 4-10 4-10-4zM6 11v5c0 1.7 2.7 3 6 3s6-1.3 6-3v-5M22 8v6",
+  beauty: "M12 3c1.5 2 1.5 4 0 6 1.5 2 1.5 4 0 6M6 6c1.5 1.5 1.5 3.5 0 5M18 6c-1.5 1.5-1.5 3.5 0 5M4 15c2 3 5 5 8 6 3-1 6-3 8-6",
+  business: "M4 20V10l8-6 8 6v10M9 20v-6h6v6",
+  environment: "M12 2c4 3 7 7 7 11a7 7 0 0 1-14 0c0-4 3-8 7-11z",
+  entertainment: "M4 4l16 8-16 8V4z",
+  legal: "M12 3v18M6 7h12M4 7l3 6H1l3-6zM17 7l3 6h-6l3-6z",
+  home: "M3 11l9-7 9 7M5 10v10h14V10",
+  tech: "M4 4h16v12H4zM9 20h6M12 16v4M7 8h10M7 11h6",
+  default: "M12 2l2.9 6.9L22 10l-5.5 4.8L18 22l-6-3.6L6 22l1.5-7.2L2 10l7.1-1.1z",
+};
+
+// 주제 문자열에서 카테고리를 추정한다 (플러그인의 topic_to_visual_concept와
+// 유사한 목적이지만, 이 워커는 독립 배포이므로 자체적으로 가벼운 사전을 둔다).
+const CATEGORY_KEYWORDS = [
+  [/카카오톡|카톡|kakaotalk|라인|line\s*app|왓츠앱|whatsapp|텔레그램|telegram|디스코드|discord|메신저|messenger|채팅/iu, "messenger"],
+  [/pc\s*버전|pc용|다운로드|download|설치|install|업데이트|update|갤럭시|galaxy|아이폰|iphone|아이패드|ipad|맥북|macbook|노트북|laptop|태블릿|모니터|스마트폰/iu, "device"],
+  [/재테크|투자|주식|펀드|자산|금융|은행|대출|부동산|아파트|주택|청약|세금|회계/iu, "finance"],
+  [/요리|레시피|음식|맛집|카페|커피|베이커리/iu, "food"],
+  [/여행|관광|trip|해외여행|여행지|기차|열차|ktx|srt|항공권|비행기표|숙소|호텔|펜션|리조트/iu, "travel"],
+  [/건강|병원|치료|영양제|비타민|다이어트|운동|헬스|피트니스/iu, "health"],
+  [/교육|학습|공부|강의|수업|자격증|합격|취업준비/iu, "education"],
+  [/뷰티|화장품|스킨케어|패션/iu, "beauty"],
+  [/창업|스타트업|마케팅|비즈니스|취업|직장|커리어|채용|면접/iu, "business"],
+  [/환경|기후|생태|반려동물|강아지|고양이/iu, "environment"],
+  [/게임|gaming|e스포츠|영화|드라마|스트리밍|음악|아이돌/iu, "entertainment"],
+  [/법률|계약서|보험|소송/iu, "legal"],
+  [/인테리어|이사|부동산\s*매물|가전/iu, "home"],
+  [/ai|인공지능|머신러닝|딥러닝|소프트웨어|프로그래밍|코딩|개발|it\b/iu, "tech"],
+];
+
+function detectCategory(text) {
+  const haystack = String(text || "");
+  for (const [pattern, category] of CATEGORY_KEYWORDS) {
+    if (pattern.test(haystack)) return category;
+  }
+  return "default";
+}
+
+function categoryGlyphPath(category) {
+  return CATEGORY_GLYPHS[category] || CATEGORY_GLYPHS.default;
+}
+
+/**
+ * 주어진 폰트 크기(px)에서 titleLines가 실제로 패널 폭을 넘지 않는지
+ * 확인하고, 넘지 않는 가장 큰 폰트 크기를 찾는다. wrapTextByWidth의 폭
+ * 추정치를 그대로 사용해 "줄바꿈 계산에 쓴 폭 가정"과 "실제 그리는 폰트
+ * 크기"가 항상 일치하도록 만든다 — 이전 버전은 이 둘이 따로 놀아서
+ * (고정 charsPerLine vs 가변 fontSize) 긴 제목이 패널 밖으로 넘치는
+ * 버그가 있었다.
+ */
+function fitTitle(topic, panelInnerWidth, maxLines, maxFontSize, minFontSize) {
+  let fontSize = maxFontSize;
+  let lines = [];
+  const safeWidth = panelInnerWidth * WIDTH_SAFETY_FACTOR;
+  while (fontSize >= minFontSize) {
+    const maxWidthEm = safeWidth / fontSize;
+    lines = wrapTextByWidth(topic, maxWidthEm, maxLines);
+    // 모든 줄이 실제로 폭 안에 들어오는지 재확인 (wrapTextByWidth는 강제
+    // 절단으로 보장하지만, 이중 안전장치로 한 번 더 검증).
+    const allFit = lines.every((line) => estTextWidthEm(line) * fontSize <= safeWidth + 0.5);
+    if (allFit) break;
+    fontSize -= 4;
+  }
+  if (fontSize < minFontSize) fontSize = minFontSize;
+  return { fontSize, lines };
+}
+
+/**
  * 헤드리스 브라우저(HTML/CSS 카드)와 시각적으로 동일한 결과를 내는 SVG를
  * 직접 합성한다. Cloudflare Workers 런타임에는 실제 브라우저 렌더링 엔진이
  * 없으므로, blur 필터·둥근 도형·유리질 패널·타이포그래피를 SVG 프리미티브로
  * 재현해 사실상 동일한 레이아웃을 만든다. SVG는 img 태그로 바로 표시되고
  * WordPress 미디어 라이브러리에도 그대로 업로드할 수 있다.
+ *
+ * ⚠️ 2026-08(v7) 버그 수정: 이전 버전은 wrapText()가 "글자 수" 기준으로
+ * 줄바꿈을 계산하면서 실제로 그리는 titleFontSize(최대 92px)와 전혀
+ * 연동되지 않아, 한글처럼 문자 폭이 넓은 텍스트나 긴 제목이 패널/캔버스
+ * 경계를 넘어 잘려 보이는 문제가 있었다(사용자 제보 스크린샷 재현 완료).
+ * fitTitle()로 교체해 "실제 그릴 폭"을 기준으로 폰트 크기를 먼저 맞추므로
+ * 어떤 길이의 주제여도 항상 패널 안에 들어온다.
  */
 function renderCardSvg({ topic, subtitle, style, width = 1600, height = 900 }) {
   const theme = pickTheme(style);
   const seed = hashString(`${topic}|${style}`);
+  const category = detectCategory(`${topic} ${subtitle}`);
+  const glyphPath = categoryGlyphPath(category);
 
-  const titleLines = wrapText(topic, 16, 3);
-  const subtitleLines = wrapText(subtitle && subtitle !== topic ? subtitle : `Visual concept for ${topic}`, 44, 2);
+  const panelX = 80, panelY = 80, panelW = width - 160, panelH = height - 160;
+  const panelInnerPad = 48;
+  const titleAvailableWidth = panelW - panelInnerPad * 2 - 40; // 우측 글리프와 겹치지 않도록 여유 확보
 
-  const titleFontSize = titleLines.length >= 3 ? 64 : titleLines.length === 2 ? 76 : 92;
-  const titleLineHeight = titleFontSize * 1.08;
+  const { fontSize: titleFontSize, lines: titleLines } = fitTitle(topic, titleAvailableWidth, 3, 92, 40);
+  const titleLineHeight = titleFontSize * 1.12;
+
+  const subtitleAvailableWidth = (panelW - panelInnerPad * 2) * WIDTH_SAFETY_FACTOR;
+  const subtitleSource = subtitle && subtitle !== topic ? subtitle : `Visual concept for ${topic}`;
+  const subtitleFontSize = 30;
+  const subtitleLines = wrapTextByWidth(subtitleSource, subtitleAvailableWidth / subtitleFontSize, 2);
+
+  // 상단 작은 배지 칩(주제 원문 미리보기)도 패널 폭을 넘지 않도록 같은
+  // 폭 기반 줄바꿈 함수로 1줄만 뽑아 사용한다(기존의 고정 24자 슬라이스는
+  // 한글처럼 넓은 문자에서 칩 배경보다 텍스트가 길어지는 문제가 있었다).
+  const badgeChipMaxWidthEm = ((panelW - panelInnerPad * 2 - 40) * WIDTH_SAFETY_FACTOR) / 18;
+  const badgeChipText = wrapTextByWidth(topic, badgeChipMaxWidthEm, 1)[0] || topic.slice(0, 24);
 
   const badgeLabel = `${style.charAt(0).toUpperCase()}${style.slice(1)} style thumbnail`;
 
@@ -158,17 +349,19 @@ function renderCardSvg({ topic, subtitle, style, width = 1600, height = 900 }) {
   const shapeOffsetX = -120 + (seed % 60);
   const shapeOffsetY = 120 + ((seed >> 4) % 60);
 
-  const panelX = 80, panelY = 80, panelW = width - 160, panelH = height - 160;
-  const panelInnerPad = 48;
-
   const titleTspans = titleLines
     .map((line, i) => `<tspan x="${panelX + panelInnerPad}" dy="${i === 0 ? 0 : titleLineHeight}">${escapeXml(line)}</tspan>`)
     .join("");
 
-  const subtitleY = panelY + panelH - panelInnerPad - (subtitleLines.length - 1) * 44 - 40;
+  const subtitleLineGap = subtitleFontSize * 1.45;
+  const subtitleY = panelY + panelH - panelInnerPad - (subtitleLines.length - 1) * subtitleLineGap - 40;
   const subtitleTspans = subtitleLines
-    .map((line, i) => `<tspan x="${panelX + panelInnerPad}" dy="${i === 0 ? 0 : 44}">${escapeXml(line)}</tspan>`)
+    .map((line, i) => `<tspan x="${panelX + panelInnerPad}" dy="${i === 0 ? 0 : subtitleLineGap}">${escapeXml(line)}</tspan>`)
     .join("");
+
+  const glyphSize = 120;
+  const glyphX = width - 100 - glyphSize;
+  const glyphY = height - 100 - glyphSize;
 
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">
   <defs>
@@ -196,12 +389,21 @@ function renderCardSvg({ topic, subtitle, style, width = 1600, height = 900 }) {
     <rect x="${panelX}" y="${panelY}" width="${panelW}" height="${panelH}" rx="36" fill="${theme.panel}" stroke="rgba(255,255,255,0.08)" stroke-width="1"/>
   </g>
 
-  <rect x="${panelX + panelInnerPad}" y="${panelY + panelInnerPad}" width="${Math.min(360, [...topic].length * 22 + 60)}" height="52" rx="26" fill="rgba(255,255,255,0.08)"/>
-  <text x="${panelX + panelInnerPad + 20}" y="${panelY + panelInnerPad + 34}" font-family="${FONT_STACK}" font-size="18" letter-spacing="1" fill="${theme.text}" fill-opacity="0.9">${escapeXml(topic.slice(0, 24))}</text>
+  <!-- 카테고리 심볼: 주제의 종류를 시각적으로 구분해, 모든 주제가 동일한
+       카드로 보이는 문제를 완화한다 (예: 메신저/기기/여행/금융 등). -->
+  <g transform="translate(${glyphX}, ${glyphY})" opacity="0.16">
+    <rect x="0" y="0" width="${glyphSize}" height="${glyphSize}" rx="28" fill="${theme.accent}"/>
+    <g transform="translate(${glyphSize * 0.2}, ${glyphSize * 0.2}) scale(${(glyphSize * 0.6) / 24})">
+      <path d="${glyphPath}" fill="none" stroke="${theme.text}" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round"/>
+    </g>
+  </g>
+
+  <rect x="${panelX + panelInnerPad}" y="${panelY + panelInnerPad}" width="${Math.min(panelW - panelInnerPad * 2, estTextWidthEm(badgeChipText) * 18 + 70)}" height="52" rx="26" fill="rgba(255,255,255,0.08)"/>
+  <text x="${panelX + panelInnerPad + 20}" y="${panelY + panelInnerPad + 34}" font-family="${FONT_STACK}" font-size="18" letter-spacing="1" fill="${theme.text}" fill-opacity="0.9">${escapeXml(badgeChipText)}</text>
 
   <text x="${panelX + panelInnerPad}" y="${panelY + panelInnerPad + 130}" font-family="${FONT_STACK}" font-size="${titleFontSize}" font-weight="800" letter-spacing="-1" fill="${theme.text}">${titleTspans}</text>
 
-  <text x="${panelX + panelInnerPad}" y="${subtitleY}" font-family="${FONT_STACK}" font-size="30" fill="${theme.text}" fill-opacity="0.85">${subtitleTspans}</text>
+  <text x="${panelX + panelInnerPad}" y="${subtitleY}" font-family="${FONT_STACK}" font-size="${subtitleFontSize}" fill="${theme.text}" fill-opacity="0.85">${subtitleTspans}</text>
 
   <text x="${panelX + panelInnerPad}" y="${panelY + panelH - 20}" font-family="${FONT_STACK}" font-size="15" fill="${theme.text}" fill-opacity="0.6">cloud-press · headless card renderer</text>
 </svg>`;
@@ -210,7 +412,14 @@ function renderCardSvg({ topic, subtitle, style, width = 1600, height = 900 }) {
 }
 
 function generateHeadlessCard({ prompt, topic, subtitle, style, width, height }) {
-  const effectiveTopic = sanitizePrompt(topic || prompt).slice(0, 80) || "Untitled";
+  // ⚠️ 2026-08(v7) 버그 수정: 이전에는 여기서 topic을 80자로 미리 잘라냈다.
+  // fitTitle()/wrapTextByWidth()는 이미 "패널에 실제로 들어가는 만큼만
+  // 보여주고 나머지는 …으로 표시"하는 로직을 자체적으로 갖추고 있으므로,
+  // 여기서 먼저 80자로 자르면 단어 중간이 잘린 원문("...lines w")이
+  // wrapTextByWidth에 그대로 전달되어 "이미 다 들어간 문장"으로 오인되고
+  // 말줄임표(…)가 붙지 않는 문제가 있었다(사용자 제보 스크린샷과 동일 증상).
+  // 원문 길이 제한은 fitTitle 한 곳에서만 담당하도록 사전 절단을 제거한다.
+  const effectiveTopic = sanitizePrompt(topic || prompt) || "Untitled";
   const svg = renderCardSvg({
     topic: effectiveTopic,
     subtitle: sanitizePrompt(subtitle || "").slice(0, 140),

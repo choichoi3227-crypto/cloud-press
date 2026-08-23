@@ -243,68 +243,186 @@ function generateHeadlessCard({ prompt, topic, subtitle, style, width, height })
 }
 
 /* ────────────────────────────────────────────────────────────
-   ① AI 이용 — Cloudflare Workers AI (flux-1-schnell)
+   ① AI 이용 — Cloudflare Workers AI (다중 모델 체인)
+   ─────────────────────────────────────────────────────────────
+   ⚠️ 확장(2026-08): flux-1-schnell 단일 모델 호출을 스타일별 다중 모델
+   체인으로 교체한다. 모델마다 입력 파라미터·프롬프트 문법·강점이 크게
+   다르므로, 모델별 프롬프트 빌더(buildModelPrompt)와 파라미터 빌더
+   (buildModelInput)를 두어 "모델에 맞는 프롬프트"를 구성한 뒤 호출한다.
+   체인의 각 모델은 1회씩만 시도하고(재시도 없음, 뉴런 남용 방지),
+   실패하면 즉시 다음 모델로 넘어가며, 체인 전체가 실패하면 ②(헤드리스
+   카드)로 폴백해 항상 성공을 보장한다.
 ──────────────────────────────────────────────────────────── */
 
-const FLUX_MODEL = "@cf/black-forest-labs/flux-1-schnell";
+const AI_MODELS = {
+  FLUX_SCHNELL: "@cf/black-forest-labs/flux-1-schnell",
+  FLUX2_DEV: "@cf/black-forest-labs/flux-2-dev",
+  SDXL_BASE: "@cf/stabilityai/stable-diffusion-xl-base-1.0",
+  SDXL_LIGHTNING: "@cf/bytedance/stable-diffusion-xl-lightning",
+  DREAMSHAPER: "@cf/lykon/dreamshaper-8-lcm",
+};
+
+// 스타일별 모델 체인. 스타일의 시각적 성격에 맞춰 우선순위를 다르게 둔다.
+//  - poster/branding: SDXL Lightning(빠르고 대비가 강한 포스터풍) → flux-schnell → dreamshaper
+//  - minimal/typography: flux-schnell(깔끔한 지시 이행) → SDXL base → dreamshaper
+//  - photo_realistic: dreamshaper(사실적 렌더링에 강함) → flux-2-dev → SDXL base
+const STYLE_MODEL_CHAIN = {
+  poster: [AI_MODELS.SDXL_LIGHTNING, AI_MODELS.FLUX_SCHNELL, AI_MODELS.DREAMSHAPER],
+  branding: [AI_MODELS.SDXL_LIGHTNING, AI_MODELS.FLUX_SCHNELL, AI_MODELS.SDXL_BASE],
+  minimal: [AI_MODELS.FLUX_SCHNELL, AI_MODELS.SDXL_BASE, AI_MODELS.DREAMSHAPER],
+  typography: [AI_MODELS.FLUX_SCHNELL, AI_MODELS.SDXL_LIGHTNING, AI_MODELS.SDXL_BASE],
+  photo_realistic: [AI_MODELS.DREAMSHAPER, AI_MODELS.FLUX2_DEV, AI_MODELS.SDXL_BASE, AI_MODELS.FLUX_SCHNELL],
+};
+
+function getModelChainForStyle(style) {
+  return STYLE_MODEL_CHAIN[style] || STYLE_MODEL_CHAIN.poster;
+}
 
 /**
- * env.AI 바인딩으로 flux-1-schnell을 딱 1회 호출한다. 실패하면 null을
- * 반환해 헤드리스 카드 폴백으로 넘어가게 한다(예외를 던지지 않음).
- * 뉴런 남용 방지를 위해 재시도하지 않고, schnell 모델 권장 스텝(4)을
- * 그대로 사용한다.
+ * 모델별 프롬프트 문법이 다르므로, 공통 프롬프트를 모델에 맞게 가공한다.
+ *   - FLUX 계열: 짧은 태그 나열보다 자연스러운 한두 문장 묘사를 선호하고,
+ *     (word:1.4) 가중치 문법·negative_prompt 파라미터를 지원하지 않는다.
+ *   - SDXL 계열(base/lightning): A1111식 가중치 문법과 negative_prompt를
+ *     지원하며, 품질 향상 태그(4k, highly detailed 등)를 덧붙이면 효과가 있다.
+ *   - dreamshaper(LCM): 소수 스텝(4~8)에 최적화된 체크포인트로, 과도하게
+ *     긴 프롬프트보다 핵심 묘사 위주가 안정적이다.
  */
-async function tryFluxImage(env, prompt) {
+function buildModelPrompt(model, basePrompt, style) {
+  const clean = sanitizePrompt(basePrompt);
+  switch (model) {
+    case AI_MODELS.SDXL_BASE:
+    case AI_MODELS.SDXL_LIGHTNING:
+      return `${clean}, professional commercial ${style} design, sharp focus, high detail, studio quality lighting, 4k`;
+    case AI_MODELS.DREAMSHAPER:
+      return `${clean}, clean composition, balanced lighting, crisp detail`;
+    case AI_MODELS.FLUX2_DEV:
+    case AI_MODELS.FLUX_SCHNELL:
+    default:
+      return clean;
+  }
+}
+
+function buildModelNegativePrompt(model) {
+  switch (model) {
+    case AI_MODELS.SDXL_BASE:
+    case AI_MODELS.SDXL_LIGHTNING:
+      // SDXL 계열만 negative_prompt 파라미터를 지원한다.
+      return "blurry, low quality, watermark, text artifacts, distorted, extra limbs, deformed";
+    default:
+      return null;
+  }
+}
+
+function buildModelInput(model, prompt, style) {
+  const shapedPrompt = buildModelPrompt(model, prompt, style);
+  const negative = buildModelNegativePrompt(model);
+
+  switch (model) {
+    case AI_MODELS.SDXL_BASE:
+      return { prompt: shapedPrompt, ...(negative ? { negative_prompt: negative } : {}), num_steps: 20, guidance: 7.5 };
+    case AI_MODELS.SDXL_LIGHTNING:
+      return { prompt: shapedPrompt, ...(negative ? { negative_prompt: negative } : {}), num_steps: 8 };
+    case AI_MODELS.DREAMSHAPER:
+      return { prompt: shapedPrompt, num_steps: 6, guidance: 2 };
+    case AI_MODELS.FLUX2_DEV:
+      return { prompt: shapedPrompt, steps: 20 };
+    case AI_MODELS.FLUX_SCHNELL:
+    default:
+      // schnell 모델 권장값(4 steps)을 넘기지 않는다 — 뉴런 남용 방지.
+      return { prompt: shapedPrompt, steps: 4 };
+  }
+}
+
+/**
+ * Workers AI 응답을 base64로 정규화한다. 모델/런타임에 따라
+ * { image: "<base64>" } / Uint8Array / ArrayBuffer / ReadableStream /
+ * { response: "<base64>" } 등 형태가 다르므로 방어적으로 처리한다.
+ */
+async function normalizeAiResult(result) {
+  if (!result) return null;
+  if (typeof result.image === "string" && result.image.length > 100) return result.image;
+  if (result instanceof Uint8Array) return bytesToBase64(result);
+  if (result instanceof ArrayBuffer) return bytesToBase64(new Uint8Array(result));
+  if (result && typeof result.response === "string" && result.response.length > 100) return result.response;
+  if (result && typeof result.getReader === "function") {
+    // ReadableStream — 전체를 모아 바이트 배열로 변환.
+    const reader = result.getReader();
+    const chunks = [];
+    let total = 0;
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (value) {
+        chunks.push(value);
+        total += value.length;
+      }
+    }
+    if (total === 0) return null;
+    const merged = new Uint8Array(total);
+    let offset = 0;
+    for (const chunk of chunks) {
+      merged.set(chunk, offset);
+      offset += chunk.length;
+    }
+    return bytesToBase64(merged);
+  }
+  return null;
+}
+
+/**
+ * env.AI 바인딩으로 스타일에 맞는 모델 체인을 순서대로 1회씩 시도한다.
+ * 각 모델 호출은 개별 타임아웃을 두고, 실패(바인딩 없음/예외/타임아웃/
+ * 빈 응답)하면 즉시 다음 모델로 넘어간다. 체인 전체가 실패하면 null을
+ * 반환해 헤드리스 카드 폴백으로 넘어가게 한다(예외를 던지지 않음).
+ */
+async function tryWorkersAiChain(env, prompt, style) {
   if (!env || !env.AI || typeof env.AI.run !== "function") return null;
 
   const cleanPrompt = sanitizePrompt(prompt);
   if (!cleanPrompt) return null;
 
-  try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 25000);
+  const chain = getModelChainForStyle(style);
 
-    const result = await env.AI.run(
-      FLUX_MODEL,
-      { prompt: cleanPrompt, steps: 4 },
-      { signal: controller.signal }
-    );
-    clearTimeout(timeout);
+  for (const model of chain) {
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 25000);
 
-    // Workers AI의 flux-1-schnell은 { image: "<base64 jpeg>" } 형태이거나
-    // 런타임에 따라 ReadableStream/Uint8Array로 올 수도 있어 방어적으로 처리한다.
-    let base64 = null;
-    if (result && typeof result.image === "string" && result.image.length > 100) {
-      base64 = result.image;
-    } else if (result instanceof Uint8Array || result instanceof ArrayBuffer) {
-      base64 = bytesToBase64(result instanceof ArrayBuffer ? new Uint8Array(result) : result);
-    } else if (result && result.response && typeof result.response === "string") {
-      base64 = result.response;
+      const input = buildModelInput(model, cleanPrompt, style);
+      const result = await env.AI.run(model, input, { signal: controller.signal });
+      clearTimeout(timeout);
+
+      const base64 = await normalizeAiResult(result);
+      if (!base64) continue; // 이 모델은 빈 응답 — 다음 모델로 폴백
+
+      return {
+        success: true,
+        provider: "workers-ai-flux", // WordPress 플러그인이 이 값으로 "AI 생성 성공"을 판별하므로 하위 호환을 위해 고정 유지
+        engine: model,
+        generation_mode: "text_to_image_ai_model",
+        model,
+        model_chain_position: chain.indexOf(model) + 1,
+        model_chain_length: chain.length,
+        external_ai_used: true,
+        cloudflare_ai_binding_used: true,
+        cost_usd: 0,
+        format: "jpeg",
+        mime_type: "image/jpeg",
+        encoding: "base64",
+        image: base64,
+        image_base64: base64,
+        data_url: `data:image/jpeg;base64,${base64}`,
+        prompt: cleanPrompt,
+        prompt_used_for_model: buildModelPrompt(model, cleanPrompt, style),
+      };
+    } catch (err) {
+      // 이 모델이 없거나(계정에서 미지원), 무료 티어 뉴런 한도 초과, 타임아웃 등
+      // — 조용히 다음 모델로 폴백. 체인 전체가 실패해야만 헤드리스로 넘어간다.
+      continue;
     }
-
-    if (!base64) return null;
-
-    return {
-      success: true,
-      provider: "workers-ai-flux",
-      engine: FLUX_MODEL,
-      generation_mode: "text_to_image_ai_model",
-      model: FLUX_MODEL,
-      external_ai_used: true,
-      cloudflare_ai_binding_used: true,
-      cost_usd: 0,
-      format: "jpeg",
-      mime_type: "image/jpeg",
-      encoding: "base64",
-      image: base64,
-      image_base64: base64,
-      data_url: `data:image/jpeg;base64,${base64}`,
-      prompt: cleanPrompt,
-    };
-  } catch (err) {
-    // AI 바인딩이 없거나, 무료 티어 뉴런 한도 초과, 타임아웃 등 — 조용히 폴백.
-    return null;
   }
+
+  return null;
 }
 
 /* ────────────────────────────────────────────────────────────
@@ -319,11 +437,11 @@ export async function generatePromptImage(payload = {}, env = null) {
   const width = Math.max(512, Math.min(2048, parseInt(payload.width, 10) || 1600));
   const height = Math.max(512, Math.min(2048, parseInt(payload.height, 10) || 900));
 
-  // ① AI 이용 우선 시도 (flux-1-schnell, 요청당 1회만)
+  // ① AI 이용 우선 시도 (스타일별 모델 체인, 모델당 1회만)
   const preferHeadless = payload.provider === "headless" || payload.force_headless === true || payload.force_headless === "true";
   if (!preferHeadless) {
-    const fluxResult = await tryFluxImage(env, prompt || topic);
-    if (fluxResult) return fluxResult;
+    const aiResult = await tryWorkersAiChain(env, prompt || topic, style);
+    if (aiResult) return aiResult;
   }
 
   // ② 헤드리스 브라우저 방식(SVG 카드) — 항상 성공하는 최종 경로
@@ -353,9 +471,25 @@ export async function handleImage(request, env) {
     const result = await generatePromptImage(payload, env);
     return json(result);
   } catch (error) {
-    // 예외적인 경우에도 최종적으로 헤드리스 카드는 성공해야 하므로, 여기까지
-    // 오면 그 자체가 심각한 버그다 — 원인을 그대로 노출한다.
-    return json({ error: String(error?.message || error), success: false }, 500);
+    // generatePromptImage 내부의 AI 체인은 이미 모든 예외를 삼키고 헤드리스
+    // 카드로 폴백하므로, 여기까지 예외가 올라오는 경우는 헤드리스 카드 생성
+    // 자체가 실패한 것뿐이다(예: sanitizePrompt 전 잘못된 payload 타입 등).
+    // 그런 경우에도 완전히 빈 손으로 500을 반환하지 않도록, 최소한의 안전
+    // 헤드리스 카드를 한 번 더 직접 시도한 뒤에만 최종 오류로 넘어간다.
+    try {
+      const safeStyle = String(payload && payload.style || "poster").toLowerCase();
+      const fallback = generateHeadlessCard({
+        prompt: sanitizePrompt(payload && (payload.prompt || payload.q) || "이미지"),
+        topic: sanitizePrompt(payload && (payload.topic || payload.prompt) || "이미지"),
+        subtitle: "",
+        style: safeStyle,
+        width: 1600,
+        height: 900,
+      });
+      return json(fallback);
+    } catch (innerError) {
+      return json({ error: String(error?.message || error), success: false }, 500);
+    }
   }
 }
 

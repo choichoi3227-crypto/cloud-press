@@ -56,7 +56,7 @@ Cloudflare Pages(Functions)로 배포하는 경우 `functions/api/search.js`, `f
 
 - `search-core.js` — 검색 스크래핑 공통 로직(파서, 엔진 정의, CORS 등). Worker와 Pages Functions가 공유합니다.
 - `research-core.js` — 규칙 기반 주제 조사 로직 + 선택적 Workers AI 보강 로직.
-- `image-core.js` — 외부 의존성 없이 프롬프트를 자율형 neural-field BMP 비트맵 이미지로 생성하는 자체 이미지 엔진.
+- `image-core.js` — `/api/image` 썸네일 이미지 생성 엔진. ① Workers AI 바인딩이 있으면 스타일별 모델 체인(FLUX.1 schnell/2 dev, SDXL Base/Lightning, DreamShaper)으로 실제 텍스트→이미지 생성을 시도하고, ② 실패하거나 바인딩이 없으면 배경 그라디언트·블러 도형·주제 카테고리별 아이콘·자동 맞춤 타이포그래피를 갖춘 SVG 카드를 항상 성공적으로 렌더링합니다(외부 의존성 없음).
 - `research-handler.js` — `/api/research` 요청 처리(인증, 검증, 응답 조립).
 - `worker-search.js` — Cloudflare Workers 진입점(`/api/search`, `/api/research`, 문서 페이지).
 - `functions/api/search.js`, `functions/api/research.js`, `functions/api/image.js` — Cloudflare Pages Functions 진입점.

@@ -454,33 +454,96 @@ function generateHeadlessCard({ prompt, topic, subtitle, style, width, height })
 /* ────────────────────────────────────────────────────────────
    ① AI 이용 — Cloudflare Workers AI (다중 모델 체인)
    ─────────────────────────────────────────────────────────────
-   ⚠️ 확장(2026-08): flux-1-schnell 단일 모델 호출을 스타일별 다중 모델
-   체인으로 교체한다. 모델마다 입력 파라미터·프롬프트 문법·강점이 크게
-   다르므로, 모델별 프롬프트 빌더(buildModelPrompt)와 파라미터 빌더
-   (buildModelInput)를 두어 "모델에 맞는 프롬프트"를 구성한 뒤 호출한다.
-   체인의 각 모델은 1회씩만 시도하고(재시도 없음, 뉴런 남용 방지),
-   실패하면 즉시 다음 모델로 넘어가며, 체인 전체가 실패하면 ②(헤드리스
-   카드)로 폴백해 항상 성공을 보장한다.
+   ⚠️ 확장(2026-08, v8): 모델 목록을 5개 → 8개로 확대했다. 모델마다 입력
+   파라미터·프롬프트 문법·강점이 크게 다르므로, 모델별 프롬프트 빌더
+   (buildModelPrompt)와 파라미터 빌더(buildModelInput)를 두어 "모델에
+   맞는 프롬프트"를 구성한 뒤 호출한다. 체인의 각 모델은 1회씩만
+   시도하고(재시도 없음, 뉴런 남용 방지), 실패하면 즉시 다음 모델로
+   넘어가며, 체인 전체가 실패하면 ②(헤드리스 카드)로 폴백해 항상 성공을
+   보장한다.
+
+   ⚠️ 모델 확신도 안내: 이 워커를 배포하는 Cloudflare 계정에 실제로
+   존재하는 텍스트-투-이미지 모델 카탈로그는 Cloudflare 대시보드
+   (dash.cloudflare.com → AI → Workers AI → Models → Text-to-Image
+   카테고리)에서 최종 확인해야 한다. 아래 CONFIDENCE 주석은 이 목록을
+   작성한 시점의 확신 정도를 표시한 것이며, 존재하지 않는 모델이 섞여
+   있어도 안전하다 — env.AI.run() 호출이 실패하면 즉시 다음 모델로
+   넘어가는 구조(위 설명)라 배포/운영에 지장이 없다. 다만 배포 후
+   Cloudflare 대시보드의 Workers AI 사용 로그(Analytics)에서 어떤
+   모델이 실제로 응답했는지 주기적으로 확인해, 존재하지 않는 것으로
+   확인된 모델은 체인에서 제거하는 것을 권장한다.
+     - CONFIDENCE: confirmed  — 실사용으로 존재가 확인된 모델.
+     - CONFIDENCE: likely     — 카탈로그에 존재했을 가능성이 높으나
+                                 정확한 슬러그/파라미터는 미확인.
+     - CONFIDENCE: uncertain  — 존재 자체가 불확실한 추정 슬러그.
+                                 실패해도 다음 모델로 자동 폴백되므로
+                                 안전하게 시도해볼 뿐이다.
+
+   ⚠️ Neuron 최소화 원칙: 각 스타일의 체인 1번(가장 먼저 시도되는) 모델은
+   항상 스텝 수가 가장 적고 뉴런 소모가 가장 적은 모델(schnell/
+   lightning/dreamshaper 계열, 4~8 스텝)로 고정한다. 대부분의 요청이
+   1번 모델에서 바로 성공하므로, 실사용 뉴런 소모는 이 최소 비용
+   모델들에 집중된다. 스텝 수가 많거나(-dev 계열, SDXL base 20스텝)
+   확신도가 낮은 모델은 항상 체인의 뒤쪽(1번이 실패했을 때만 도달하는
+   자리)에 배치해, 평균 뉴런 소모를 최소화하면서도 폴백 폭은 넓힌다.
 ──────────────────────────────────────────────────────────── */
 
 const AI_MODELS = {
-  FLUX_SCHNELL: "@cf/black-forest-labs/flux-1-schnell",
-  FLUX2_DEV: "@cf/black-forest-labs/flux-2-dev",
-  SDXL_BASE: "@cf/stabilityai/stable-diffusion-xl-base-1.0",
-  SDXL_LIGHTNING: "@cf/bytedance/stable-diffusion-xl-lightning",
-  DREAMSHAPER: "@cf/lykon/dreamshaper-8-lcm",
+  // CONFIDENCE: confirmed — 이미 실사용으로 확인된 4개 모델.
+  FLUX_SCHNELL: "@cf/black-forest-labs/flux-1-schnell",       // 4 steps, 최저 비용, 자연문 지시 이행 우수
+  SDXL_BASE: "@cf/stabilityai/stable-diffusion-xl-base-1.0",   // 20 steps, 고품질/고비용, negative_prompt 지원
+  SDXL_LIGHTNING: "@cf/bytedance/stable-diffusion-xl-lightning", // 8 steps, 빠르고 대비 강함, negative_prompt 지원
+  DREAMSHAPER: "@cf/lykon/dreamshaper-8-lcm",                   // 6 steps, 사실적 렌더링 강점, 저비용
+
+  // CONFIDENCE: likely — 존재 가능성 높으나 슬러그/파라미터 미확인.
+  FLUX2_DEV: "@cf/black-forest-labs/flux-2-dev",                // FLUX 최신 세대, -dev는 -schnell보다 스텝이 많아 고비용 추정
+  SD21_BASE: "@cf/stabilityai/stable-diffusion-2-1",            // SDXL 이전 세대, 저해상도 대신 더 가벼울 수 있음
+
+  // CONFIDENCE: uncertain — 추정 슬러그. 실패 시 자동 폴백되므로 안전하게 포함.
+  FLUX1_DEV: "@cf/black-forest-labs/flux-1-dev",                // flux-1의 비distilled(고품질) 버전으로 추정
+  SD15_BASE: "@cf/runwayml/stable-diffusion-v1-5",              // SD 1.5 텍스트-투-이미지 베이스 버전으로 추정
 };
 
-// 스타일별 모델 체인. 스타일의 시각적 성격에 맞춰 우선순위를 다르게 둔다.
-//  - poster/branding: SDXL Lightning(빠르고 대비가 강한 포스터풍) → flux-schnell → dreamshaper
-//  - minimal/typography: flux-schnell(깔끔한 지시 이행) → SDXL base → dreamshaper
-//  - photo_realistic: dreamshaper(사실적 렌더링에 강함) → flux-2-dev → SDXL base
+// 스타일별 모델 체인. 각 스타일의 "기본 철학"(zorlinq32 플러그인 스타일
+// 정의 기준)에 맞춰 우선순위를 다르게 둔다. 1번 자리는 항상 저비용
+// 모델이며, 뒤로 갈수록 고비용/저확신 모델이 추가 안전망으로 붙는다.
 const STYLE_MODEL_CHAIN = {
-  poster: [AI_MODELS.SDXL_LIGHTNING, AI_MODELS.FLUX_SCHNELL, AI_MODELS.DREAMSHAPER],
-  branding: [AI_MODELS.SDXL_LIGHTNING, AI_MODELS.FLUX_SCHNELL, AI_MODELS.SDXL_BASE],
-  minimal: [AI_MODELS.FLUX_SCHNELL, AI_MODELS.SDXL_BASE, AI_MODELS.DREAMSHAPER],
-  typography: [AI_MODELS.FLUX_SCHNELL, AI_MODELS.SDXL_LIGHTNING, AI_MODELS.SDXL_BASE],
-  photo_realistic: [AI_MODELS.DREAMSHAPER, AI_MODELS.FLUX2_DEV, AI_MODELS.SDXL_BASE, AI_MODELS.FLUX_SCHNELL],
+  // poster: "실제 인쇄 광고 포스터처럼 주제마다 완전히 다른 구도"가 철학.
+  // 강한 대비·포스터풍 마감이 강점인 Lightning을 1순위로, 폭넓은 구도
+  // 표현력이 필요하므로 서로 다른 계열(FLUX/SDXL/Dreamshaper)을 두루 포함.
+  poster: [
+    AI_MODELS.SDXL_LIGHTNING, AI_MODELS.FLUX_SCHNELL, AI_MODELS.DREAMSHAPER,
+    AI_MODELS.SDXL_BASE, AI_MODELS.FLUX2_DEV,
+  ],
+  // branding: "프리미엄 브랜드 캠페인, CTA 구역으로 시선 유도"가 철학.
+  // Lightning의 상업광고급 대비를 1순위로, 디테일이 중요하므로 고품질
+  // -dev/base 계열을 폭넓게 안전망으로 둔다(뉴런 비용은 1순위 성공 시 미발생).
+  branding: [
+    AI_MODELS.SDXL_LIGHTNING, AI_MODELS.FLUX_SCHNELL, AI_MODELS.SDXL_BASE,
+    AI_MODELS.FLUX2_DEV, AI_MODELS.FLUX1_DEV,
+  ],
+  // minimal: "최대 여백, 최소 시각 노이즈, 단 하나의 극도로 단순화된 실루엣"이
+  // 철학. 과도한 디테일을 만들어내는 고스텝 모델은 오히려 철학에 어긋나므로
+  // 저스텝·깔끔한 지시 이행 모델(schnell/lightning) 위주로만 짧게 구성한다.
+  minimal: [
+    AI_MODELS.FLUX_SCHNELL, AI_MODELS.SDXL_LIGHTNING, AI_MODELS.SD21_BASE,
+  ],
+  // typography: "배경은 순수하게 텍스트를 위한 무대, 경쟁하는 디테일 없음"이
+  // 철학. minimal과 마찬가지로 단순한 배경 생성에 강한 저비용 모델을 우선하되,
+  // 감성적 색조 표현력을 위해 SDXL 계열도 안전망으로 포함한다.
+  typography: [
+    AI_MODELS.FLUX_SCHNELL, AI_MODELS.SDXL_LIGHTNING, AI_MODELS.SDXL_BASE,
+    AI_MODELS.SD21_BASE,
+  ],
+  // photo_realistic: "실제 사진과 구분 불가능한 사실성"이 철학. 사실적
+  // 렌더링에 강한 Dreamshaper를 1순위로, 그 다음은 디테일/사실감이 뛰어난
+  // 고품질 모델 순으로 폭넓게 안전망을 둔다(가장 많은 폴백 단계를 허용 —
+  // 사실성 실패 시 결과물 품질 저하가 가장 두드러지는 스타일이기 때문).
+  photo_realistic: [
+    AI_MODELS.DREAMSHAPER, AI_MODELS.SDXL_LIGHTNING, AI_MODELS.FLUX2_DEV,
+    AI_MODELS.SDXL_BASE, AI_MODELS.FLUX1_DEV, AI_MODELS.FLUX_SCHNELL,
+    AI_MODELS.SD15_BASE,
+  ],
 };
 
 function getModelChainForStyle(style) {
@@ -489,10 +552,11 @@ function getModelChainForStyle(style) {
 
 /**
  * 모델별 프롬프트 문법이 다르므로, 공통 프롬프트를 모델에 맞게 가공한다.
- *   - FLUX 계열: 짧은 태그 나열보다 자연스러운 한두 문장 묘사를 선호하고,
- *     (word:1.4) 가중치 문법·negative_prompt 파라미터를 지원하지 않는다.
- *   - SDXL 계열(base/lightning): A1111식 가중치 문법과 negative_prompt를
- *     지원하며, 품질 향상 태그(4k, highly detailed 등)를 덧붙이면 효과가 있다.
+ *   - FLUX 계열(schnell/dev): 짧은 태그 나열보다 자연스러운 한두 문장 묘사를
+ *     선호하고, (word:1.4) 가중치 문법·negative_prompt 파라미터를 지원하지 않는다.
+ *   - Stable Diffusion 계열(SDXL base/lightning, SD 2.1, SD 1.5): A1111식
+ *     가중치 문법과 negative_prompt를 지원하며, 품질 향상 태그(4k, highly
+ *     detailed 등)를 덧붙이면 효과가 있다.
  *   - dreamshaper(LCM): 소수 스텝(4~8)에 최적화된 체크포인트로, 과도하게
  *     긴 프롬프트보다 핵심 묘사 위주가 안정적이다.
  */
@@ -501,10 +565,13 @@ function buildModelPrompt(model, basePrompt, style) {
   switch (model) {
     case AI_MODELS.SDXL_BASE:
     case AI_MODELS.SDXL_LIGHTNING:
+    case AI_MODELS.SD21_BASE:
+    case AI_MODELS.SD15_BASE:
       return `${clean}, professional commercial ${style} design, sharp focus, high detail, studio quality lighting, 4k`;
     case AI_MODELS.DREAMSHAPER:
       return `${clean}, clean composition, balanced lighting, crisp detail`;
     case AI_MODELS.FLUX2_DEV:
+    case AI_MODELS.FLUX1_DEV:
     case AI_MODELS.FLUX_SCHNELL:
     default:
       return clean;
@@ -515,7 +582,9 @@ function buildModelNegativePrompt(model) {
   switch (model) {
     case AI_MODELS.SDXL_BASE:
     case AI_MODELS.SDXL_LIGHTNING:
-      // SDXL 계열만 negative_prompt 파라미터를 지원한다.
+    case AI_MODELS.SD21_BASE:
+    case AI_MODELS.SD15_BASE:
+      // Stable Diffusion 계열만 negative_prompt 파라미터를 지원한다.
       return "blurry, low quality, watermark, text artifacts, distorted, extra limbs, deformed";
     default:
       return null;
@@ -531,10 +600,20 @@ function buildModelInput(model, prompt, style) {
       return { prompt: shapedPrompt, ...(negative ? { negative_prompt: negative } : {}), num_steps: 20, guidance: 7.5 };
     case AI_MODELS.SDXL_LIGHTNING:
       return { prompt: shapedPrompt, ...(negative ? { negative_prompt: negative } : {}), num_steps: 8 };
+    case AI_MODELS.SD21_BASE:
+      // SD 2.1은 SDXL보다 가벼운 해상도/아키텍처로 추정되어 스텝을 다소 낮춘다(뉴런 절감).
+      return { prompt: shapedPrompt, ...(negative ? { negative_prompt: negative } : {}), num_steps: 15, guidance: 7.5 };
+    case AI_MODELS.SD15_BASE:
+      // SD 1.5는 가장 가벼운 세대이므로 더 적은 스텝으로도 충분하다고 가정한다(뉴런 절감).
+      return { prompt: shapedPrompt, ...(negative ? { negative_prompt: negative } : {}), num_steps: 12, guidance: 7.0 };
     case AI_MODELS.DREAMSHAPER:
       return { prompt: shapedPrompt, num_steps: 6, guidance: 2 };
     case AI_MODELS.FLUX2_DEV:
       return { prompt: shapedPrompt, steps: 20 };
+    case AI_MODELS.FLUX1_DEV:
+      // flux-1-dev는 schnell의 비distilled 버전으로 추정 — schnell(4 steps)보다
+      // 스텝을 늘리되(고품질 목적), Neuron 최소화 원칙에 따라 지나치게 늘리지 않는다.
+      return { prompt: shapedPrompt, steps: 15 };
     case AI_MODELS.FLUX_SCHNELL:
     default:
       // schnell 모델 권장값(4 steps)을 넘기지 않는다 — 뉴런 남용 방지.

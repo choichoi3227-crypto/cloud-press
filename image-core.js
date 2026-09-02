@@ -219,6 +219,69 @@ function pickTheme(style) {
   return STYLE_THEMES[style] || STYLE_THEMES.poster;
 }
 
+/**
+ * 스타일별 레이아웃 구조. 색상(STYLE_THEMES)만으로는 스타일 간 차이가
+ * 옅어(패널 위치·크기·정렬이 전부 동일하면 결국 "색만 다른 같은 카드"가
+ * 됨), 각 스타일의 실제 디자인 철학에 맞춰 패널 기하·타이포 스케일·
+ * 장식 요소 유무 자체를 다르게 정의한다.
+ *
+ *  - poster: 화면 대부분을 차지하는 대형 중앙 패널, 큰 타이틀 — 실제
+ *    인쇄 포스터처럼 강한 존재감.
+ *  - minimal: 좌상단의 작은 텍스트 블록 + 나머지는 여백 — 도형 하나만
+ *    남기는 절제된 구성. 타이틀 최대 크기도 다른 스타일보다 작게 제한.
+ *  - typography: 텍스트가 화면 대부분을 차지하는 초대형 폰트, 글리프도
+ *    끄고 액센트 바만 살짝 — "텍스트가 곧 비주얼"인 스타일.
+ *  - branding: 좌하단 정렬 + 상단에 짧은 액센트 바(CTA 느낌), 패널은
+ *    화면 하단 60%만 차지.
+ *  - photo_realistic: 유리질 패널 자체를 없애고(showPanel:false) 배경
+ *    전체에 텍스트를 얹어 사진 위에 캡션이 있는 듯한 느낌.
+ *
+ * 모든 스타일 공통: showBadge/showWatermark 항목 자체가 없다 — 스타일명이나
+ * 정형 문구를 이미지에 넣는 로직을 완전히 제거했기 때문이다.
+ */
+const STYLE_LAYOUTS = {
+  poster: {
+    panelX: (w) => w * 0.08, panelY: (h) => h * 0.10,
+    panelW: (w) => w * 0.72, panelH: (h) => h * 0.80,
+    pad: 56, panelRadius: 40, showPanel: true,
+    maxTitleLines: 3, maxTitleFont: 100, minTitleFont: 44, titleOffsetY: 170,
+    subtitleFont: 32, showGlyph: true, glyphSize: 130, glyphOpacity: 0.18, glyphAlign: "right",
+    showAccentBar: false, reserveGlyph: true, bigShapeR: 360,
+  },
+  minimal: {
+    panelX: (w) => w * 0.10, panelY: (h) => h * 0.14,
+    panelW: (w) => w * 0.55, panelH: (h) => h * 0.34,
+    pad: 40, panelRadius: 28, showPanel: false,
+    maxTitleLines: 2, maxTitleFont: 60, minTitleFont: 32, titleOffsetY: 60,
+    subtitleFont: 24, showGlyph: true, glyphSize: 64, glyphOpacity: 0.5, glyphAlign: "left",
+    showAccentBar: false, reserveGlyph: false, bigShapeR: 260,
+  },
+  typography: {
+    panelX: (w) => w * 0.09, panelY: (h) => h * 0.20,
+    panelW: (w) => w * 0.82, panelH: (h) => h * 0.62,
+    pad: 40, panelRadius: 0, showPanel: false,
+    maxTitleLines: 3, maxTitleFont: 128, minTitleFont: 52, titleOffsetY: 140,
+    subtitleFont: 30, showGlyph: false, glyphSize: 0, glyphOpacity: 0, glyphAlign: "left",
+    showAccentBar: true, reserveGlyph: false, bigShapeR: 300,
+  },
+  branding: {
+    panelX: (w) => w * 0.08, panelY: (h) => h * 0.42,
+    panelW: (w) => w * 0.62, panelH: (h) => h * 0.46,
+    pad: 48, panelRadius: 32, showPanel: true,
+    maxTitleLines: 2, maxTitleFont: 80, minTitleFont: 40, titleOffsetY: 100,
+    subtitleFont: 28, showGlyph: true, glyphSize: 100, glyphOpacity: 0.22, glyphAlign: "right",
+    showAccentBar: true, reserveGlyph: true, bigShapeR: 320,
+  },
+  photo_realistic: {
+    panelX: (w) => w * 0.08, panelY: (h) => h * 0.55,
+    panelW: (w) => w * 0.84, panelH: (h) => h * 0.32,
+    pad: 44, panelRadius: 0, showPanel: false,
+    maxTitleLines: 2, maxTitleFont: 72, minTitleFont: 36, titleOffsetY: 60,
+    subtitleFont: 26, showGlyph: true, glyphSize: 90, glyphOpacity: 0.14, glyphAlign: "right",
+    showAccentBar: false, reserveGlyph: true, bigShapeR: 420,
+  },
+};
+
 // 한글이 네모(□)로 깨지지 않도록, 서버/브라우저에 흔히 설치되어 있는 한글
 // 웹폰트를 우선순위대로 나열한다. 시스템 폰트 렌더러(SVG rasterizer, 브라우저,
 // WordPress 미디어 라이브러리 썸네일 등)는 목록의 첫 번째로 발견되는 폰트를
@@ -324,44 +387,72 @@ function renderCardSvg({ topic, subtitle, style, width = 1600, height = 900 }) {
   const seed = hashString(`${topic}|${style}`);
   const category = detectCategory(`${topic} ${subtitle}`);
   const glyphPath = categoryGlyphPath(category);
-
-  const panelX = 80, panelY = 80, panelW = width - 160, panelH = height - 160;
-  const panelInnerPad = 48;
-  const titleAvailableWidth = panelW - panelInnerPad * 2 - 40; // 우측 글리프와 겹치지 않도록 여유 확보
-
-  const { fontSize: titleFontSize, lines: titleLines } = fitTitle(topic, titleAvailableWidth, 3, 92, 40);
-  const titleLineHeight = titleFontSize * 1.12;
-
-  const subtitleAvailableWidth = (panelW - panelInnerPad * 2) * WIDTH_SAFETY_FACTOR;
-  const subtitleSource = subtitle && subtitle !== topic ? subtitle : `Visual concept for ${topic}`;
-  const subtitleFontSize = 30;
-  const subtitleLines = wrapTextByWidth(subtitleSource, subtitleAvailableWidth / subtitleFontSize, 2);
-
-  // 상단 작은 배지 칩(주제 원문 미리보기)도 패널 폭을 넘지 않도록 같은
-  // 폭 기반 줄바꿈 함수로 1줄만 뽑아 사용한다(기존의 고정 24자 슬라이스는
-  // 한글처럼 넓은 문자에서 칩 배경보다 텍스트가 길어지는 문제가 있었다).
-  const badgeChipMaxWidthEm = ((panelW - panelInnerPad * 2 - 40) * WIDTH_SAFETY_FACTOR) / 18;
-  const badgeChipText = wrapTextByWidth(topic, badgeChipMaxWidthEm, 1)[0] || topic.slice(0, 24);
-
-  const badgeLabel = `${style.charAt(0).toUpperCase()}${style.slice(1)} style thumbnail`;
+  const layout = STYLE_LAYOUTS[style] || STYLE_LAYOUTS.poster;
 
   // shape 위치는 seed로 살짝 변주해 스타일이 같아도 매번 완전히 동일하진 않게 한다.
   const shapeOffsetX = -120 + (seed % 60);
   const shapeOffsetY = 120 + ((seed >> 4) % 60);
+
+  // ⚠️ 이미지에 들어가는 텍스트는 오직 "실제 주제(topic)"와, 있는 경우
+  // "실제 조사된 부제(subtitle)"만 사용한다. "Poster style thumbnail" 같은
+  // 스타일명 배지나 "Visual concept for X" 같은 정형 문구, 하단 워터마크
+  // 문구는 주제와 무관한 상투어라 절대 넣지 않는다 — 주제가 있는 그대로
+  // 화면을 채우도록 배지/워터마크 자체를 레이아웃에서 제거했다(아래
+  // layout.showBadge / layout.showWatermark가 항상 false).
+  const panelX = layout.panelX(width);
+  const panelY = layout.panelY(height);
+  const panelW = layout.panelW(width);
+  const panelH = layout.panelH(height);
+  const panelInnerPad = layout.pad;
+  const titleAvailableWidth = panelW - panelInnerPad * 2 - (layout.reserveGlyph ? 40 : 0);
+
+  const { fontSize: titleFontSize, lines: titleLines } = fitTitle(
+    topic, titleAvailableWidth, layout.maxTitleLines, layout.maxTitleFont, layout.minTitleFont
+  );
+  const titleLineHeight = titleFontSize * 1.12;
+
+  const subtitleAvailableWidth = (panelW - panelInnerPad * 2) * WIDTH_SAFETY_FACTOR;
+  const subtitleFontSize = layout.subtitleFont;
+  // 실제로 조사된 부제가 없으면, 정형 문구를 채워 넣는 대신 부제 자체를
+  // 생략한다(빈 문장을 억지로 만들어내지 않음 — 주제와 무관한 텍스트를
+  // 이미지에 넣지 않는다는 원칙을 부제에도 동일하게 적용).
+  const hasRealSubtitle = Boolean(subtitle && subtitle.trim() && subtitle.trim() !== topic.trim());
+  const subtitleLines = hasRealSubtitle
+    ? wrapTextByWidth(subtitle, subtitleAvailableWidth / subtitleFontSize, 2)
+    : [];
 
   const titleTspans = titleLines
     .map((line, i) => `<tspan x="${panelX + panelInnerPad}" dy="${i === 0 ? 0 : titleLineHeight}">${escapeXml(line)}</tspan>`)
     .join("");
 
   const subtitleLineGap = subtitleFontSize * 1.45;
-  const subtitleY = panelY + panelH - panelInnerPad - (subtitleLines.length - 1) * subtitleLineGap - 40;
+  const titleBlockHeight = titleLines.length * titleLineHeight;
+  const titleY = panelY + layout.titleOffsetY;
+  const subtitleY = titleY + titleBlockHeight + subtitleFontSize + 8;
   const subtitleTspans = subtitleLines
     .map((line, i) => `<tspan x="${panelX + panelInnerPad}" dy="${i === 0 ? 0 : subtitleLineGap}">${escapeXml(line)}</tspan>`)
     .join("");
 
-  const glyphSize = 120;
-  const glyphX = width - 100 - glyphSize;
+  const glyphSize = layout.glyphSize;
+  const glyphX = layout.glyphAlign === "left" ? panelX + panelInnerPad : width - 100 - glyphSize;
   const glyphY = height - 100 - glyphSize;
+
+  const panelRect = layout.showPanel
+    ? `<g filter="url(#panelShadow)"><rect x="${panelX}" y="${panelY}" width="${panelW}" height="${panelH}" rx="${layout.panelRadius}" fill="${theme.panel}" stroke="rgba(255,255,255,0.08)" stroke-width="1"/></g>`
+    : "";
+
+  const accentBar = layout.showAccentBar
+    ? `<rect x="${panelX + panelInnerPad}" y="${titleY - titleFontSize - 24}" width="72" height="6" rx="3" fill="${theme.accent}"/>`
+    : "";
+
+  const glyphMarkup = layout.showGlyph
+    ? `<g transform="translate(${glyphX}, ${glyphY})" opacity="${layout.glyphOpacity}">
+    <rect x="0" y="0" width="${glyphSize}" height="${glyphSize}" rx="28" fill="${theme.accent}"/>
+    <g transform="translate(${glyphSize * 0.2}, ${glyphSize * 0.2}) scale(${(glyphSize * 0.6) / 24})">
+      <path d="${glyphPath}" fill="none" stroke="${theme.text}" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round"/>
+    </g>
+  </g>`
+    : "";
 
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">
   <defs>
@@ -378,34 +469,21 @@ function renderCardSvg({ topic, subtitle, style, width = 1600, height = 900 }) {
 
   <rect x="0" y="0" width="${width}" height="${height}" fill="url(#bgGrad)"/>
 
-  <circle cx="${shapeOffsetX}" cy="${shapeOffsetY}" r="340" fill="${theme.shape}" filter="url(#blurLg)"/>
+  <circle cx="${shapeOffsetX}" cy="${shapeOffsetY}" r="${layout.bigShapeR}" fill="${theme.shape}" filter="url(#blurLg)"/>
   <ellipse cx="${width - 100}" cy="${height - 80}" rx="260" ry="240" fill="${theme.accent}" opacity="0.22" filter="url(#blurMd)" transform="rotate(22 ${width - 100} ${height - 80})"/>
   <rect x="220" y="${height * 0.58}" width="660" height="220" rx="120" fill="${theme.accent2}" opacity="0.14" filter="url(#blurMd)"/>
 
-  <rect x="${width - 320}" y="80" width="240" height="60" rx="28" fill="rgba(255,255,255,0.1)"/>
-  <text x="${width - 200}" y="118" text-anchor="middle" font-family="${FONT_STACK}" font-size="16" letter-spacing="2" fill="${theme.text}" fill-opacity="0.9" font-weight="600">${escapeXml(badgeLabel.toUpperCase())}</text>
-
-  <g filter="url(#panelShadow)">
-    <rect x="${panelX}" y="${panelY}" width="${panelW}" height="${panelH}" rx="36" fill="${theme.panel}" stroke="rgba(255,255,255,0.08)" stroke-width="1"/>
-  </g>
+  ${panelRect}
 
   <!-- 카테고리 심볼: 주제의 종류를 시각적으로 구분해, 모든 주제가 동일한
        카드로 보이는 문제를 완화한다 (예: 메신저/기기/여행/금융 등). -->
-  <g transform="translate(${glyphX}, ${glyphY})" opacity="0.16">
-    <rect x="0" y="0" width="${glyphSize}" height="${glyphSize}" rx="28" fill="${theme.accent}"/>
-    <g transform="translate(${glyphSize * 0.2}, ${glyphSize * 0.2}) scale(${(glyphSize * 0.6) / 24})">
-      <path d="${glyphPath}" fill="none" stroke="${theme.text}" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round"/>
-    </g>
-  </g>
+  ${glyphMarkup}
 
-  <rect x="${panelX + panelInnerPad}" y="${panelY + panelInnerPad}" width="${Math.min(panelW - panelInnerPad * 2, estTextWidthEm(badgeChipText) * 18 + 70)}" height="52" rx="26" fill="rgba(255,255,255,0.08)"/>
-  <text x="${panelX + panelInnerPad + 20}" y="${panelY + panelInnerPad + 34}" font-family="${FONT_STACK}" font-size="18" letter-spacing="1" fill="${theme.text}" fill-opacity="0.9">${escapeXml(badgeChipText)}</text>
+  ${accentBar}
 
-  <text x="${panelX + panelInnerPad}" y="${panelY + panelInnerPad + 130}" font-family="${FONT_STACK}" font-size="${titleFontSize}" font-weight="800" letter-spacing="-1" fill="${theme.text}">${titleTspans}</text>
+  <text x="${panelX + panelInnerPad}" y="${titleY}" font-family="${FONT_STACK}" font-size="${titleFontSize}" font-weight="800" letter-spacing="-1" fill="${theme.text}">${titleTspans}</text>
 
-  <text x="${panelX + panelInnerPad}" y="${subtitleY}" font-family="${FONT_STACK}" font-size="${subtitleFontSize}" fill="${theme.text}" fill-opacity="0.85">${subtitleTspans}</text>
-
-  <text x="${panelX + panelInnerPad}" y="${panelY + panelH - 20}" font-family="${FONT_STACK}" font-size="15" fill="${theme.text}" fill-opacity="0.6">cloud-press · headless card renderer</text>
+  ${hasRealSubtitle ? `<text x="${panelX + panelInnerPad}" y="${subtitleY}" font-family="${FONT_STACK}" font-size="${subtitleFontSize}" fill="${theme.text}" fill-opacity="0.85">${subtitleTspans}</text>` : ""}
 </svg>`;
 
   return svg;

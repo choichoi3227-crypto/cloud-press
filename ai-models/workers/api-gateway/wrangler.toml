@@ -1,0 +1,33 @@
+name = "cloud-press-api-gateway"
+main = "src/index.ts"
+compatibility_date = "2026-01-01"
+compatibility_flags = ["nodejs_compat"]
+
+[vars]
+INFERENCE_SERVER_URL = "http://localhost:8000"
+# WordPress cloud-press-deploy 플러그인이 조회할 수 있는 저장소 화이트리스트.
+# owner/repo 형식, 쉼표로 구분. 실제 배포 승인은 WordPress 쪽 다중 승인 로직이 담당하며
+# 이건 그 앞단의 2차 방어선일 뿐이다 (docs/12-github-deploy-plugin-spec.md 참조).
+DEPLOY_REPO_WHITELIST = "choichoi3227-crypto/cloud-press"
+
+# 아래는 `wrangler d1 create` / `wrangler kv namespace create` 실행 후
+# 출력되는 실제 id로 반드시 교체해야 합니다. (07-deployment-guide.md 참조)
+
+[[d1_databases]]
+binding = "DB"
+database_name = "cloud-press-db"
+database_id = "REPLACE_ME_AFTER_D1_CREATE"
+
+[[kv_namespaces]]
+binding = "RATE_LIMIT_KV"
+id = "REPLACE_ME_AFTER_KV_CREATE"
+
+[[kv_namespaces]]
+binding = "CACHE_KV"
+id = "REPLACE_ME_AFTER_KV_CREATE"
+
+# secrets (파일에 값 쓰지 말 것 — 아래 명령으로 각각 설정)
+# npx wrangler secret put INTERNAL_API_KEY    (Worker <-> 추론 서버)
+# npx wrangler secret put ADMIN_SECRET        (WordPress connector <-> Worker, 사용자 API 키 발급용)
+# npx wrangler secret put DEPLOY_PROXY_KEY    (WordPress deploy 플러그인 <-> Worker, GitHub 프록시용)
+# npx wrangler secret put GITHUB_TOKEN        (Worker -> GitHub API 조회용, repo 읽기 권한만 부여)

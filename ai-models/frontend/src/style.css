@@ -1,0 +1,313 @@
+/* ---------- 토큰 ---------- */
+:root {
+  --bg: #f7f5f0;
+  --ink: #1a1b1e;
+  --ink-soft: #52565c;
+  --line: #d8d4c9;
+  --blue: #3d5a80;
+  --blue-soft: #e8edf3;
+  --brick: #b0492f;
+  --brick-soft: #f5e9e4;
+  --green-ok: #3f7350;
+  --mono: "IBM Plex Mono", "SFMono-Regular", Consolas, monospace;
+  --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Pretendard, "Noto Sans KR", sans-serif;
+}
+
+* { box-sizing: border-box; }
+
+html { -webkit-text-size-adjust: 100%; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--sans);
+  line-height: 1.6;
+  font-size: 16px;
+}
+
+.wrap {
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 0 24px;
+}
+
+a { color: var(--blue); }
+
+/* ---------- 헤더 ---------- */
+.site-header {
+  border-bottom: 1px solid var(--line);
+  padding: 20px 0;
+}
+.site-header .wrap {
+  display: flex;
+  align-items: baseline;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.wordmark {
+  font-family: var(--mono);
+  font-weight: 600;
+  font-size: 1.05rem;
+  letter-spacing: -0.02em;
+}
+.tagline {
+  color: var(--ink-soft);
+  font-size: 0.9rem;
+}
+
+/* ---------- 인트로 ---------- */
+.intro {
+  padding: 56px 0 40px;
+}
+.intro h1 {
+  font-size: 1.9rem;
+  line-height: 1.35;
+  max-width: 20ch;
+  margin: 0 0 20px;
+  letter-spacing: -0.01em;
+}
+.intro p {
+  max-width: 62ch;
+  color: var(--ink-soft);
+  font-size: 1rem;
+}
+
+/* ---------- 콘솔 공통 ---------- */
+.console {
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 28px;
+  margin-bottom: 28px;
+  background: #fffdf9;
+}
+.console-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+.console-head h2 {
+  font-family: var(--mono);
+  font-size: 1.1rem;
+  margin: 0;
+}
+.console-desc {
+  color: var(--ink-soft);
+  font-size: 0.92rem;
+  margin: 0 0 20px;
+  max-width: 58ch;
+}
+
+.status-badge {
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: #eee;
+  color: var(--ink-soft);
+  white-space: nowrap;
+}
+.status-badge.online {
+  background: #e5f0e8;
+  color: var(--green-ok);
+}
+.status-badge.offline {
+  background: var(--brick-soft);
+  color: var(--brick);
+}
+
+/* ---------- 텍스트 콘솔 ---------- */
+.input-row {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+#text-input {
+  flex: 1;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  font-size: 0.95rem;
+  font-family: var(--sans);
+  background: #fff;
+  color: var(--ink);
+}
+#text-input:focus {
+  outline: 2px solid var(--blue);
+  outline-offset: 1px;
+}
+
+button {
+  font-family: var(--sans);
+  font-size: 0.92rem;
+  font-weight: 600;
+  border: none;
+  border-radius: 4px;
+  padding: 12px 20px;
+  cursor: pointer;
+  transition: opacity 0.15s ease;
+}
+button:hover { opacity: 0.88; }
+button:disabled { opacity: 0.5; cursor: not-allowed; }
+button:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
+}
+
+#text-submit { background: var(--blue); color: #fff; }
+#image-submit { background: var(--brick); color: #fff; }
+
+.output {
+  min-height: 64px;
+  padding: 16px 18px;
+  background: var(--blue-soft);
+  border-radius: 4px;
+  font-size: 0.95rem;
+}
+.output .placeholder {
+  color: var(--ink-soft);
+  margin: 0;
+}
+.output .response-line {
+  margin: 0;
+  color: var(--ink);
+}
+.output .error-line {
+  margin: 0;
+  color: var(--brick);
+}
+
+.example-row {
+  margin-top: 14px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.example-label {
+  font-size: 0.82rem;
+  color: var(--ink-soft);
+}
+.example-chip {
+  background: transparent;
+  border: 1px solid var(--line);
+  color: var(--ink-soft);
+  font-weight: 500;
+  font-size: 0.82rem;
+  padding: 6px 12px;
+  border-radius: 999px;
+}
+.example-chip:hover {
+  border-color: var(--blue);
+  color: var(--blue);
+  opacity: 1;
+}
+
+/* ---------- 이미지 콘솔 ---------- */
+.condition-row {
+  display: flex;
+  gap: 16px;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+}
+.field-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.field-group label {
+  font-size: 0.8rem;
+  color: var(--ink-soft);
+}
+.field-group select {
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: #fff;
+  font-family: var(--sans);
+  font-size: 0.92rem;
+  min-width: 120px;
+}
+
+.image-output {
+  background: var(--brick-soft);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 180px;
+}
+.image-output img {
+  width: 160px;
+  height: 160px;
+  image-rendering: pixelated;
+  border-radius: 4px;
+  border: 1px solid rgba(0,0,0,0.08);
+  background: #fff;
+}
+
+/* ---------- 정직한 스펙 섹션 ---------- */
+.honesty {
+  border-top: 1px solid var(--line);
+  padding: 44px 0 60px;
+}
+.honesty h2 {
+  font-size: 1.2rem;
+  margin: 0 0 24px;
+}
+.honesty-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 32px;
+}
+.honesty-grid h3 {
+  font-size: 0.9rem;
+  font-family: var(--mono);
+  margin: 0 0 12px;
+}
+.honesty-grid ul {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--ink-soft);
+  font-size: 0.92rem;
+}
+.honesty-grid li { margin-bottom: 8px; }
+
+.roadmap-note {
+  margin-top: 28px;
+  font-size: 0.88rem;
+  color: var(--ink-soft);
+}
+
+/* ---------- 푸터 ---------- */
+.site-footer {
+  border-top: 1px solid var(--line);
+  padding: 24px 0 40px;
+}
+.site-footer .wrap {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+}
+
+/* ---------- 반응형 ---------- */
+@media (max-width: 600px) {
+  .intro h1 { font-size: 1.5rem; }
+  .honesty-grid { grid-template-columns: 1fr; }
+  .input-row { flex-direction: column; }
+  #text-submit { width: 100%; }
+  .condition-row { flex-direction: column; align-items: stretch; }
+  .field-group select { width: 100%; }
+  #image-submit { width: 100%; }
+}
+
+/* ---------- 모션 최소화 존중 ---------- */
+@media (prefers-reduced-motion: reduce) {
+  * { transition: none !important; }
+}

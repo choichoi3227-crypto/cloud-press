@@ -1,2 +1,26 @@
+# --- 검색/이미지 API 프로젝트 (저장소 루트) ---
 node_modules/
 .wrangler/
+
+# --- Cloud Press AI 모델 프로젝트 (ai-models/) ---
+
+# Python
+ai-models/**/__pycache__/
+ai-models/**/*.pyc
+ai-models/**/*.pt
+ai-models/**/*.pth
+ai-models/**/.venv/
+ai-models/**/venv/
+
+# Node / Wrangler (ai-models 하위의 별도 Worker 프로젝트)
+ai-models/**/dist/
+ai-models/**/.dev.vars
+
+# 데이터 및 체크포인트 (용량 문제로 git에 포함하지 않음 — Drive/HF Hub에 별도 저장)
+ai-models/training/*/data/raw/*.jsonl
+ai-models/training/*/data/prepared/*.jsonl
+ai-models/training/*/data/*/images/
+ai-models/training/*/checkpoints/
+
+# OS
+.DS_Store

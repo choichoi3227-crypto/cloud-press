@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Cloud Press — Flash Texter &amp; Nano-Tech Artist</title>
+<meta name="description" content="직접 학습한 두 개의 소형 AI 모델, Flash Texter와 Nano-Tech Artist를 실시간으로 테스트합니다.">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header class="site-header">
+  <div class="wrap">
+    <span class="wordmark">Cloud Press</span>
+    <span class="tagline">직접 학습한 모델 두 개, 지금 이 페이지에서 실행됩니다</span>
+  </div>
+</header>
+
+<main class="wrap">
+
+  <section class="intro">
+    <h1>작게 시작해서, 매일 조금씩 나아지는 중입니다</h1>
+    <p>
+      Flash Texter와 Nano-Tech Artist는 Gemini나 Nano Banana 같은 거대 모델이 아닙니다.
+      수백 개의 대화 예시와, 코드로 직접 그린 도형 이미지로 학습한 작은 모델입니다.
+      완벽하진 않지만, 아래에서 직접 확인할 수 있습니다 — 지어낸 데모가 아니라 실제로 학습된 가중치가 응답합니다.
+    </p>
+  </section>
+
+  <section class="console" id="text-console">
+    <div class="console-head">
+      <h2>Flash Texter</h2>
+      <span class="status-badge" id="text-status">확인 중…</span>
+    </div>
+    <p class="console-desc">
+      인사, 감사, 날씨, 안부, 작별, 정체성, 도움 — 7가지 의도를 인식하는 소형 대화 모델입니다.
+      범위 밖의 질문에는 모른다고 솔직하게 답합니다.
+    </p>
+
+    <form id="text-form" class="input-row">
+      <input
+        type="text"
+        id="text-input"
+        placeholder="예: 안녕하세요, 오늘 날씨 어때요?"
+        maxlength="200"
+        autocomplete="off"
+      >
+      <button type="submit" id="text-submit">보내기</button>
+    </form>
+
+    <div class="output" id="text-output" aria-live="polite">
+      <p class="placeholder">응답이 여기에 표시됩니다.</p>
+    </div>
+
+    <div class="example-row">
+      <span class="example-label">예시:</span>
+      <button class="example-chip" data-example="안녕하세요">안녕하세요</button>
+      <button class="example-chip" data-example="오늘 날씨 어때?">오늘 날씨 어때?</button>
+      <button class="example-chip" data-example="너는 누구야?">너는 누구야?</button>
+      <button class="example-chip" data-example="고마워요">고마워요</button>
+    </div>
+  </section>
+
+  <section class="console" id="image-console">
+    <div class="console-head">
+      <h2>Nano-Tech Artist</h2>
+      <span class="status-badge" id="image-status">확인 중…</span>
+    </div>
+    <p class="console-desc">
+      색상과 도형 조건을 받아 64×64 이미지를 생성하는 소형 조건부 GAN입니다.
+      자유 텍스트 프롬프트가 아니라, 정확한 조건 조합만 받습니다 — 다음 단계에서 확장될 예정입니다.
+    </p>
+
+    <form id="image-form" class="condition-row">
+      <div class="field-group">
+        <label for="color-select">색상</label>
+        <select id="color-select">
+          <option value="red">빨강</option>
+          <option value="blue">파랑</option>
+          <option value="green">초록</option>
+          <option value="yellow">노랑</option>
+          <option value="purple">보라</option>
+          <option value="black">검정</option>
+        </select>
+      </div>
+      <div class="field-group">
+        <label for="shape-select">도형</label>
+        <select id="shape-select">
+          <option value="circle">원</option>
+          <option value="square">사각형</option>
+          <option value="triangle">삼각형</option>
+        </select>
+      </div>
+      <button type="submit" id="image-submit">생성하기</button>
+    </form>
+
+    <div class="output image-output" id="image-output">
+      <p class="placeholder">생성된 이미지가 여기에 표시됩니다.</p>
+    </div>
+  </section>
+
+  <section class="honesty">
+    <h2>지금 이 모델들이 할 수 있는 것과 없는 것</h2>
+    <div class="honesty-grid">
+      <div>
+        <h3>할 수 있는 것</h3>
+        <ul>
+          <li>정해진 7가지 의도 범위 안에서 자연스러운 한국어 응답</li>
+          <li>색상 6종 × 도형 3종 조합의 이미지 생성</li>
+          <li>범위 밖 입력을 감지해 솔직하게 모른다고 답하기</li>
+        </ul>
+      </div>
+      <div>
+        <h3>아직 할 수 없는 것</h3>
+        <ul>
+          <li>자유로운 주제의 대화나 긴 글 생성</li>
+          <li>텍스트 프롬프트로 원하는 이미지를 자유롭게 그리기</li>
+          <li>이전 대화를 기억하는 멀티턴 대화</li>
+        </ul>
+      </div>
+    </div>
+    <p class="roadmap-note">
+      개발 로드맵은 <a href="https://github.com/choichoi3227-crypto/cloud-press/blob/master/docs/08-roadmap.md" target="_blank" rel="noopener">GitHub 저장소</a>에 공개되어 있습니다.
+    </p>
+  </section>
+
+</main>
+
+<footer class="site-footer">
+  <div class="wrap">
+    <span>Cloud Press · 직접 학습한 모델을 API로 제공합니다</span>
+    <a href="https://github.com/choichoi3227-crypto/cloud-press" target="_blank" rel="noopener">GitHub</a>
+  </div>
+</footer>
+
+<script src="config.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

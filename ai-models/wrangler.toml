@@ -1,4 +1,4 @@
-name = "cloudpress-search-endpoint"
+name = "cloudpress-ai"
 main = "frontend/src/"
 compatibility_date = "2026-05-14"
 

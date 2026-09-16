@@ -1,30 +1,8 @@
 name = "cloudpress-ai"
-main = "./frontend/src/index.html"
 compatibility_date = "2026-05-14"
 
-# Cloudflare Workers 무료 플랜 배포용 단독 검색 + 주제조사 API입니다.
-# 기본값: 별도 DB, KV, R2, Secrets, API 키, AI 바인딩 없이 URL 요청만으로 동작합니다.
-# 배포:
-#   npx wrangler deploy
-# 로컬 테스트:
-#   npx wrangler dev
+[assets]
+directory = "./frontend/src"
 
 [observability]
 enabled = false
-
-# ── (선택) X-AIBP-Secret 인증 ──
-# /api/research 호출 시 헤더 X-AIBP-Secret 값을 검사하고 싶다면 아래처럼 secret을
-# 등록하세요(등록하지 않으면 인증 없이 누구나 호출 가능한 기존 동작과 동일합니다).
-#   npx wrangler secret put AIBP_SHARED_SECRET
-
-# ── Cloudflare Workers AI 바인딩 ──
-# /api/research는 AI 바인딩 없이도 100% 동작합니다(규칙 기반, 요청당 최대 1회만
-# 짧은 프롬프트로 결과를 보강). 켜지 않아도 무방합니다.
-#
-# /api/image는 이 바인딩이 있으면 스타일별 모델 체인(FLUX.1 schnell,
-# FLUX.2 dev, Stable Diffusion XL Base/Lightning, DreamShaper 8 LCM 중 스타일에
-# 맞는 순서)을 모델당 딱 1회씩 시도하고(재시도 없음, 뉴런 남용 방지), 체인
-# 전체가 실패하거나 바인딩이 없으면 항상 성공하는 헤드리스 카드(SVG) 렌더링으로
-# 자동 폴백합니다.
-[ai]
-binding = "AI"

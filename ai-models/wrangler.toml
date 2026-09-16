@@ -1,5 +1,5 @@
 name = "cloudpress-ai"
-main = "./frontend/src/"
+main = "./frontend/src/index.html"
 compatibility_date = "2026-05-14"
 
 # Cloudflare Workers 무료 플랜 배포용 단독 검색 + 주제조사 API입니다.

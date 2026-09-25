@@ -16,15 +16,15 @@ DEPLOY_REPO_WHITELIST = "choichoi3227-crypto/cloud-press"
 [[d1_databases]]
 binding = "DB"
 database_name = "cloud-press-db"
-database_id = "REPLACE_ME_AFTER_D1_CREATE"
+database_id = "a3e039c2-bd82-4ae5-a5ea-ec477015b487"
 
 [[kv_namespaces]]
 binding = "RATE_LIMIT_KV"
-id = "REPLACE_ME_AFTER_KV_CREATE"
+id = "c9a9ea8a771849d7adfaaa91c46bf9a9"
 
 [[kv_namespaces]]
 binding = "CACHE_KV"
-id = "REPLACE_ME_AFTER_KV_CREATE"
+id = "39c4bf548f954ffabc6f9f5cdb449fd5"
 
 # secrets (파일에 값 쓰지 말 것 — 아래 명령으로 각각 설정)
 # npx wrangler secret put INTERNAL_API_KEY    (Worker <-> 추론 서버)

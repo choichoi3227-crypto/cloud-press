@@ -1,7 +1,7 @@
 {
   "name": "cloud-press",
-  "version": "5.0.0",
-  "description": "Cloudflare Workers 무료 검색 스크래핑 + 주제조사 + 자체 BMP 비트맵 이미지 생성 API — Google+Naver, API 키 없는 URL 요청 기반 엔드포인트. AI 바인딩 없이 100% 동작(옵션으로 최소 사용 가능).",
+  "version": "1.0.0",
+  "description": "Cloudflare Workers 무료/저비용 검색 스크래핑 + 주제조사 + SVG 필터 기반 이미지 생성 API — Google+Naver, API 키 없는 URL 요청 기반 엔드포인트. /api/image는 1순위로 LLM(텍스트 모델)이 결정한 SVG 필터 디자인을 PNG로 래스터라이즈해 반환하며, AI 바인딩 없이도 규칙 기반 기본값으로 100% 동작.",
   "private": true,
   "type": "module",
   "scripts": {
@@ -11,9 +11,13 @@
     "check": "node --check search-core.js && node --check research-core.js && node --check research-handler.js && node --check image-core.js && node --check worker-search.js && node --check functions/api/search.js && node --check functions/api/research.js && node --check functions/api/image.js"
   },
   "devDependencies": {
-    "wrangler": "^4.0.0"
+    "wrangler": "^4.0.0",
+    "@fontsource/noto-sans-kr": "^5.3.0"
   },
   "engines": {
     "node": ">=18.0.0"
+  },
+  "dependencies": {
+    "@cf-wasm/resvg": "^0.4.0"
   }
 }

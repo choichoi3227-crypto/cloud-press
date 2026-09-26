@@ -12,6 +12,16 @@ compatibility_date = "2026-05-14"
 [observability]
 enabled = false
 
+# ── SVG → PNG 래스터라이즈용 정적 자산 ──
+# image-core.js가 @cf-wasm/resvg/workerd로 SVG 카드를 PNG로 변환할 때 쓰는
+# 한글 폰트(Noto Sans KR Bold, 서브셋 없이 전체 한글 포함)를 Data 모듈로
+# 번들합니다. Data 모듈은 원본 바이트 그대로 ArrayBuffer로 import되므로
+# base64 인코딩 오버헤드(약 +33%)가 없습니다.
+[[rules]]
+type = "Data"
+globs = ["**/*.woff2"]
+fallthrough = true
+
 # ── (선택) X-AIBP-Secret 인증 ──
 # /api/research 호출 시 헤더 X-AIBP-Secret 값을 검사하고 싶다면 아래처럼 secret을
 # 등록하세요(등록하지 않으면 인증 없이 누구나 호출 가능한 기존 동작과 동일합니다).
@@ -21,10 +31,27 @@ enabled = false
 # /api/research는 AI 바인딩 없이도 100% 동작합니다(규칙 기반, 요청당 최대 1회만
 # 짧은 프롬프트로 결과를 보강). 켜지 않아도 무방합니다.
 #
-# /api/image는 이 바인딩이 있으면 스타일별 모델 체인(FLUX.1 schnell,
-# FLUX.2 dev, Stable Diffusion XL Base/Lightning, DreamShaper 8 LCM 중 스타일에
-# 맞는 순서)을 모델당 딱 1회씩 시도하고(재시도 없음, 뉴런 남용 방지), 체인
-# 전체가 실패하거나 바인딩이 없으면 항상 성공하는 헤드리스 카드(SVG) 렌더링으로
-# 자동 폴백합니다.
+# /api/image는 1순위로 LLM(텍스트 모델) 기반 SVG 필터 카드를 생성합니다.
+# 이 바인딩이 없어도 규칙 기반 기본값으로 항상 성공하며, 있으면 프롬프트의
+# 의도를 반영해 색상·구도를 매번 다르게 결정합니다. 그림 생성 AI 모델
+# (FLUX/SDXL/Phoenix 등)은 provider=ai-model로 명시 요청했을 때만 안전망으로
+# 시도합니다.
 [ai]
 binding = "AI"
+
+# ── PNG 변환(SVG 래스터라이즈)과 요금제 ──
+# /api/image는 최종적으로 PNG로 변환된 이미지를 반환하려 시도합니다
+# (@cf-wasm/resvg, 이 워커에 WASM으로 번들되어 외부 API 호출 없이 동작).
+# 다만 SVG 파싱+폰트 셰이핑+래스터라이즈는 CPU를 씁니다:
+#   - Workers 무료 플랜: 요청당 CPU 10ms + wall-clock 30ms 제한.
+#     이 카드 렌더링은 이 한도를 초과할 수 있어(대형 카드일수록 더 그렇습니다)
+#     간헐적으로 PNG 변환이 시간 초과될 수 있습니다.
+#   - Workers 유료 플랜($5/월~): CPU 시간이 최대 30초까지 늘어나 안정적으로
+#     통과합니다.
+# 어느 플랜이든 PNG 변환이 실패/시간초과하면 원본 SVG를 그대로 반환하도록
+# 폴백되어 있어 /api/image 자체는 항상 성공합니다(단, 그 경우 응답 포맷이
+# image/png가 아니라 image/svg+xml이 됩니다 — 응답의 "format" 필드로 확인).
+# 완전 무료로만 운영하고 싶다면 FORCE_SVG_ONLY 환경변수(vars)를 "true"로
+# 두어 PNG 변환 자체를 건너뛸 수 있습니다(항상 SVG만 반환, CPU 여유 확보).
+#   [vars]
+#   FORCE_SVG_ONLY = "true"

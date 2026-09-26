@@ -2,26 +2,37 @@
  * image-core.js
  * /api/image — 썸네일/포스터 이미지 생성 엔드포인트.
  *
- * ⚠️ 2026-08(v6) 전면 재작성:
- * 이전 버전(v3~v5)은 외부 의존성 없이 프롬프트를 해시값으로 바꿔 좌표별로
- * sin/cos/tanh 수식을 계산하는 "절차적 노이즈 비트맵" 생성기였다. 이는
- * 텍스트·레이아웃이 있는 실제 카드가 아니라 의미 없는 추상 색상 패턴만
- * 만들어낼 뿐이라, zorlinq32 플러그인의 "헤드리스 브라우저(HTML/CSS 카드를
- * 그대로 스크린샷)" 방식과는 결과물이 근본적으로 달랐다. 이번 개편에서
- * 완전히 새로운 2단계 파이프라인으로 교체한다.
+ * ⚠️ 2026-09(v10) 개편: 1순위 경로를 "LLM 기반 SVG 필터 카드"로 교체.
+ * 이전(v9)까지는 그림 생성(text-to-image) AI 모델 체인이 1순위였으나,
+ * 이 모델들은 응답 지연이 크고 무료 티어 뉴런 한도·모델별 가용성에 따라
+ * 실패율도 존재한다. 반면 SVG는 (a) 벡터라 어떤 해상도에서도 깨지지 않고,
+ * (b) 텍스트가 항상 선명하게 렌더링되며, (c) 응답이 훨씬 가볍고 빠르다.
+ * 기존에도 ②(헤드리스 카드)가 SVG였지만 레이아웃이 완전히 고정된 템플릿이라
+ * 스타일 체감 차이가 적었다. v10은 그 사이에 "LLM이 스타일별 프롬프트를 그대로
+ * 받아 SVG 필터 아트의 디자인 파라미터(배경 그라디언트 색상, blur 도형의 개수·
+ * 위치·반경, 패널 기하, 글리프 카테고리 등)를 매 요청마다 새로 결정"하는 경로를
+ * 신설해 최우선으로 배치한다. 실제 래스터라이즈는 이 파일의 SVG 필터 프리미티브
+ * (feGaussianBlur, feDropShadow, gradient 등)가 그대로 담당하므로 안정성·품질은
+ * 기존 헤드리스 카드와 동일하게 "항상 성공"이 보장되고, 배치·색상만 LLM이 매번
+ * 새로 판단해 커스터마이징 폭을 넓힌다.
  *
  * 우선순위:
- *   ① AI 이용 — Cloudflare Workers AI 바인딩(env.AI)이 설정되어 있으면
- *      @cf/black-forest-labs/flux-1-schnell(무료 티어에서 가장 가벼운 이미지
- *      모델)을 요청당 딱 1회만 호출해 실제 텍스트-투-이미지 생성을 시도한다.
- *      실패(바인딩 없음/오류/타임아웃)하면 즉시 ②로 폴백한다.
- *      뉴런 남용 방지: 재시도 없이 1회만 호출하고, 스텝 수도 schnell 모델의
- *      권장값(4 steps)을 넘기지 않는다.
- *   ② 헤드리스 브라우저 방식 — zorlinq32 플러그인이 로컬 Chrome/Chromium으로
- *      HTML/CSS 카드를 스크린샷 찍던 것과 동일한 레이아웃(배경 그라디언트,
- *      블러 처리된 원형/캡슐 도형, 유리질(glassmorphism) 패널, 상단 배지,
- *      제목/부제목 타이포그래피)을 이 워커 안에서 SVG로 직접 합성한다.
- *      외부 API·브라우저 바인딩이 전혀 필요 없어 항상 성공한다.
+ *   ① LLM 기반 SVG 필터 카드(최우선, 가장 안정적·고품질) — Cloudflare
+ *      Workers AI의 텍스트 모델(@cf/meta/llama-3.1-8b-instruct)에 스타일별
+ *      프롬프트를 그대로 전달해 SVG 디자인 파라미터(JSON)를 생성시키고,
+ *      이 워커의 SVG 필터 렌더러(feGaussianBlur 기반 blur 도형, 그라디언트,
+ *      유리질 패널, 카테고리 글리프, 자동 줄바꿈 타이포그래피)로 합성한다.
+ *      외부 이미지 모델 없이 텍스트 모델 1회 호출 + 로컬 SVG 합성이라
+ *      응답이 빠르고 뉴런 소모도 적다. LLM 호출이 실패/타임아웃해도 규칙
+ *      기반 기본 파라미터로 즉시 대체해 이 경로 자체는 항상 성공한다.
+ *   ② 그림 생성 AI 모델 체인(안전망) — Cloudflare Workers AI 바인딩
+ *      (env.AI)의 text-to-image 모델(FLUX.1 schnell/FLUX.2/SDXL/Phoenix/
+ *      Lucid Origin/DreamShaper 등, 스타일별 체인)을 순서대로 1회씩 시도한다.
+ *      ①이 명시적으로 요청된 경우가 아니면 기본적으로 시도하지 않으며,
+ *      photo_realistic처럼 실제 사진 질감이 중요한 경우에만 최종 폴백으로
+ *      선택적으로 사용한다.
+ *   ③ 헤드리스 브라우저 방식(최종 안전망) — 레이아웃이 고정된 SVG 카드를
+ *      직접 합성한다. 외부 API·바인딩이 전혀 필요 없어 항상 성공한다.
  *
  * 응답은 항상 { success, provider, format, mime_type, data_url, ... } 형태이며,
  * WordPress 플러그인은 provider 필드로 어느 경로에서 만들어졌는지 판별한다.
@@ -382,16 +393,19 @@ function fitTitle(topic, panelInnerWidth, maxLines, maxFontSize, minFontSize) {
  * fitTitle()로 교체해 "실제 그릴 폭"을 기준으로 폰트 크기를 먼저 맞추므로
  * 어떤 길이의 주제여도 항상 패널 안에 들어온다.
  */
-function renderCardSvg({ topic, subtitle, style, width = 1600, height = 900 }) {
-  const theme = pickTheme(style);
+function renderCardSvg({ topic, subtitle, style, width = 1600, height = 900, themeOverride = null, layoutOverride = null, category: categoryOverride = null }) {
+  const theme = { ...pickTheme(style), ...(themeOverride || {}) };
   const seed = hashString(`${topic}|${style}`);
-  const category = detectCategory(`${topic} ${subtitle}`);
+  const category = categoryOverride || detectCategory(`${topic} ${subtitle}`);
   const glyphPath = categoryGlyphPath(category);
-  const layout = STYLE_LAYOUTS[style] || STYLE_LAYOUTS.poster;
+  const layout = { ...(STYLE_LAYOUTS[style] || STYLE_LAYOUTS.poster), ...(layoutOverride || {}) };
 
   // shape 위치는 seed로 살짝 변주해 스타일이 같아도 매번 완전히 동일하진 않게 한다.
-  const shapeOffsetX = -120 + (seed % 60);
-  const shapeOffsetY = 120 + ((seed >> 4) % 60);
+  // (LLM이 shapeOffset을 직접 지정한 경우 그 값을 우선한다.)
+  const shapeOffsetX = layoutOverride && Number.isFinite(layoutOverride.shapeOffsetX)
+    ? layoutOverride.shapeOffsetX : -120 + (seed % 60);
+  const shapeOffsetY = layoutOverride && Number.isFinite(layoutOverride.shapeOffsetY)
+    ? layoutOverride.shapeOffsetY : 120 + ((seed >> 4) % 60);
 
   // ⚠️ 이미지에 들어가는 텍스트는 오직 "실제 주제(topic)"와, 있는 경우
   // "실제 조사된 부제(subtitle)"만 사용한다. "Poster style thumbnail" 같은
@@ -399,10 +413,11 @@ function renderCardSvg({ topic, subtitle, style, width = 1600, height = 900 }) {
   // 문구는 주제와 무관한 상투어라 절대 넣지 않는다 — 주제가 있는 그대로
   // 화면을 채우도록 배지/워터마크 자체를 레이아웃에서 제거했다(아래
   // layout.showBadge / layout.showWatermark가 항상 false).
-  const panelX = layout.panelX(width);
-  const panelY = layout.panelY(height);
-  const panelW = layout.panelW(width);
-  const panelH = layout.panelH(height);
+  const resolveDim = (v, base) => (typeof v === "function" ? v(base) : (Number.isFinite(v) ? v : v));
+  const panelX = resolveDim(layout.panelX, width);
+  const panelY = resolveDim(layout.panelY, height);
+  const panelW = resolveDim(layout.panelW, width);
+  const panelH = resolveDim(layout.panelH, height);
   const panelInnerPad = layout.pad;
   const titleAvailableWidth = panelW - panelInnerPad * 2 - (layout.reserveGlyph ? 40 : 0);
 
@@ -831,6 +846,135 @@ async function tryWorkersAiChain(env, prompt, style) {
 }
 
 /* ────────────────────────────────────────────────────────────
+   ① LLM 기반 SVG 필터 카드
+   — Cloudflare Workers AI 텍스트 모델(env.AI)에 스타일별 프롬프트를 그대로
+     전달해 SVG 디자인 파라미터(배경색·강조색·blur 도형 배치·패널 기하 등)를
+     JSON으로 생성시키고, 이 워커의 SVG 필터 렌더러(renderCardSvg)로 합성한다.
+   — LLM 호출이 실패/시간초과/JSON 파싱 실패해도 규칙 기반 기본 파라미터로
+     즉시 대체하므로, 이 경로 자체는 항상 성공한다(텍스트 모델은 이미지 모델
+     보다 훨씬 가볍고 빨라 무료 티어에서도 지연·실패율이 낮다).
+──────────────────────────────────────────────────────────── */
+
+const LLM_TEXT_MODEL = "@cf/meta/llama-3.1-8b-instruct";
+
+// 색상 hex 형식만 허용해, LLM이 임의 문자열을 돌려줘도 SVG에 그대로 삽입되지 않게 한다.
+function sanitizeHexColor(value, fallback) {
+  const s = String(value || "").trim();
+  return /^#[0-9a-fA-F]{3,8}$/.test(s) ? s : fallback;
+}
+
+function clampNumber(value, min, max, fallback) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.max(min, Math.min(max, n));
+}
+
+/**
+ * LLM에게 "스타일별 프롬프트를 그대로" 전달하고, SVG 필터 카드 합성에
+ * 필요한 디자인 파라미터만 JSON으로 받는다. 실제 그림을 그리게 하는 것이
+ * 아니라 색상·도형 배치·카테고리 같은 구조화된 결정만 맡기므로, 이미지
+ * 생성 모델 없이도 스타일별 프롬프트의 의도를 반영한 매번 다른 카드가
+ * 나온다.
+ */
+async function tryLlmSvgFilterCard(env, { prompt, topic, subtitle, style }) {
+  const theme = pickTheme(style);
+  const layout = STYLE_LAYOUTS[style] || STYLE_LAYOUTS.poster;
+  const effectiveTopic = sanitizePrompt(topic || prompt) || "Untitled";
+
+  let themeOverride = null;
+  let layoutOverride = null;
+  let category = null;
+
+  if (env && env.AI && typeof env.AI.run === "function") {
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort("llm_svg_timeout"), 8000);
+
+      // 스타일별 프롬프트를 그대로 전달한다 — 모델별로 다시 가공하지 않고,
+      // "이 시각적 의도를 SVG 디자인 파라미터로 바꿔라"는 지시만 감싼다.
+      const instruction = `아래는 "${style}" 스타일 썸네일 카드를 위한 시각 프롬프트다. 이 프롬프트를 그대로 시각적 의도로 삼아, SVG 카드의 디자인 파라미터를 JSON으로만 응답하라(마크다운, 설명, 코드블록 금지).
+
+프롬프트: ${sanitizePrompt(prompt || effectiveTopic)}
+주제: ${effectiveTopic}
+
+스키마:
+{"background":"#RRGGBB","accent":"#RRGGBB","accent2":"#RRGGBB","text":"#RRGGBB","category":"messenger|device|finance|food|travel|health|education|beauty|business|environment|entertainment|legal|home|tech|default","bigShapeR":정수(150~500),"shapeOffsetX":정수(-200~200),"shapeOffsetY":정수(0~300),"glyphOpacity":0과1사이소수}
+기존 "${style}" 테마(background:${theme.background}, accent:${theme.accent})의 분위기는 유지하되, 프롬프트의 주제·색상 무드에 맞게 background/accent/accent2를 조정하라. text는 background와 대비가 뚜렷한 색으로 고르라.`;
+
+      let result;
+      try {
+        result = await env.AI.run(LLM_TEXT_MODEL, {
+          messages: [{ role: "user", content: instruction }],
+          max_tokens: 220,
+        }, { signal: controller.signal });
+      } finally {
+        clearTimeout(timeout);
+      }
+
+      const raw = typeof result === "string" ? result : (result?.response || "");
+      const match = raw.match(/\{[\s\S]*\}/);
+      if (match) {
+        const parsed = JSON.parse(match[0]);
+        const bg = sanitizeHexColor(parsed.background, theme.background);
+        const ac = sanitizeHexColor(parsed.accent, theme.accent);
+        themeOverride = {
+          background: bg,
+          accent: ac,
+          accent2: sanitizeHexColor(parsed.accent2, theme.accent2),
+          text: sanitizeHexColor(parsed.text, theme.text),
+        };
+        layoutOverride = {
+          bigShapeR: clampNumber(parsed.bigShapeR, 150, 500, layout.bigShapeR),
+          shapeOffsetX: clampNumber(parsed.shapeOffsetX, -200, 200, undefined),
+          shapeOffsetY: clampNumber(parsed.shapeOffsetY, 0, 300, undefined),
+          glyphOpacity: clampNumber(parsed.glyphOpacity, 0, 1, layout.glyphOpacity),
+        };
+        if (typeof parsed.category === "string" && CATEGORY_GLYPHS[parsed.category]) {
+          category = parsed.category;
+        }
+      }
+    } catch {
+      // LLM 호출/파싱 실패 — 조용히 규칙 기반 기본 파라미터(override 없음)로 진행.
+    }
+  }
+
+  const svg = renderCardSvg({
+    topic: effectiveTopic,
+    subtitle: sanitizePrompt(subtitle || "").slice(0, 140),
+    style: style || "poster",
+    width: 1600,
+    height: 900,
+    themeOverride,
+    layoutOverride,
+    category,
+  });
+  const svgBase64 = bytesToBase64(new TextEncoder().encode(svg));
+
+  return {
+    success: true,
+    provider: "llm-svg-filter-card", // WordPress 플러그인이 이 값으로 "1순위 경로 성공"을 판별
+    engine: themeOverride ? LLM_TEXT_MODEL : "cloud-press-svg-card-renderer",
+    generation_mode: "llm_svg_filter_card",
+    model: themeOverride ? LLM_TEXT_MODEL : "local-svg-card",
+    llm_used_for_params: Boolean(themeOverride),
+    external_ai_used: Boolean(themeOverride),
+    cloudflare_ai_binding_used: Boolean(themeOverride),
+    cost_usd: 0,
+    format: "svg",
+    mime_type: "image/svg+xml",
+    encoding: "base64",
+    width: 1600,
+    height: 900,
+    image: svgBase64,
+    image_base64: svgBase64,
+    data_url: `data:image/svg+xml;base64,${svgBase64}`,
+    svg,
+    style: style || "poster",
+    prompt: sanitizePrompt(prompt || effectiveTopic),
+  };
+}
+
+/* ────────────────────────────────────────────────────────────
    진입점
 ──────────────────────────────────────────────────────────── */
 
@@ -842,14 +986,25 @@ export async function generatePromptImage(payload = {}, env = null) {
   const width = Math.max(512, Math.min(2048, parseInt(payload.width, 10) || 1600));
   const height = Math.max(512, Math.min(2048, parseInt(payload.height, 10) || 900));
 
-  // ① AI 이용 우선 시도 (스타일별 모델 체인, 모델당 1회만)
   const preferHeadless = payload.provider === "headless" || payload.force_headless === true || payload.force_headless === "true";
-  if (!preferHeadless) {
+  const preferAiModel = payload.provider === "ai-model" || payload.force_ai_model === true || payload.force_ai_model === "true";
+
+  // ① 1순위: LLM 기반 SVG 필터 카드 — 가장 안정적이고 빠르며, 스타일별
+  // 프롬프트를 그대로 텍스트 모델에 전달해 SVG 디자인 파라미터를 결정한다.
+  // force_headless/force_ai_model로 다른 경로를 명시 요청한 경우만 건너뛴다.
+  if (!preferHeadless && !preferAiModel) {
+    const llmSvgResult = await tryLlmSvgFilterCard(env, { prompt, topic, subtitle, style });
+    if (llmSvgResult) return llmSvgResult;
+  }
+
+  // ② 안전망: 그림 생성 AI 모델 체인(FLUX/SDXL/Phoenix 등). 기본 흐름에서는
+  // 호출하지 않고, provider=ai-model로 명시 요청했을 때만 시도한다.
+  if (preferAiModel) {
     const aiResult = await tryWorkersAiChain(env, prompt || topic, style);
     if (aiResult) return aiResult;
   }
 
-  // ② 헤드리스 브라우저 방식(SVG 카드) — 항상 성공하는 최종 경로
+  // ③ 최종 안전망: 레이아웃 고정 헤드리스 SVG 카드 — 항상 성공한다.
   return generateHeadlessCard({ prompt, topic, subtitle, style, width, height });
 }
 
@@ -898,4 +1053,4 @@ export async function handleImage(request, env) {
   }
 }
 
-export { CORS_HEADERS, AI_MODELS, EDIT_MODELS };
+export { CORS_HEADERS, AI_MODELS, EDIT_MODELS, tryLlmSvgFilterCard };

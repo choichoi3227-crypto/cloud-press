@@ -14,12 +14,15 @@ enabled = false
 
 # ── SVG → PNG 래스터라이즈용 정적 자산 ──
 # image-core.js가 @cf-wasm/resvg/workerd로 SVG 카드를 PNG로 변환할 때 쓰는
-# 한글 폰트(Noto Sans KR Bold, 서브셋 없이 전체 한글 포함)를 Data 모듈로
-# 번들합니다. Data 모듈은 원본 바이트 그대로 ArrayBuffer로 import되므로
-# base64 인코딩 오버헤드(약 +33%)가 없습니다.
+# 한글 폰트(Noto Sans KR Bold, 한글 완성형 11,172자 전체 + 영문/숫자/기호
+# 서브셋 TTF)를 Data 모듈로 번들합니다. ⚠️ woff2가 아니라 TTF를 쓰는 이유:
+# 이 워커가 쓰는 @cf-wasm/resvg(신버전 resvg-wasm) 빌드는 woff2 디코딩 시
+# WASM이 "unreachable" 에러로 크래시하는 것이 로컬 검증에서 확인되어, 반드시
+# TTF(비압축)로 번들해야 한다. Data 모듈은 원본 바이트 그대로 ArrayBuffer로
+# import되므로 base64 인코딩 오버헤드(약 +33%)가 없다.
 [[rules]]
 type = "Data"
-globs = ["**/*.woff2"]
+globs = ["**/*.ttf"]
 fallthrough = true
 
 # ── (선택) X-AIBP-Secret 인증 ──

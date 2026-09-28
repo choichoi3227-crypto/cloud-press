@@ -11,13 +11,24 @@
     "check": "node --check search-core.js && node --check research-core.js && node --check research-handler.js && node --check image-core.js && node --check worker-search.js && node --check functions/api/search.js && node --check functions/api/research.js && node --check functions/api/image.js"
   },
   "devDependencies": {
-    "wrangler": "^4.0.0",
-    "@fontsource/noto-sans-kr": "^5.3.0"
+    "wrangler": "^4.0.0"
   },
   "engines": {
     "node": ">=18.0.0"
   },
   "dependencies": {
     "@cf-wasm/resvg": "^0.4.0"
-  }
+  },
+  "main": "image-core.js",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/choichoi3227-crypto/cloud-press.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/choichoi3227-crypto/cloud-press/issues"
+  },
+  "homepage": "https://github.com/choichoi3227-crypto/cloud-press#readme"
 }

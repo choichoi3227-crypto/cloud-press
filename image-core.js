@@ -61,6 +61,7 @@
  */
 
 import { CORS_HEADERS, json } from './search-core.js';
+import KOREAN_FONT_TTF from './assets/fonts/NotoSansKR-Bold.ttf';
 
 // ──────────────────────────────────────────────────────────────────────
 // 1. 모델 카탈로그: 각 모델의 정확한 ID와 요청 형식(JSON vs multipart),
@@ -542,6 +543,7 @@ async function generateSvgWithLLM( env, body, style, width, height ) {
 					provider:      'svg-llm:' + SVG_TEXT_MODEL.split( '/' ).pop(),
 					model_used:    'SVG (Llama 3.3 70B Instruct)',
 					fallback_used: false,
+					raw_svg:       svg,
 				};
 			}
 		} catch ( err ) {
@@ -576,11 +578,26 @@ function extractSvgMarkup( raw, width, height ) {
 	if ( /<(?:script|foreignObject|iframe|image)\b|\son\w+\s*=|(?:href|xlink:href)\s*=\s*["']\s*(?:https?:|data:|javascript:)/i.test( svg ) ) return null;
 	if ( ! /<title(?:\s[^>]*)?>[\s\S]*?<\/title>/i.test( svg ) ) return null;
 
-	// <svg ...> 여는 태그만 뽑아 viewBox와 고정 width/height 속성을 확인한다.
+	// <svg ...> 여는 태그만 뽑아 xmlns·viewBox·고정 width/height 속성을 확인한다.
 	const openTagMatch = svg.match( /<svg\b[^>]*>/i );
-	const openTag = openTagMatch ? openTagMatch[ 0 ] : '';
+	let openTag = openTagMatch ? openTagMatch[ 0 ] : '';
+	if ( ! openTag ) return null;
+
 	const viewBoxMatch = openTag.match( /viewBox\s*=\s*["']\s*[\d.\-]+\s+[\d.\-]+\s+([\d.]+)\s+([\d.]+)\s*["']/i );
 	if ( ! viewBoxMatch ) return null; // viewBox 자체가 없으면 스케일링이 불안정하므로 신뢰하지 않는다.
+
+	let fixedSvg = svg;
+
+	// xmlns 네임스페이스 누락은 흔한 LLM 실수다(관찰된 실제 사례: <svg
+	// viewBox="..."> 만 쓰고 xmlns를 빼먹음). 이 경우 브라우저가 문서를
+	// SVG가 아닌 일반 XML로 취급해 렌더링하지 못하고, resvg 같은 래스터
+	// 라이저는 아예 크래시한다. 거부하고 2순위로 넘기는 대신, 서버에서
+	// 표준 네임스페이스를 주입해 살려낸다(1순위 경로를 최대한 살리기 위함).
+	if ( ! /xmlns\s*=/i.test( openTag ) ) {
+		const withXmlns = openTag.replace( /^<svg\b/i, '<svg xmlns="http://www.w3.org/2000/svg"' );
+		fixedSvg = fixedSvg.replace( openTag, withXmlns );
+		openTag = withXmlns;
+	}
 
 	if ( width && height ) {
 		const vbWidth = parseFloat( viewBoxMatch[ 1 ] );
@@ -597,11 +614,11 @@ function extractSvgMarkup( raw, width, height ) {
 		// 스케일링되게 한다.
 		const stripped = openTag.replace( /\s(?:width|height)\s*=\s*["'][^"']*["']/gi, '' );
 		if ( stripped !== openTag ) {
-			return svg.replace( openTag, stripped );
+			fixedSvg = fixedSvg.replace( openTag, stripped );
 		}
 	}
 
-	return svg;
+	return fixedSvg;
 }
 
 function sanitizeImageText( value, maxLength ) {
@@ -674,6 +691,83 @@ function buildFallbackSvgCard( topic, subtitle, style, width, height ) {
 }
 
 /**
+ * ──────────────────────────────────────────────────────────────────────
+ * 5. SVG → PNG 래스터라이즈 (@cf-wasm/resvg, WASM 기반, 외부 API 호출 없음)
+ * ──────────────────────────────────────────────────────────────────────
+ *
+ * ⚠️ 중요: @cf-wasm/resvg의 신버전 워크어드 빌드(import { Resvg } from
+ * '@cf-wasm/resvg/workerd')는 woff2 폰트 버퍼를 로드하는 순간 WASM 내부에서
+ * "unreachable" 패닉을 일으키는 것이 로컬 검증(Node 런타임 기준)에서
+ * 확인되었다. 반면 TTF는 문제없이 로드·렌더링된다. 이 때문에 이 파일은
+ * woff2가 아니라 TTF(한글 완성형 전체 서브셋, 약 2.4MB)를 번들한다.
+ * legacy 엔트리포인트(@cf-wasm/resvg/legacy/workerd, 구 resvg-wasm 2.4.1)는
+ * woff2 로드 자체는 크래시하지 않지만 실제 렌더링에서 텍스트가 통째로
+ * 빠지는 현상이 확인되어 채택하지 않았다.
+ *
+ * Workers 무료 플랜은 CPU 10ms 제한이 있어 대형 카드(1600x900+, 레이어가
+ * 많은 SVG)에서는 간헐적으로 시간 초과가 날 수 있다. 이 함수는 실패하면
+ * null을 반환하고, 호출부(generateImage)가 원본 SVG를 그대로 반환하는
+ * 폴백을 수행한다 — /api/image 자체는 이 때문에 항상 성공한다.
+ */
+let cachedResvgModule = null;
+async function loadResvgModule() {
+	if ( cachedResvgModule ) return cachedResvgModule;
+	// 정적 문자열 리터럴로 import해야 Workers 번들러가 워크어드 전용
+	// 엔트리포인트를 정확히 고른다(동적 경로 조합은 번들러가 처리 못 함).
+	cachedResvgModule = await import( '@cf-wasm/resvg/workerd' );
+	return cachedResvgModule;
+}
+
+/**
+ * 주어진 SVG 원문을 PNG 바이트로 래스터라이즈한다.
+ * 성공: { base64, mime: 'image/png' } / 실패(폰트 로드 실패, CPU 시간초과,
+ * WASM 오류 등 무엇이든): null — 절대 예외를 던지지 않는다.
+ */
+async function rasterizeSvgToPng( svg, width, height ) {
+	if ( ! svg ) return null;
+	try {
+		const { Resvg } = await loadResvgModule();
+		const resvg = await Resvg.async( svg, {
+			font: {
+				fontBuffers: [ new Uint8Array( KOREAN_FONT_TTF ) ],
+				loadSystemFonts: false,
+				defaultFontFamily: 'Noto Sans KR',
+			},
+			fitTo: { mode: 'width', value: width },
+			background: 'rgba(0,0,0,0)',
+		} );
+		const pngData = resvg.render();
+		const pngBuffer = pngData.asPng();
+		return { base64: arrayBufferToBase64( pngBuffer.buffer ? pngBuffer.buffer : pngBuffer ), mime: 'image/png' };
+	} catch ( err ) {
+		console.warn( `[image-core] SVG→PNG 래스터라이즈 실패(SVG로 폴백): ${ err && err.message ? err.message : err }` );
+		return null;
+	}
+}
+
+/**
+ * generateImage가 만든 SVG 결과(raw_svg 포함)를 받아 PNG 변환을 시도하고,
+ * 성공하면 결과를 PNG로 치환해 반환한다. env.FORCE_SVG_ONLY === 'true'면
+ * 변환을 아예 건너뛴다(완전 무료 운영, CPU 여유 확보 목적).
+ * 실패하거나 raw_svg가 없으면 입력을 그대로 반환한다.
+ */
+async function tryConvertToPng( env, result ) {
+	if ( ! result || ! result.raw_svg ) return result;
+	if ( env && String( env.FORCE_SVG_ONLY ).toLowerCase() === 'true' ) return result;
+
+	const png = await rasterizeSvgToPng( result.raw_svg, result.width, result.height );
+	if ( ! png ) return result; // 변환 실패 — 원본 SVG 결과를 그대로 반환(항상 성공 보장).
+
+	const { raw_svg, ...rest } = result;
+	return {
+		...rest,
+		data_url:  `data:${ png.mime };base64,${ png.base64 }`,
+		mime_type: png.mime,
+		format:    'png',
+	};
+}
+
+/**
  * 이 모듈의 진입점. worker.js(또는 worker-search.js)의 /api/image 핸들러가
  * 이 함수를 호출한다.
  *
@@ -682,7 +776,8 @@ function buildFallbackSvgCard( topic, subtitle, style, width, height ) {
  * @returns {object} { data_url, mime_type, width, height, provider, model_used, fallback_used }
  *
  * 1순위(SVG-LLM) → 2순위(이미지 모델 풀) → 3순위(자체 내장 SVG 카드, 항상 성공)
- * 순서로 시도한다.
+ * 순서로 시도한 뒤, SVG 결과(1·3순위)는 PNG로 래스터라이즈를 시도한다.
+ * PNG 변환이 실패해도 원본 SVG를 그대로 반환하므로 이 함수는 항상 성공한다.
  */
 export async function generateImage( env, body ) {
 	body = body && typeof body === 'object' ? body : {};
@@ -692,14 +787,14 @@ export async function generateImage( env, body ) {
 	const height = Math.min( Math.max( parseInt( body.height, 10 ) || 900,  256 ), 2048 );
 
 	const svgResult = await generateSvgWithLLM( env, body, style, width, height );
-	if ( svgResult ) return svgResult;
+	if ( svgResult ) return tryConvertToPng( env, svgResult );
 
 	const modelResult = await generateWithImageModelPool( env, body, style, width, height );
 	if ( modelResult ) return { ...modelResult, fallback_used: true };
 
 	// 1·2순위 모두 실패 — 이 파일 안에서 완결되는 최종 안전망.
 	const svg = buildFallbackSvgCard( body.topic, body.subtitle, style, width, height );
-	return {
+	const fallbackResult = {
 		data_url:      'data:image/svg+xml;base64,' + btoa( unescape( encodeURIComponent( svg ) ) ),
 		mime_type:     'image/svg+xml',
 		width,
@@ -707,7 +802,9 @@ export async function generateImage( env, body ) {
 		provider:      'fallback-svg-card',
 		model_used:    'fallback-svg-card',
 		fallback_used: true,
+		raw_svg:       svg,
 	};
+	return tryConvertToPng( env, fallbackResult );
 }
 
 /**

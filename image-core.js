@@ -54,6 +54,8 @@
  * 이미지를 만드는 용도이므로 이 두 모델은 사용하지 않는다.
  */
 
+import { CORS_HEADERS, json } from './search-core.js';
+
 // ──────────────────────────────────────────────────────────────────────
 // 1. 모델 카탈로그: 각 모델의 정확한 ID와 요청 형식(JSON vs multipart),
 //    지원 파라미터. 전부 Cloudflare 공식 문서 기준으로 확인된 값이다.
@@ -317,6 +319,7 @@ function arrayBufferToBase64( buffer ) {
  * 전부 실패하면 null을 반환해 호출부(generateImage)가 3순위로 넘어가게 한다.
  */
 async function generateWithImageModelPool( env, body, style, width, height ) {
+	if ( ! env || ! env.AI || typeof env.AI.run !== 'function' ) return null;
 	const prompt = buildBackgroundPrompt( body.prompt, body.topic, body.subtitle, style );
 	const order  = pickModelOrder( style );
 
@@ -365,9 +368,15 @@ const SVG_STYLE_DIRECTIVES = {
  * topic/subtitle 원문을 프롬프트에 그대로 포함시킨다.
  */
 async function generateSvgWithLLM( env, body, style, width, height ) {
+	// AI 바인딩이 없는 설치에서는 호출 자체를 하지 않는다. 이전에는 여기서
+	// 예외를 낸 뒤 이미지 모델 풀을 전부 순회해 불필요한 경고와 지연을 만들었다.
+	if ( ! env || ! env.AI || typeof env.AI.run !== 'function' ) return null;
+
 	const directive = SVG_STYLE_DIRECTIVES[ style ] || SVG_STYLE_DIRECTIVES.minimal;
-	const title    = ( body.topic || '' ).toString().slice( 0, 60 );
-	const subtitle = ( body.subtitle || '' ).toString().slice( 0, 80 );
+	const prompt   = sanitizeImageText( body.prompt, 1200 );
+	const title    = sanitizeImageText( body.topic, 90 );
+	const subtitle = sanitizeImageText( body.subtitle, 140 );
+	const subject  = title || prompt || subtitle;
 
 	const systemPrompt =
 		'당신은 SVG 마크업만으로 완성된 썸네일 비주얼을 그리는 디자이너입니다. ' +
@@ -377,13 +386,21 @@ async function generateSvgWithLLM( env, body, style, width, height ) {
 		'제목 텍스트가 있다면 <text> 요소로 화면에 큼직하게 배치하고, 한글이 잘리거나 ' +
 		'뷰박스를 벗어나지 않도록 폰트 크기와 위치를 신중히 정하세요. ' +
 		'font-family는 "Pretendard, \'Apple SD Gothic Neo\', \'Malgun Gothic\', sans-serif"로 지정하세요.\n' +
-		'그라디언트(linearGradient/radialGradient), 도형, 은은한 패턴을 활용해 배경을 풍부하게 만드세요.\n\n' +
+		'이 요청의 핵심 주제를 장식용 추상 도형으로 대체하지 마세요. 핵심 주제를 알아볼 수 있는 ' +
+		'주요 오브젝트/장면을 직접 제작하고, 그 오브젝트가 화면 면적의 상당 부분을 차지하게 하세요. ' +
+		'주제와 관련된 보조 오브젝트와 배경 맥락도 직접 그리되, 요청과 무관한 사람·동물·아이콘을 넣지 마세요.\n' +
+		'반드시 (1) 배경 레이어, (2) 주제를 표현하는 전경 오브젝트 레이어, (3) 제목/부제목 텍스트 레이어를 ' +
+		'각각 SVG 요소로 만드세요. CSS나 외부 이미지, <image>, foreignObject를 사용하지 마세요. ' +
+		'첫 번째 자식으로 요청의 핵심 주제를 설명하는 <title>을 넣으세요.\n' +
+		'그라디언트(linearGradient/radialGradient), 필터, 도형, 은은한 패턴을 활용해 배경을 풍부하게 만드세요.\n\n' +
 		`디자인 톤: ${ directive }`;
 
 	const userPrompt = [
+		prompt   ? `원본 이미지 프롬프트(가장 중요한 시각 요구사항): ${ prompt }` : '',
 		title    ? `제목: ${ title }`    : '',
 		subtitle ? `부제목: ${ subtitle }` : '',
-		'위 내용을 담은 썸네일을 SVG로 그려주세요.',
+		`핵심 주제: ${ subject }`,
+		'위 요구사항을 만족하는, 주제와 시각적으로 직접 관련된 완성형 썸네일을 SVG로 그려주세요.',
 	].filter( Boolean ).join( '\n' );
 
 	try {
@@ -428,8 +445,20 @@ function extractSvgMarkup( raw ) {
 
 	const svg = raw.slice( start, end + '</svg>'.length ).trim();
 	// 아주 짧으면(모델이 태그만 흉내내고 내용은 못 채운 경우) 신뢰하지 않는다.
-	if ( svg.length < 80 ) return null;
+	if ( svg.length < 300 ) return null;
+	// SVG는 data URL이라도 script/event handler/외부 리소스를 포함할 수 있다.
+	// LLM 결과는 신뢰할 수 없는 입력으로 취급하고, 완성형 벡터 요소만 허용한다.
+	if ( /<(?:script|foreignObject|iframe|image)\b|\son\w+\s*=|(?:href|xlink:href)\s*=\s*["']\s*(?:https?:|data:|javascript:)/i.test( svg ) ) return null;
+	if ( ! /<title(?:\s[^>]*)?>[\s\S]*?<\/title>/i.test( svg ) ) return null;
 	return svg;
+}
+
+function sanitizeImageText( value, maxLength ) {
+	return String( value || '' )
+		.replace( /[\u0000-\u001F\u007F]/g, ' ' )
+		.replace( /\s+/g, ' ' )
+		.trim()
+		.slice( 0, maxLength );
 }
 
 // ──────────────────────────────────────────────────────────────────────
@@ -485,7 +514,9 @@ function buildFallbackSvgCard( topic, subtitle, style, width, height ) {
  * 순서로 시도한다.
  */
 export async function generateImage( env, body ) {
-	const style  = body.style || 'minimal';
+	body = body && typeof body === 'object' ? body : {};
+	const requestedStyle = String( body.style || 'minimal' ).toLowerCase();
+	const style  = SVG_STYLE_DIRECTIVES[ requestedStyle ] ? requestedStyle : 'minimal';
 	const width  = Math.min( Math.max( parseInt( body.width, 10 )  || 1600, 256 ), 2048 );
 	const height = Math.min( Math.max( parseInt( body.height, 10 ) || 900,  256 ), 2048 );
 
@@ -507,3 +538,37 @@ export async function generateImage( env, body ) {
 		fallback_used: true,
 	};
 }
+
+/**
+ * /api/image의 HTTP 어댑터. 생성 로직은 generateImage에만 두고, Worker와
+ * Pages Functions가 같은 입력 검증/JSON 응답을 사용하도록 이 파일에서 제공한다.
+ */
+export async function handleImage( request, env ) {
+	let body;
+	try {
+		body = request.method === 'GET'
+			? Object.fromEntries( new URL( request.url ).searchParams )
+			: await request.json();
+	} catch ( err ) {
+		return json( { error: '요청 본문이 유효한 JSON이 아닙니다.' }, 400 );
+	}
+
+	body = body && typeof body === 'object' && ! Array.isArray( body ) ? body : {};
+	const prompt = sanitizeImageText( body.prompt || body.q, 1200 );
+	const topic = sanitizeImageText( body.topic, 90 );
+	if ( ! prompt && ! topic ) {
+		return json( {
+			error: 'prompt 또는 topic이 필요합니다.',
+			endpoint: 'POST /api/image { prompt, topic?, subtitle?, style?, width?, height? }',
+		}, 400 );
+	}
+
+	try {
+		return json( await generateImage( env, { ...body, prompt, topic } ) );
+	} catch ( err ) {
+		console.error( `[image-core] 이미지 생성 실패: ${ err && err.message ? err.message : err }` );
+		return json( { error: 'image_generation_failed', success: false }, 500 );
+	}
+}
+
+export { CORS_HEADERS };

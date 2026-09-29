@@ -11,20 +11,18 @@
  * 형태로 돌려준다.
  *
  * ════════════════════════════════════════════════════════════════════════
- * 생성 경로 우선순위 (요청 사항 반영: SVG 경로가 1순위)
+ * 생성 경로 우선순위 (SVG 경로가 1순위)
  * ════════════════════════════════════════════════════════════════════════
- * 1순위) SVG 필터 기반 생성 — Cloudflare Workers AI의 텍스트 모델(LLM)에게
- *        스타일별 프롬프트를 그대로 주고 SVG 마크업 자체를 만들게 한다.
- *        - 100% 벡터라 어떤 해상도로도 깨지지 않고, 한글 <text>도 그대로
- *          정확하게 렌더링된다(확산 모델처럼 글자가 깨지는 문제 자체가 없음).
- *        - 색상/좌표/도형을 그대로 텍스트(마크업)로 받기 때문에 후처리
- *          커스터마이징(굿즈화, 좌표 미세조정 등)이 이미지 모델보다 훨씬 쉽다.
- *        - 실패(모델이 유효한 SVG를 못 만들거나 파싱 오류)하면 2순위로 폴백.
- * 2순위) Cloudflare Workers AI 이미지 생성 모델 풀 — 스타일별로 3~4개씩
- *        묶은 풀에서 매번 무작위로 골라 시도하고, 실패하면 풀 안의 다음
- *        모델로 자동 폴백한다(고정된 단일 모델만 계속 쓰지 않는다).
- * 3순위) 이 파일 자체에 내장된 최종 SVG 카드 생성기(항상 성공) — 위 두
- *        경로가 전부 실패했을 때만 사용되는 안전망이다.
+ * 1순위) 프롬프트 충실 SVG — Workers AI LLM이 전달된 프롬프트 원문을 그대로 읽고 장면을
+ *        직접 그린다. 실물 느낌이 필요한 사물은 라이브러리 심볼(<use href="#obj-laptop">)로
+ *        가져다 쓸 수 있고, 결과는 svg-safe.js의 복구·검증과 최소 요소 수 검사를 통과해야 한다.
+ *        (AI 바인딩이 없거나 provider:"svg-scene" / env.SVG_FREEHAND="false" 면 건너뜀)
+ * 2순위) 오브젝트 씬 합성(svg-scene.js + svg-objects.js) — 프롬프트·주제에서 사물과 색을 골라
+ *        24종 벡터 오브젝트로 조립한다. 시드별로 레이아웃·배경 모티프·색이 달라지고, 항상
+ *        well-formed 이며 AI 없이도 동작한다.
+ * 3순위) Cloudflare Workers AI 이미지 생성 모델 풀 — provider:"ai-model"이면 1순위보다 먼저,
+ *        아니면 위 경로가 실패했을 때 시도한다(스타일별 풀에서 무작위 선택, 실패 시 다음 모델).
+ * 4순위) 이 파일 자체에 내장된 최종 SVG 카드 생성기(항상 성공).
  *
  * ⚠️ 2순위(확산 모델) 경로에서는 제목/부제목 한국어 텍스트를 이미지 위에
  * 직접 그리지 않는다 — zorlinq32 쪽 브라우저 <canvas>가 웹폰트로 직접 그려
@@ -61,6 +59,9 @@
  */
 
 import { CORS_HEADERS, json } from './search-core.js';
+import { escapeXml, finalizeSvg, svgToDataUrl, scanXml, countDrawn } from './svg-safe.js';
+import { buildSymbols, symbolCatalog, OBJECT_KEYS } from './svg-objects.js';
+import { planScene, composeSceneSvg } from './svg-scene.js';
 import KOREAN_FONT_TTF from './assets/fonts/NotoSansKR-Bold.ttf';
 
 // ──────────────────────────────────────────────────────────────────────
@@ -353,9 +354,11 @@ async function callOneModel( env, modelKey, prompt, width, height, style ) {
 	}
 }
 
-function arrayBufferToBase64( buffer ) {
+function arrayBufferToBase64( input ) {
+	// Uint8Array 뷰가 넘어오면 그 뷰의 범위만 인코딩해야 한다. 예전에는 pngBuffer.buffer(뷰가
+	// 가리키는 "전체" ArrayBuffer)를 넘겨, 뷰가 offset을 가진 경우 PNG가 깨질 수 있었다.
+	const bytes = input instanceof Uint8Array ? input : new Uint8Array( input );
 	let binary = '';
-	const bytes = new Uint8Array( buffer );
 	const chunkSize = 0x8000;
 	for ( let i = 0; i < bytes.length; i += chunkSize ) {
 		binary += String.fromCharCode.apply( null, bytes.subarray( i, i + chunkSize ) );
@@ -457,168 +460,133 @@ const SVG_STYLE_DIRECTIVES = {
 };
 
 /**
- * 1순위 경로: LLM에게 완성된 SVG 마크업을 직접 작성하게 한다.
- * 성공하면 { data_url, mime_type, ... }를 반환하고, 실패(모델 오류·유효하지
- * 않은 SVG)하면 null을 반환해 2순위로 넘어가게 한다.
+ * 프롬프트 충실 경로: LLM이 "전달된 프롬프트 그대로" 장면을 직접 그린다.
  *
- * ⚠️ 이 경로는 한글이 그대로 화면에 보여도 안전하므로(벡터 텍스트),
- * topic/subtitle 원문을 프롬프트에 그대로 포함시킨다.
+ * - 프롬프트 원문을 가장 앞에 두고, 프롬프트의 모든 명사·장소·시간대·색·분위기가
+ *   화면에 보이도록 요구한다(고정된 사물 목록에서 고르는 방식이 아니다).
+ * - 실물 느낌이 필요한 사물은 라이브러리 심볼(<use href="#obj-laptop" .../>)을 가져다 쓸 수
+ *   있게 하고, 없는 사물은 LLM이 도형으로 직접 그린다. 심볼 정의는 응답에 없어도 서버가
+ *   <defs>에 주입하므로 참조가 끊기지 않는다.
+ * - 결과는 복구·검증(finalizeSvg) + 최소 요소 수 검사를 통과해야만 채택한다. 실패하면
+ *   호출부가 오브젝트 씬 합성으로 넘어간다.
  */
+const MIN_DRAWN_ELEMENTS = 30;
+
 async function generateSvgWithLLM( env, body, style, width, height ) {
-	// AI 바인딩이 없는 설치에서는 호출 자체를 하지 않는다. 이전에는 여기서
-	// 예외를 낸 뒤 이미지 모델 풀을 전부 순회해 불필요한 경고와 지연을 만들었다.
 	if ( ! env || ! env.AI || typeof env.AI.run !== 'function' ) return null;
 
 	const directive = SVG_STYLE_DIRECTIVES[ style ] || SVG_STYLE_DIRECTIVES.minimal;
-	const prompt   = sanitizeImageText( body.prompt, 1200 );
+	const prompt   = sanitizeImageText( body.prompt, 1500 );
 	const title    = sanitizeImageText( body.topic, 90 );
 	const subtitle = sanitizeImageText( body.subtitle, 140 );
-	const subject  = title || prompt || subtitle;
+	const scene    = prompt || [ title, subtitle ].filter( Boolean ).join( ' - ' );
+	if ( ! scene ) return null;
 
 	const systemPrompt =
-		'당신은 SVG 마크업만으로 완성된 썸네일 비주얼을 그리는 시니어 그래픽 디자이너입니다. ' +
-		'설명이나 코드블록 표시(```) 없이, <svg> 태그로 시작해서 </svg> 태그로 끝나는 ' +
-		'완전한 SVG 마크업 "그 자체"만 출력하세요. 다른 텍스트는 절대 출력하지 마세요.\n\n' +
-		`캔버스 크기는 viewBox="0 0 ${ width } ${ height }" 로 고정합니다.\n\n` +
-		'[텍스트 레이어 규칙]\n' +
-		'제목 텍스트가 있다면 <text> 요소로 화면에 큼직하게(전체 높이의 8~12% 폰트 크기) 배치하고, ' +
-		'한글이 잘리거나 뷰박스를 벗어나지 않도록 폰트 크기와 좌측/여백 위치를 신중히 정하세요. ' +
-		'부제목이 있다면 제목보다 뚜렷이 작은 크기(전체 높이의 4~5%)로 제목 아래 배치해 위계를 만드세요. ' +
-		'font-family는 "Pretendard, \'Apple SD Gothic Neo\', \'Malgun Gothic\', sans-serif"로 지정하고, ' +
-		'제목은 font-weight="700" 이상으로 굵게 처리하세요. 텍스트와 배경의 명도 대비가 충분해 ' +
-		'가독성이 확실히 보장되도록 하세요(필요하면 텍스트 뒤에 반투명 블록이나 그림자를 추가).\n\n' +
-		'[구성 규칙]\n' +
-		'이 요청의 핵심 주제를 장식용 추상 도형으로만 대체하지 마세요. 핵심 주제를 알아볼 수 있는 ' +
-		'주요 오브젝트/장면을 직접 제작하고, 그 오브젝트가 화면 면적의 상당 부분을 차지하게 하세요. ' +
-		'주제와 관련된 보조 오브젝트와 배경 맥락도 함께 그리되, 요청과 무관한 사람·동물·아이콘을 넣지 마세요.\n' +
-		'반드시 (1) 배경 레이어(그라디언트 포함), (2) 배경 장식/텍스처 레이어, (3) 주제를 표현하는 ' +
-		'전경 오브젝트 레이어, (4) 제목 텍스트 레이어, (5) 부제목 텍스트 레이어(있는 경우) — 이렇게 ' +
-		'레이어를 명확히 분리된 SVG 요소로 구성하세요. CSS나 외부 이미지, <image>, foreignObject는 ' +
-		'사용하지 마세요. 첫 번째 자식으로 요청의 핵심 주제를 설명하는 <title>을 넣으세요.\n\n' +
-		'[색상·디테일 규칙]\n' +
-		'전체 배색은 서로 조화로운 3~5개 색상으로 제한하고, 스타일 톤에 맞는 명확한 주조색을 정하세요. ' +
-		'그라디언트(linearGradient/radialGradient), 은은한 필터(feGaussianBlur 등), 도형, 패턴을 활용해 ' +
-		'배경을 밋밋하지 않게 풍부하게 만들되 텍스트 가독성을 해치지 않는 선에서 절제하세요.\n\n' +
-		`디자인 톤: ${ directive }`;
+		'You are a senior vector illustrator. Draw ONE finished, detailed illustration as raw SVG that depicts the ' +
+		'IMAGE PROMPT as literally and specifically as possible. Every subject, object, setting, color, time of day, ' +
+		'weather, mood and quantity mentioned in the prompt must be clearly recognizable in the picture. Do not replace ' +
+		'the requested subject with generic abstract shapes, and do not add unrelated subjects.\n\n' +
+		'OUTPUT FORMAT: output only the SVG markup, starting with <svg and ending with </svg>. No explanation, no code fences.\n' +
+		`Canvas: <svg xmlns="http://www.w3.org/2000/svg" width="${ width }" height="${ height }" viewBox="0 0 ${ width } ${ height }">. ` +
+		'The first child must be a <title> describing the scene.\n\n' +
+		'COMPOSITION (build in this order, back to front): 1) background: sky / wall / room / landscape that matches the prompt\n' +
+		'with a gradient; 2) environment details that belong to the setting (furniture, buildings, hills, trees, windows, horizon, ...); ' +
+		'3) the MAIN SUBJECT drawn large (at least 35% of the canvas), built from many overlapping shapes with gradients, ' +
+		'highlights, shading and a contact shadow so it looks solid and realistic; 4) secondary objects from the prompt; ' +
+		'5) small foreground details, light effects and depth (overlapping layers, lighter far away, darker near). ' +
+		'Use at least 40 shapes. Use the colors and lighting named in the prompt; otherwise choose a coherent 4-6 color palette.\n\n' +
+		'LIBRARY SYMBOLS (optional, already defined, do not redefine): ' + symbolCatalog() + '. ' +
+		'Place one with <use href="#obj-laptop" x="..." y="..." width="..." height="..."/> (keep width equal to height). ' +
+		'Use a symbol when the prompt asks for exactly that object; draw everything else yourself, and draw the scene around them.\n\n' +
+		'RULES: valid XML. Escape & < > as &amp; &lt; &gt; in text. Never repeat an attribute on one tag. ' +
+		'No <script>, <image>, <foreignObject>, external links, CSS @import or filters (use gradients and semi-transparent shapes instead). ' +
+		'Every shape needs explicit fill or stroke. Keep all important content inside the canvas.\n\n' +
+		( title
+			? `TEXT: add the title "${ title }"` + ( subtitle ? ` and the smaller subtitle "${ subtitle }"` : '' ) +
+				' as <text> (font-family="Noto Sans KR, sans-serif", font-weight="700" for the title) on a translucent dark or light band ' +
+				'in an empty area (usually the lower-left), sized 6-9% of the canvas height, high contrast, never covering the main subject. ' +
+				'Break long titles into several <text> lines so nothing leaves the canvas.\n\n'
+			: 'TEXT: do not put any text in the image.\n\n' ) +
+		`Overall look: ${ directive }`;
 
-	const userPrompt = [
-		prompt   ? `원본 이미지 프롬프트(가장 중요한 시각 요구사항): ${ prompt }` : '',
-		title    ? `제목: ${ title }`    : '',
-		subtitle ? `부제목: ${ subtitle }` : '',
-		`핵심 주제: ${ subject }`,
-		'위 요구사항을 만족하는, 주제와 시각적으로 직접 관련된 완성형 썸네일을 SVG로 그려주세요.',
-	].filter( Boolean ).join( '\n' );
+	const userPrompt =
+		`IMAGE PROMPT (draw exactly this):\n${ scene }` +
+		( title && prompt ? `\n\nTitle: ${ title }` + ( subtitle ? `\nSubtitle: ${ subtitle }` : '' ) : '' ) +
+		'\n\nNow output the complete SVG.';
 
 	const messages = [
 		{ role: 'system', content: systemPrompt },
 		{ role: 'user', content: userPrompt },
 	];
 
-	// 첫 시도 실패(모델 오류 또는 유효하지 않은 SVG) 시 1회 재시도한다.
-	// 재시도 시에는 이전 실패를 알려 더 신중하게 규칙을 지키도록 유도한다.
-	const attempts = [ null, '이전 시도가 유효하지 않은 SVG를 생성했습니다. 반드시 <svg>로 시작해서 </svg>로 ' +
-		'끝나는 완전한 마크업만, 다른 설명 없이 출력하세요. viewBox 속성을 지시받은 크기 그대로(예: ' +
-		`"0 0 ${ width } ${ height }") 정확히 넣고, width/height 고정 속성은 넣지 마세요. ` +
-		'<title> 요소를 첫 번째 자식으로 반드시 포함하세요.' ];
+	const attempts = [ null,
+		'The previous answer was rejected (invalid XML, too few shapes, wrong canvas, or extra text around the SVG). ' +
+		`Output ONLY a complete, valid SVG with viewBox="0 0 ${ width } ${ height }", at least 40 shapes, closed tags and escaped &. ` +
+		'The picture must show what the prompt describes.' ];
 
 	for ( const retryNote of attempts ) {
-		const callMessages = retryNote
-			? [ ...messages, { role: 'user', content: retryNote } ]
-			: messages;
-
+		const callMessages = retryNote ? [ ...messages, { role: 'user', content: retryNote } ] : messages;
 		try {
 			const result = await env.AI.run( SVG_TEXT_MODEL, {
 				messages: callMessages,
-				max_tokens: 3000,
+				max_tokens: 6000,
+				temperature: 0.7,
 			} );
-
 			const raw = result && result.response ? String( result.response ) : '';
-			const svg = extractSvgMarkup( raw, width, height );
-			if ( svg ) {
-				return {
-					data_url:      'data:image/svg+xml;base64,' + btoa( unescape( encodeURIComponent( svg ) ) ),
-					mime_type:     'image/svg+xml',
-					width,
-					height,
-					provider:      'svg-llm:' + SVG_TEXT_MODEL.split( '/' ).pop(),
-					model_used:    'SVG (Llama 3.3 70B Instruct)',
-					fallback_used: false,
-					raw_svg:       svg,
-				};
-			}
+			let svg = extractSvgMarkup( raw, width, height );
+			if ( ! svg ) continue;
+			svg = injectSymbols( svg );
+			if ( ! svg || countDrawn( svg ) < MIN_DRAWN_ELEMENTS ) continue;
+			return {
+				data_url:      svgToDataUrl( svg ),
+				mime_type:     'image/svg+xml',
+				format:        'svg',
+				width,
+				height,
+				provider:      'svg-llm:' + SVG_TEXT_MODEL.split( '/' ).pop(),
+				model_used:    'SVG (Llama 3.3 70B Instruct)',
+				fallback_used: false,
+				raw_svg:       svg,
+			};
 		} catch ( err ) {
 			console.warn( `[image-core] SVG LLM 생성 실패(${ retryNote ? '재시도' : '1차' }): ${ err && err.message ? err.message : err }` );
 		}
 	}
-
 	return null;
 }
 
 /**
- * LLM 응답에서 실제 <svg>...</svg> 마크업만 추출하고, 형태가 최소한
- * 유효한지(태그 짝, viewBox 존재) 가볍게 검증한다. 완전한 XML 검증은
- * 하지 않지만, 명백히 깨진 응답(코드블록 설명이 섞이거나 태그가
- * 안 닫힌 경우)은 걸러내 2순위로 안전하게 넘어가게 한다.
+ * 응답이 참조한 라이브러리 심볼 정의를 <defs>로 주입하고, 존재하지 않는 #obj-* 참조(<use>)는 제거한다.
+ * 검증을 통과하지 못하면 null.
+ */
+function injectSymbols( svg ) {
+	const known = new Set( OBJECT_KEYS.map( ( k ) => 'obj-' + k ) );
+	const used = new Set();
+	let out = svg.replace( /<use\b[^>]*?(?:xlink:)?href\s*=\s*["']#([\w-]+)["'][^>]*?\/>|<use\b[^>]*?(?:xlink:)?href\s*=\s*["']#([\w-]+)["'][^>]*?>\s*<\/use>/gi, ( m, a, b ) => {
+		const id = a || b;
+		if ( known.has( id ) ) { used.add( id ); return m; }
+		// 모델이 자기 <defs>에 직접 정의한 id면 그대로 두고, 아니면 끊어진 참조이므로 제거한다.
+		return new RegExp( `id\\s*=\\s*["']${ id }["']` ).test( svg ) ? m : '';
+	} );
+	if ( used.size ) {
+		const defs = '<defs>' + buildSymbols( [ ...used ].map( ( id ) => id.slice( 4 ) ) ) + '</defs>';
+		out = out.replace( /^(<svg\b[^>]*>)/, `$1${ defs }` );
+	}
+	return scanXml( out ).ok ? out : null;
+}
+
+/**
+ * LLM 응답에서 SVG를 뽑아 "반드시 렌더링되는" 상태로 만든다(svg-safe.js 위임).
  *
- * width/height가 주어지면 viewBox가 실제로 존재하는지, 그리고 SVG 루트에
- * 요청 비율과 크게 어긋나는 고정 width/height 속성이 박혀 있어 반응형
- * 렌더링을 깨뜨리지 않는지도 함께 확인한다.
+ * 예전 구현은 루트의 width/height를 일부러 제거했는데, 그러면 Firefox 캔버스
+ * 합성·WordPress 미디어 업로드처럼 고유 크기가 필요한 소비자가 이미지를 못 읽는다.
+ * 지금은 요청 픽셀 크기를 width/height + viewBox로 모두 명시한다. 또한
+ * bare `&`, 닫히지 않은 태그, 중복 속성, 토큰 초과로 잘린 응답을 복구하거나
+ * 거부해서 깨진 SVG가 그대로 나가지 않게 한다.
  */
 function extractSvgMarkup( raw, width, height ) {
-	if ( ! raw ) return null;
-	const start = raw.indexOf( '<svg' );
-	const end   = raw.lastIndexOf( '</svg>' );
-	if ( start === -1 || end === -1 || end <= start ) return null;
-
-	const svg = raw.slice( start, end + '</svg>'.length ).trim();
-	// 아주 짧으면(모델이 태그만 흉내내고 내용은 못 채운 경우) 신뢰하지 않는다.
-	if ( svg.length < 300 ) return null;
-	// SVG는 data URL이라도 script/event handler/외부 리소스를 포함할 수 있다.
-	// LLM 결과는 신뢰할 수 없는 입력으로 취급하고, 완성형 벡터 요소만 허용한다.
-	if ( /<(?:script|foreignObject|iframe|image)\b|\son\w+\s*=|(?:href|xlink:href)\s*=\s*["']\s*(?:https?:|data:|javascript:)/i.test( svg ) ) return null;
-	if ( ! /<title(?:\s[^>]*)?>[\s\S]*?<\/title>/i.test( svg ) ) return null;
-
-	// <svg ...> 여는 태그만 뽑아 xmlns·viewBox·고정 width/height 속성을 확인한다.
-	const openTagMatch = svg.match( /<svg\b[^>]*>/i );
-	let openTag = openTagMatch ? openTagMatch[ 0 ] : '';
-	if ( ! openTag ) return null;
-
-	const viewBoxMatch = openTag.match( /viewBox\s*=\s*["']\s*[\d.\-]+\s+[\d.\-]+\s+([\d.]+)\s+([\d.]+)\s*["']/i );
-	if ( ! viewBoxMatch ) return null; // viewBox 자체가 없으면 스케일링이 불안정하므로 신뢰하지 않는다.
-
-	let fixedSvg = svg;
-
-	// xmlns 네임스페이스 누락은 흔한 LLM 실수다(관찰된 실제 사례: <svg
-	// viewBox="..."> 만 쓰고 xmlns를 빼먹음). 이 경우 브라우저가 문서를
-	// SVG가 아닌 일반 XML로 취급해 렌더링하지 못하고, resvg 같은 래스터
-	// 라이저는 아예 크래시한다. 거부하고 2순위로 넘기는 대신, 서버에서
-	// 표준 네임스페이스를 주입해 살려낸다(1순위 경로를 최대한 살리기 위함).
-	if ( ! /xmlns\s*=/i.test( openTag ) ) {
-		const withXmlns = openTag.replace( /^<svg\b/i, '<svg xmlns="http://www.w3.org/2000/svg"' );
-		fixedSvg = fixedSvg.replace( openTag, withXmlns );
-		openTag = withXmlns;
-	}
-
-	if ( width && height ) {
-		const vbWidth = parseFloat( viewBoxMatch[ 1 ] );
-		const vbHeight = parseFloat( viewBoxMatch[ 2 ] );
-		if ( vbWidth > 0 && vbHeight > 0 ) {
-			const requestedRatio = width / height;
-			const vbRatio = vbWidth / vbHeight;
-			// 요청 비율과 30% 넘게 어긋나면 모델이 지시받은 viewBox를 무시하고
-			// 임의의 크기로 그렸다는 뜻이므로 신뢰하지 않고 2순위로 넘어간다.
-			if ( Math.abs( vbRatio - requestedRatio ) / requestedRatio > 0.3 ) return null;
-		}
-		// 루트에 고정 width/height(px 등 절대단위)가 박혀 있으면 컨테이너
-		// 크기에 맞춰 반응형으로 늘어나지 않는다 — 있다면 제거해 viewBox만으로
-		// 스케일링되게 한다.
-		const stripped = openTag.replace( /\s(?:width|height)\s*=\s*["'][^"']*["']/gi, '' );
-		if ( stripped !== openTag ) {
-			fixedSvg = fixedSvg.replace( openTag, stripped );
-		}
-	}
-
-	return fixedSvg;
+	return finalizeSvg( raw, width, height );
 }
 
 function sanitizeImageText( value, maxLength ) {
@@ -644,15 +612,6 @@ const FALLBACK_STYLE_COLORS = {
 	branding:        [ '#312e81', '#4338ca', '#a5b4fc' ],
 };
 
-function escapeXml( str ) {
-	return String( str )
-		.replace( /&/g, '&amp;' )
-		.replace( /</g, '&lt;' )
-		.replace( />/g, '&gt;' )
-		.replace( /"/g, '&quot;' )
-		.replace( /'/g, '&apos;' );
-}
-
 function buildFallbackSvgCard( topic, subtitle, style, width, height ) {
 	const [ c1, c2, accent ] = FALLBACK_STYLE_COLORS[ style ] || FALLBACK_STYLE_COLORS.minimal;
 	const title = escapeXml( ( topic || '' ).toString().slice( 0, 40 ) );
@@ -674,7 +633,8 @@ function buildFallbackSvgCard( topic, subtitle, style, width, height ) {
 		? `<rect x="0" y="${ height * 0.34 }" width="${ width * 0.72 }" height="${ height * 0.36 }" fill="#000000" opacity="${ scrimOpacity }"/>`
 		: '';
 
-	return `<svg viewBox="0 0 ${ width } ${ height }" xmlns="http://www.w3.org/2000/svg">
+	return `<svg xmlns="http://www.w3.org/2000/svg" width="${ width }" height="${ height }" viewBox="0 0 ${ width } ${ height }" role="img" aria-label="${ title }">
+  <title>${ title || 'thumbnail' }</title>
   <defs>
     <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
       <stop offset="0%" stop-color="${ c1 }"/>
@@ -737,8 +697,12 @@ async function rasterizeSvgToPng( svg, width, height ) {
 			background: 'rgba(0,0,0,0)',
 		} );
 		const pngData = resvg.render();
-		const pngBuffer = pngData.asPng();
-		return { base64: arrayBufferToBase64( pngBuffer.buffer ? pngBuffer.buffer : pngBuffer ), mime: 'image/png' };
+		const pngBytes = pngData.asPng();
+		// PNG 시그니처(89 50 4E 47)를 확인해, 비정상 바이트가 PNG로 둔갑해 나가지 않게 한다.
+		if ( ! pngBytes || pngBytes.length < 8 || pngBytes[ 0 ] !== 0x89 || pngBytes[ 1 ] !== 0x50 || pngBytes[ 2 ] !== 0x4E || pngBytes[ 3 ] !== 0x47 ) {
+			throw new Error( 'resvg가 유효한 PNG를 반환하지 않음' );
+		}
+		return { base64: arrayBufferToBase64( pngBytes ), mime: 'image/png' };
 	} catch ( err ) {
 		console.warn( `[image-core] SVG→PNG 래스터라이즈 실패(SVG로 폴백): ${ err && err.message ? err.message : err }` );
 		return null;
@@ -785,18 +749,59 @@ export async function generateImage( env, body ) {
 	const style  = SVG_STYLE_DIRECTIVES[ requestedStyle ] ? requestedStyle : 'minimal';
 	const width  = Math.min( Math.max( parseInt( body.width, 10 )  || 1600, 256 ), 2048 );
 	const height = Math.min( Math.max( parseInt( body.height, 10 ) || 900,  256 ), 2048 );
+	const provider = String( body.provider || '' ).toLowerCase();
 
-	const svgResult = await generateSvgWithLLM( env, body, style, width, height );
-	if ( svgResult ) return tryConvertToPng( env, svgResult );
+	// 요청에서 확산 모델을 명시한 경우에만 그림 생성 모델 풀을 먼저 시도한다.
+	if ( 'ai-model' === provider ) {
+		const modelFirst = await generateWithImageModelPool( env, body, style, width, height );
+		if ( modelFirst ) return { ...modelFirst, fallback_used: false };
+	}
 
-	const modelResult = await generateWithImageModelPool( env, body, style, width, height );
-	if ( modelResult ) return { ...modelResult, fallback_used: true };
+	// 1순위: LLM이 프롬프트를 그대로 읽고 장면을 직접 그린다(AI 바인딩이 있고 강제 해제하지 않은 경우).
+	// provider:"svg-scene" 이거나 env.SVG_FREEHAND="false" 면 건너뛴다.
+	const freehandOff = 'svg-scene' === provider || String( env && env.SVG_FREEHAND ).toLowerCase() === 'false';
+	if ( ! freehandOff ) {
+		const svgResult = await generateSvgWithLLM( env, body, style, width, height );
+		if ( svgResult ) return tryConvertToPng( env, svgResult );
+	}
 
-	// 1·2순위 모두 실패 — 이 파일 안에서 완결되는 최종 안전망.
-	const svg = buildFallbackSvgCard( body.topic, body.subtitle, style, width, height );
+	// 2순위: 주제·프롬프트에서 사물을 골라 조립하는 오브젝트 씬(항상 well-formed, AI 없이도 동작).
+	try {
+		const plan = await planScene( env, body );
+		const composed = composeSceneSvg( plan, {
+			topic: body.topic, subtitle: body.subtitle, prompt: body.prompt, style, width, height,
+		} );
+		const svg = finalizeSvg( composed, width, height );
+		if ( svg ) {
+			return tryConvertToPng( env, {
+				data_url:      svgToDataUrl( svg ),
+				mime_type:     'image/svg+xml',
+				format:        'svg',
+				width,
+				height,
+				provider:      'svg-scene:' + plan.planner,
+				model_used:    `SVG Scene (${ [ plan.hero, ...plan.supports ].join( ' + ' ) })`,
+				fallback_used: ! freehandOff && !! ( env && env.AI ),
+				scene:         { hero: plan.hero, supports: plan.supports, planner: plan.planner },
+				raw_svg:       svg,
+			} );
+		}
+		console.warn( '[image-core] 씬 SVG가 검증을 통과하지 못해 다음 경로로 넘어갑니다.' );
+	} catch ( err ) {
+		console.warn( `[image-core] 씬 합성 실패: ${ err && err.message ? err.message : err }` );
+	}
+
+	if ( 'ai-model' !== provider ) {
+		const modelResult = await generateWithImageModelPool( env, body, style, width, height );
+		if ( modelResult ) return { ...modelResult, fallback_used: true };
+	}
+
+	// 위 경로가 모두 실패 — 이 파일 안에서 완결되는 최종 안전망.
+	const svg = buildFallbackSvgCard( body.topic || body.subtitle || body.prompt, body.subtitle, style, width, height );
 	const fallbackResult = {
-		data_url:      'data:image/svg+xml;base64,' + btoa( unescape( encodeURIComponent( svg ) ) ),
+		data_url:      svgToDataUrl( svg ),
 		mime_type:     'image/svg+xml',
+		format:        'svg',
 		width,
 		height,
 		provider:      'fallback-svg-card',

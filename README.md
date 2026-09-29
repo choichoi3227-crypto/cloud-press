@@ -8,7 +8,7 @@ Cloudflare Workers / Pages Functions 무료 플랜에 배포 가능한, API 키 
 
 - `GET /api/search` — Google + 네이버 검색 결과를 JSON으로 반환
 - `POST /api/research` — 검색 결과 기반 주제 조사 JSON
-- `GET/POST /api/image` — Workers AI(FLUX) 또는 헤드리스 SVG 카드로 썸네일 생성
+- `GET/POST /api/image` — 전달된 프롬프트를 그대로 그린 SVG 썸네일 생성. 1순위는 LLM이 프롬프트를 읽고 직접 그리는 방식(`image-core.js`), 실패 시 주제에 맞는 오브젝트 씬 합성(`svg-scene.js`, `svg-objects.js`)으로 폴백하며 결과는 `svg-safe.js`로 검증·복구 후 가능하면 PNG로 변환합니다. `provider`: `svg-scene`(LLM 생략) / `ai-model`(FLUX 등 이미지 모델 우선).
 
 상세 내용은 이 디렉토리의 각 소스 파일(`search-core.js`, `research-core.js`, `image-core.js`, `worker-search.js`, `functions/`)과 `search.html`을 참조하세요. 배포는 루트의 `wrangler.toml`(Worker 이름: `cloudpress-search-endpoint`) 또는 `wrangler-search.toml`을 사용합니다.
 

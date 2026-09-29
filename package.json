@@ -1,14 +1,14 @@
 {
   "name": "cloud-press",
   "version": "1.0.0",
-  "description": "Cloudflare Workers 무료/저비용 검색 스크래핑 + 주제조사 + SVG 필터 기반 이미지 생성 API — Google+Naver, API 키 없는 URL 요청 기반 엔드포인트. /api/image는 1순위로 LLM(텍스트 모델)이 결정한 SVG 필터 디자인을 PNG로 래스터라이즈해 반환하며, AI 바인딩 없이도 규칙 기반 기본값으로 100% 동작.",
+  "description": "Cloudflare Workers 무료/저비용 검색 스크래핑 + 주제조사 + SVG 필터 기반 이미지 생성 API — Google+Naver, API 키 없는 URL 요청 기반 엔드포인트. /api/image는 주제·프롬프트에 맞는 오브젝트(노트북·커피·차트 등 24종)로 구성한 SVG 씬을 PNG로 래스터라이즈해 반환하며, AI 바인딩 없이도 키워드 기반으로 100% 동작.",
   "private": true,
   "type": "module",
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
     "deploy:search": "wrangler deploy",
-    "check": "node --check search-core.js && node --check research-core.js && node --check research-handler.js && node --check image-core.js && node --check worker-search.js && node --check functions/api/search.js && node --check functions/api/research.js && node --check functions/api/image.js"
+    "check": "node --check search-core.js && node --check research-core.js && node --check research-handler.js && node --check svg-safe.js && node --check svg-objects.js && node --check svg-scene.js && node --check image-core.js && node --check worker-search.js && node --check functions/api/search.js && node --check functions/api/research.js && node --check functions/api/image.js"
   },
   "devDependencies": {
     "wrangler": "^4.0.0"

@@ -24,3 +24,4 @@ ai-models/training/*/checkpoints/
 
 # OS
 .DS_Store
+/cloud-press/

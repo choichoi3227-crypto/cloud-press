@@ -6,7 +6,7 @@
  * Routes:
  *   GET  /api/search?q={query}&engine=all|google|naver&start=0
  *   POST /api/research   { query, max_results?, country? }  (X-AIBP-Secret optional)
- *   GET/POST /api/image   { prompt, topic?, subtitle?, style?, width?, height? }
+ *   GET/POST /api/image   { prompt, topic?, subtitle?, display_subtitle?, style?, width?, height? }
  *   GET  / or /search    - minimal endpoint documentation
  *
  * Cloudflare Workers AI (recommended, see wrangler.toml [ai] binding):

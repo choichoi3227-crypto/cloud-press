@@ -5,10 +5,20 @@
  * 이 파일의 역할
  * ════════════════════════════════════════════════════════════════════════
  * zorlinq32(WordPress 플러그인)가 POST /api/image로 보내는
- *   { prompt, topic, subtitle, style, width, height }
+ *   { prompt, topic, scene, subtitle, display_subtitle, style, width, height }
  * 를 받아, 스타일에 맞는 이미지를 만들어
- *   { data_url, mime_type, width, height, provider, model_used, fallback_used }
+ *   { data_url, mime_type, width, height, provider, model_used, fallback_used, text_included }
  * 형태로 돌려준다.
+ *
+ * - topic            : 이미지에 제목으로 그려지는 유일한 문구.
+ * - scene            : 주제에서 파생한 "무엇을 그릴지" 설명(스타일 지시문 제외). 오브젝트·색 선택에만 쓴다.
+ * - subtitle         : 조사 결과(hero_shot 등)의 "장면 설명". 오브젝트·색을 고르는 참고용이며 절대 화면에 그리지 않는다.
+ * - display_subtitle : 화면에 실제로 그릴 부제(선택). 없으면 부제 없이 제목만 그린다.
+ * - text_included    : 응답 이미지 안에 제목이 이미 그려졌는지. true 면 호출자는 제목을 다시 합성하면 안 된다
+ *                      (SVG를 PNG로 래스터라이즈해도 true 로 유지된다 — mime_type 만으로 판단하면 제목이 2번 나온다).
+ *
+ * 스타일: 기존 5종(poster/minimal/photo_realistic/typography/branding) + 디자인 6종
+ *         (gradient/infographic/isometric/neon/papercut/blueprint, svg-styles.js).
  *
  * ════════════════════════════════════════════════════════════════════════
  * 생성 경로 우선순위 (SVG 경로가 1순위)
@@ -61,7 +71,8 @@
 import { CORS_HEADERS, json } from './search-core.js';
 import { escapeXml, finalizeSvg, svgToDataUrl, scanXml, countDrawn } from './svg-safe.js';
 import { buildSymbols, symbolCatalog, OBJECT_KEYS } from './svg-objects.js';
-import { planScene, composeSceneSvg } from './svg-scene.js';
+import { planScene, composeSceneSvg, hasSceneTitle } from './svg-scene.js';
+import { composeStyledSvg, STYLED_KEYS } from './svg-styles.js';
 import KOREAN_FONT_TTF from './assets/fonts/NotoSansKR-Bold.ttf';
 
 // ──────────────────────────────────────────────────────────────────────
@@ -206,6 +217,20 @@ const STYLE_MODEL_POOLS = {
 	// CTA/브랜드 캠페인 비주얼 — 고품질·프롬프트 순응도가 중요해 Klein 9B와
 	// Phoenix(텍스트/로고 요소가 섞여도 안정적)를 우선한다.
 	branding: [ 'FLUX2_KLEIN_9B', 'PHOENIX', 'LUCID_ORIGIN', 'SDXL_BASE' ],
+
+	// ── 디자인 스타일 6종(svg-styles.js가 1순위로 직접 그리며, 아래 풀은 ai-model 요청·SVG 실패 시에만 쓰인다) ──
+	// 부드러운 색 번짐/오로라 그라디언트 — 저스텝 모델도 잘 그린다.
+	gradient: [ 'FLUX_SCHNELL', 'LUCID_ORIGIN', 'SDXL_LIGHTNING' ],
+	// 정보 전달형 플랫 그래픽 — 그래픽 디자인 특화 Lucid Origin 우선.
+	infographic: [ 'LUCID_ORIGIN', 'FLUX2_KLEIN_9B', 'PHOENIX' ],
+	// 등각 3D 렌더 — 프롬프트 순응도가 높은 모델 우선.
+	isometric: [ 'FLUX2_KLEIN_9B', 'LUCID_ORIGIN', 'SDXL_BASE' ],
+	// 어두운 배경 + 발광 — 대비 표현이 좋은 SDXL Base 우선.
+	neon: [ 'SDXL_BASE', 'LUCID_ORIGIN', 'FLUX2_KLEIN_4B', 'PHOENIX' ],
+	// 종이 공예 — 질감 표현이 좋은 모델 우선.
+	papercut: [ 'FLUX2_KLEIN_9B', 'SDXL_BASE', 'PHOENIX' ],
+	// 청사진 도면 — 선화·그리드 표현이 안정적인 모델 우선.
+	blueprint: [ 'SDXL_BASE', 'LUCID_ORIGIN', 'FLUX_SCHNELL' ],
 };
 
 const DEFAULT_POOL = [ 'FLUX_SCHNELL', 'SDXL_BASE', 'DREAMSHAPER' ];
@@ -226,6 +251,12 @@ const STYLE_NEGATIVE_PROMPT = {
 	minimal: 'cluttered, busy, complex pattern, high detail, many objects, harsh contrast, loud colors',
 	typography: 'cluttered, busy background, high detail, competing focal point, loud colors, complex texture',
 	branding: 'amateur, cheap looking, cluttered, low production value, harsh lighting, inconsistent style',
+	gradient: 'photograph, realistic objects, hard edges, flat single color, busy pattern, dirty muddy colors, cluttered',
+	infographic: 'photograph, photorealistic, 3d render, muddy colors, cluttered, unreadable tiny details, distorted charts',
+	isometric: 'perspective distortion, photograph, flat 2d, sketchy, inconsistent angles, cluttered, muddy colors',
+	neon: 'daylight, pastel, flat colors, low contrast, dull, washed out, photograph, cluttered',
+	papercut: 'photograph, glossy 3d render, neon, thin lines, sketch, digital gradients, cluttered',
+	blueprint: 'photograph, colorful, realistic shading, 3d render, pastel, cluttered, messy lines, hand drawn sketch',
 };
 
 function buildNegativePrompt( style ) {
@@ -278,6 +309,24 @@ function buildBackgroundPrompt( prompt, topic, subtitle, style ) {
 		branding:
 			'premium commercial brand campaign visual, polished studio-quality look, refined color palette, ' +
 			'balanced whitespace, consistent art direction, high production value',
+		gradient:
+			'vibrant aurora mesh gradient background, smooth blended color blobs on a dark base, frosted glass ' +
+			'translucent panels, soft glow, subtle floating particles, modern glassmorphism UI-poster aesthetic',
+		infographic:
+			'clean flat infographic layout on a light background, header band, numbered cards, simple icons, ' +
+			'mini bar and donut charts, tidy grid alignment, friendly corporate color palette',
+		isometric:
+			'isometric 3D illustration at exact 30 degree angle, isometric platform with cubes and bars, soft pastel ' +
+			'background, three-tone shading on every face, clean vector-like render, tiny floor shadows',
+		neon:
+			'dark cyberpunk neon scene, glowing cyan and magenta neon outlines, synthwave perspective grid floor, ' +
+			'luminous halo rings, deep black background, high contrast light bloom',
+		papercut:
+			'layered paper cut-out art, stacked paper waves with soft drop shadows, handmade craft look, warm ' +
+			'matte paper texture, rounded paper discs, depth created by layered shadows',
+		blueprint:
+			'engineering blueprint drawing on deep blue grid paper, white and cyan thin technical lines, dimension ' +
+			'arrows, callout leader lines, drawing title block, monochrome technical illustration',
 	}[ style ] || 'clean background, high production quality';
 
 	// topic/subtitle은 한국어일 가능성이 높으므로, 모델에는 주제를 "장면"으로
@@ -396,6 +445,7 @@ async function generateWithImageModelPool( env, body, style, width, height ) {
 						provider:      'workers-ai:' + picked.modelKey.toLowerCase(),
 						model_used:    picked.modelLabel,
 						fallback_used: order[ 0 ] !== modelKey,
+						text_included: false, // 확산 모델은 글자를 그리지 않는다 — 제목은 플러그인 캔버스가 합성
 					},
 				};
 			}
@@ -453,6 +503,25 @@ const SVG_STYLE_DIRECTIVES = {
 		'텍스트가 화면의 주인공이 되는 구도. 배경은 텍스트 가독성을 해치지 않는 저채도 단순 패턴이나 ' +
 		'그라디언트로만 구성하고, 텍스트 뒤나 주변에 옅은 보조 도형(기하학적 프레임, 밑줄, 강조 블록)을 ' +
 		'배치해 완성도를 높인다. 텍스트와 배경의 명도 대비를 충분히 확보한다.',
+	gradient:
+		'어두운 바탕 위에 3~4개의 선명한 색(예: 보라·핑크·청록·주황)이 부드럽게 번지는 오로라/메시 그라디언트 배경. ' +
+		'반투명 유리 카드(글래스모피즘: 흰색 10~30% 채움 + 얇은 흰 테두리)와 빛 번짐, 작은 입자로 깊이를 주고 ' +
+		'날카로운 외곽선은 쓰지 않는다. 주제 오브젝트는 유리 카드 위에 크고 선명하게 둔다.',
+	infographic:
+		'정보 전달형 인포그래픽. 밝은 배경 + 상단 색 띠 헤더(제목), 번호 배지(1·2·3)가 붙은 흰 카드 2~3개, 각 카드에 주제 관련 ' +
+		'아이콘과 미니 차트(막대·도넛·진행 막대)를 넣는다. 정렬은 격자에 맞추고, 실제 통계 수치나 없는 사실을 지어내지 않는다.',
+	isometric:
+		'30° 등각 투영(아이소메트릭) 3D 일러스트. 등각 플랫폼 위에 큐브·막대·주제 오브젝트를 세우고, 모든 면을 ' +
+		'윗면 밝게 / 왼쪽 중간 / 오른쪽 어둡게 3톤으로 칠한다. 원근 왜곡 없이 평행선만 사용하고 바닥에 부드러운 그림자를 둔다.',
+	neon:
+		'검정에 가까운 배경 위 형광 네온(시안·마젠타·라임) 발광 라인. 굵은 저불투명 선을 겹쳐 글로우를 표현하고, ' +
+		'원근 그리드 바닥, 발광 링, 코너 브래킷을 사용한다. 밝은 파스텔이나 흰 배경은 쓰지 않는다.',
+	papercut:
+		'종이 공예(페이퍼 컷아웃). 겹겹이 쌓인 종이 물결 레이어마다 위쪽에 어두운 반투명 그림자를 겹쳐 깊이를 만들고, ' +
+		'둥근 종이 원판·구름·별 조각을 사용한다. 무광의 따뜻한 색감, 얇은 선·네온·유광 효과는 금지.',
+	blueprint:
+		'청사진 도면. 짙은 파랑 배경에 옅은 방안(격자), 흰색·하늘색 가는 선만 사용한다. 치수선(양끝 화살표), 십자 중심선, ' +
+		'번호가 붙은 지시선과 부품 이름, 우하단 표제란(테두리 표)을 넣는다. 파랑·흰색 외 색은 오브젝트에만 허용.',
 	branding:
 		'고급스러운 브랜드 캠페인 비주얼. 정제된 색상 팔레트(주색 1개 + 중립색 1~2개), 균형 잡힌 여백, ' +
 		'상업적으로 세련된 톤을 유지한다. 얇은 라인 요소나 미묘한 그라디언트로 프리미엄한 질감을 더하고, ' +
@@ -478,7 +547,7 @@ async function generateSvgWithLLM( env, body, style, width, height ) {
 	const directive = SVG_STYLE_DIRECTIVES[ style ] || SVG_STYLE_DIRECTIVES.minimal;
 	const prompt   = sanitizeImageText( body.prompt, 1500 );
 	const title    = sanitizeImageText( body.topic, 90 );
-	const subtitle = sanitizeImageText( body.subtitle, 140 );
+	const subtitle = resolveDisplaySubtitle( body );
 	const scene    = prompt || [ title, subtitle ].filter( Boolean ).join( ' - ' );
 	if ( ! scene ) return null;
 
@@ -547,6 +616,7 @@ async function generateSvgWithLLM( env, body, style, width, height ) {
 				provider:      'svg-llm:' + SVG_TEXT_MODEL.split( '/' ).pop(),
 				model_used:    'SVG (Llama 3.3 70B Instruct)',
 				fallback_used: false,
+				text_included: !! title, // 제목을 이미지 안에 직접 그렸는지(플러그인이 제목을 중복 합성하지 않도록)
 				raw_svg:       svg,
 			};
 		} catch ( err ) {
@@ -589,6 +659,18 @@ function extractSvgMarkup( raw, width, height ) {
 	return finalizeSvg( raw, width, height );
 }
 
+/**
+ * 이미지 위에 실제로 "그려도 되는" 부제.
+ *
+ * ⚠️ `subtitle` 필드(플러그인이 조사 결과의 hero_shot 등 "그림 고르기용 장면 설명"을 담아 보내던 값)는
+ * 오브젝트·색을 고르는 참고 자료일 뿐 화면에 표시할 문구가 아니다. 예전에는 이 값을 그대로 부제로
+ * 찍어서 "OO을(를) 중심으로 한 상징적 장면" 같은 설명문이 썸네일에 나타났다. 표시할 부제가 정말 있을 때만
+ * `display_subtitle` 로 따로 보내야 하며, 없으면 부제는 그리지 않는다.
+ */
+function resolveDisplaySubtitle( body ) {
+	return sanitizeImageText( body && body.display_subtitle, 140 );
+}
+
 function sanitizeImageText( value, maxLength ) {
 	return String( value || '' )
 		.replace( /[\u0000-\u001F\u007F]/g, ' ' )
@@ -610,14 +692,24 @@ const FALLBACK_STYLE_COLORS = {
 	minimal:         [ '#f8fafc', '#e2e8f0', '#94a3b8' ],
 	typography:      [ '#111827', '#374151', '#60a5fa' ],
 	branding:        [ '#312e81', '#4338ca', '#a5b4fc' ],
+	gradient:        [ '#4f46e5', '#db2777', '#22d3ee' ],
+	infographic:     [ '#1e3a8a', '#2563eb', '#f59e0b' ],
+	isometric:       [ '#e0f2fe', '#bae6fd', '#f97316' ],
+	neon:            [ '#020617', '#111827', '#22d3ee' ],
+	papercut:        [ '#fde68a', '#fdba74', '#fb7185' ],
+	blueprint:       [ '#0b3d91', '#1e40af', '#93c5fd' ],
 };
 
+// 배경이 밝아 어두운 글자색을 써야 하는 스타일
+const LIGHT_BG_STYLES = new Set( [ 'minimal', 'isometric', 'papercut' ] );
+
 function buildFallbackSvgCard( topic, subtitle, style, width, height ) {
+	// topic 이 없으면 글자 없는 카드(프롬프트 원문을 제목으로 찍지 않는다).
 	const [ c1, c2, accent ] = FALLBACK_STYLE_COLORS[ style ] || FALLBACK_STYLE_COLORS.minimal;
 	const title = escapeXml( ( topic || '' ).toString().slice( 0, 40 ) );
 	const sub   = escapeXml( ( subtitle || '' ).toString().slice( 0, 60 ) );
-	const textColor = style === 'minimal' ? '#0f172a' : '#ffffff';
-	const scrimOpacity = style === 'minimal' ? 0 : 0.16;
+	const textColor = LIGHT_BG_STYLES.has( style ) ? '#0f172a' : '#ffffff';
+	const scrimOpacity = LIGHT_BG_STYLES.has( style ) ? 0 : 0.16;
 
 	// 스타일별로 장식 도형의 배치를 다르게 해 카드마다 구도가 단조롭지
 	// 않도록 한다(포스터: 대각선 스트라이프, 미니멀: 큰 원 하나, 그 외:
@@ -644,9 +736,9 @@ function buildFallbackSvgCard( topic, subtitle, style, width, height ) {
   <rect width="100%" height="100%" fill="url(#bg)"/>
   ${ decoration }
   ${ scrim }
-  <text x="${ width * 0.08 }" y="${ height * 0.5 }" font-family="Pretendard, 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif" font-size="${ Math.round( height * 0.09 ) }" font-weight="700" fill="${ textColor }">${ title }</text>
-  <text x="${ width * 0.08 }" y="${ height * 0.62 }" font-family="Pretendard, 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif" font-size="${ Math.round( height * 0.045 ) }" fill="${ textColor }" opacity="0.85">${ sub }</text>
-  <rect x="${ width * 0.08 }" y="${ height * 0.68 }" width="${ width * 0.1 }" height="${ Math.max( 4, height * 0.006 ) }" fill="${ accent }" opacity="0.9"/>
+  ${ title ? `<text x="${ width * 0.08 }" y="${ height * 0.5 }" font-family="Pretendard, 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif" font-size="${ Math.round( height * 0.09 ) }" font-weight="700" fill="${ textColor }">${ title }</text>` : '' }
+  ${ title && sub ? `<text x="${ width * 0.08 }" y="${ height * 0.62 }" font-family="Pretendard, 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif" font-size="${ Math.round( height * 0.045 ) }" fill="${ textColor }" opacity="0.85">${ sub }</text>` : '' }
+  <rect x="${ width * 0.08 }" y="${ height * ( title ? 0.68 : 0.5 ) }" width="${ width * 0.1 }" height="${ Math.max( 4, height * 0.006 ) }" fill="${ accent }" opacity="0.9"/>
 </svg>`;
 }
 
@@ -750,6 +842,14 @@ export async function generateImage( env, body ) {
 	const width  = Math.min( Math.max( parseInt( body.width, 10 )  || 1600, 256 ), 2048 );
 	const height = Math.min( Math.max( parseInt( body.height, 10 ) || 900,  256 ), 2048 );
 	const provider = String( body.provider || '' ).toLowerCase();
+	const displaySub = resolveDisplaySubtitle( body );
+	// 오브젝트·색 선택(주제 매칭)에 쓰는 텍스트. 플러그인이 주제에서 파생한 `scene`을 보내면 그것만 쓴다.
+	// `prompt`에는 스타일 지시문("poster", "product", "app-promo" ...)이 섞여 있어 키워드 사전이 엉뚱한
+	// 사물을 고르는 원인이 되기 때문이다. scene 이 없으면(구버전 플러그인) 기존처럼 prompt 를 쓴다.
+	const matchText = sanitizeImageText( body.scene, 600 ) || body.prompt;
+	// 디자인 스타일 6종은 svg-styles.js가 스타일별 고유 구도로 직접 그린다(결과가 항상 그 스타일다움).
+	// LLM 자유 작화는 provider:"svg-llm" 로 명시했을 때만 시도한다.
+	const isDesigned = STYLED_KEYS.includes( style );
 
 	// 요청에서 확산 모델을 명시한 경우에만 그림 생성 모델 풀을 먼저 시도한다.
 	if ( 'ai-model' === provider ) {
@@ -759,7 +859,7 @@ export async function generateImage( env, body ) {
 
 	// 1순위: LLM이 프롬프트를 그대로 읽고 장면을 직접 그린다(AI 바인딩이 있고 강제 해제하지 않은 경우).
 	// provider:"svg-scene" 이거나 env.SVG_FREEHAND="false" 면 건너뛴다.
-	const freehandOff = 'svg-scene' === provider || String( env && env.SVG_FREEHAND ).toLowerCase() === 'false';
+	const freehandOff = 'svg-scene' === provider || String( env && env.SVG_FREEHAND ).toLowerCase() === 'false' || ( isDesigned && 'svg-llm' !== provider );
 	if ( ! freehandOff ) {
 		const svgResult = await generateSvgWithLLM( env, body, style, width, height );
 		if ( svgResult ) return tryConvertToPng( env, svgResult );
@@ -767,10 +867,9 @@ export async function generateImage( env, body ) {
 
 	// 2순위: 주제·프롬프트에서 사물을 골라 조립하는 오브젝트 씬(항상 well-formed, AI 없이도 동작).
 	try {
-		const plan = await planScene( env, body );
-		const composed = composeSceneSvg( plan, {
-			topic: body.topic, subtitle: body.subtitle, prompt: body.prompt, style, width, height,
-		} );
+		const plan = await planScene( env, { ...body, prompt: matchText } );
+		const sceneOpts = { topic: body.topic, subtitle: displaySub, prompt: matchText, style, width, height };
+		const composed = isDesigned ? composeStyledSvg( plan, sceneOpts ) : composeSceneSvg( plan, sceneOpts );
 		const svg = finalizeSvg( composed, width, height );
 		if ( svg ) {
 			return tryConvertToPng( env, {
@@ -780,8 +879,10 @@ export async function generateImage( env, body ) {
 				width,
 				height,
 				provider:      'svg-scene:' + plan.planner,
-				model_used:    `SVG Scene (${ [ plan.hero, ...plan.supports ].join( ' + ' ) })`,
+				model_used:    `SVG Scene [${ style }] (${ [ plan.hero, ...plan.supports ].join( ' + ' ) })`,
 				fallback_used: ! freehandOff && !! ( env && env.AI ),
+				style,
+				text_included: hasSceneTitle( sceneOpts ),
 				scene:         { hero: plan.hero, supports: plan.supports, planner: plan.planner },
 				raw_svg:       svg,
 			} );
@@ -797,7 +898,7 @@ export async function generateImage( env, body ) {
 	}
 
 	// 위 경로가 모두 실패 — 이 파일 안에서 완결되는 최종 안전망.
-	const svg = buildFallbackSvgCard( body.topic || body.subtitle || body.prompt, body.subtitle, style, width, height );
+	const svg = buildFallbackSvgCard( sanitizeImageText( body.topic, 90 ) || displaySub, sanitizeImageText( body.topic, 90 ) ? displaySub : '', style, width, height );
 	const fallbackResult = {
 		data_url:      svgToDataUrl( svg ),
 		mime_type:     'image/svg+xml',
@@ -807,6 +908,7 @@ export async function generateImage( env, body ) {
 		provider:      'fallback-svg-card',
 		model_used:    'fallback-svg-card',
 		fallback_used: true,
+		text_included: !! ( sanitizeImageText( body.topic, 90 ) || displaySub ),
 		raw_svg:       svg,
 	};
 	return tryConvertToPng( env, fallbackResult );

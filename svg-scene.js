@@ -37,8 +37,8 @@ const KEYWORDS = {
 	bag:       [ '쇼핑', '쿠팡', '할인', '쇼핑몰', '구매', '최저가', '세일', '직구', '패션', '옷', '가방', '브랜드', '선물', '택배', '리뷰', '제품', '추천템', 'shopping', 'sale', 'discount', 'fashion', 'store', 'retail', 'ecommerce', 'purchase', 'gift', 'brand' ],
 	camera:    [ '사진', '촬영', '카메라', '영상', '유튜브', '유튜버', '여행 사진', '편집', '브이로그', '릴스', '인스타', '콘텐츠', 'photo', 'photography', 'camera', 'video', 'youtube', 'vlog', 'filming', 'instagram', 'content creator' ],
 	health:    [ '건강', '병원', '다이어트', '영양', '의료', '약', '질환', '증상', '치료', '예방', '면역', '비타민', '수면', '스트레스', '검진', '한의원', '통증', '혈압', '당뇨', 'health', 'medical', 'hospital', 'diet', 'nutrition', 'wellness', 'symptom', 'therapy', 'vitamin', 'sleep', 'doctor' ],
-	food:      [ '음식', '맛집', '요리', '레시피', '식당', '밥', '라면', '국수', '반찬', '점심', '저녁', '야식', '간식', '배달', '한식', '집밥', '먹거리', 'food', 'recipe', 'restaurant', 'cooking', 'meal', 'dinner', 'lunch', 'noodle', 'kitchen', 'dish' ],
-	shield:    [ '보안', '해킹', '개인정보', '백신', '안전', '보호', '사기', '피싱', '랜섬', '방화벽', '비밀번호', '인증', '보증', 'security', 'hacking', 'privacy', 'safety', 'protect', 'phishing', 'antivirus', 'firewall', 'password', 'vpn', 'cyber' ],
+	food:      [ '음식', '사료', '맛집', '요리', '레시피', '식당', '밥', '라면', '국수', '반찬', '점심', '저녁', '야식', '간식', '배달', '한식', '집밥', '먹거리', 'food', 'recipe', 'restaurant', 'cooking', 'meal', 'dinner', 'lunch', 'noodle', 'kitchen', 'dish' ],
+	shield:    [ '보안', '로그인', '해킹', '개인정보', '백신', '안전', '보호', '사기', '피싱', '랜섬', '방화벽', '비밀번호', '인증', '보증', 'security', 'hacking', 'privacy', 'safety', 'protect', 'phishing', 'antivirus', 'firewall', 'password', 'vpn', 'cyber', 'secure', 'login', 'brute force', 'attack' ],
 	airplane:  [ '여행', '항공', '비행기', '해외여행', '휴가', '관광', '호텔', '숙소', '공항', '항공권', '패키지', '출장', '투어', '리조트', 'travel', 'flight', 'airplane', 'airline', 'vacation', 'trip', 'tourism', 'hotel', 'airport', 'holiday' ],
 	chip:      [ '인공지능', '챗gpt', '챗봇', '로봇', '반도체', '머신러닝', '딥러닝', '자동화', '스마트', '테크', '기술', '데이터', '알고리즘', '프롬프트', 'ai', 'artificial intelligence', 'chatgpt', 'gpt', 'robot', 'chip', 'machine learning', 'automation', 'tech', 'technology', 'gemini', 'llm', 'algorithm' ],
 	calendar:  [ '일정', '시간', '마감', '스케줄', '계획', '달력', '예약', '기한', '신청 기간', '접수', '기간', '일주일', '루틴', '습관', '연휴', 'schedule', 'calendar', 'deadline', 'planning', 'plan', 'time management', 'routine', 'appointment', 'timeline' ],
@@ -62,7 +62,7 @@ const SUPPORT_DEFAULTS = {
 
 const GENERIC_HEROES = [ 'bulb', 'laptop', 'chart', 'globe', 'document', 'magnifier' ];
 
-function hashString( str ) {
+export function hashString( str ) {
 	let h = 2166136261;
 	for ( let i = 0; i < str.length; i++ ) {
 		h ^= str.charCodeAt( i );
@@ -71,7 +71,7 @@ function hashString( str ) {
 	return h >>> 0;
 }
 
-function mulberry32( seed ) {
+export function mulberry32( seed ) {
 	let a = seed >>> 0;
 	return () => {
 		a = ( a + 0x6D2B79F5 ) >>> 0;
@@ -252,7 +252,7 @@ function wrapLines( text, maxWidth, size ) {
 	return lines;
 }
 
-function fitText( text, maxWidth, maxLines, startSize, minSize ) {
+export function fitText( text, maxWidth, maxLines, startSize, minSize ) {
 	for ( let size = startSize; size >= minSize; size -= 2 ) {
 		const lines = wrapLines( text, maxWidth, size );
 		if ( lines.length <= maxLines ) return { size, lines };
@@ -269,7 +269,7 @@ function fitText( text, maxWidth, maxLines, startSize, minSize ) {
 }
 
 // 번들 폰트(Noto Sans KR)에 없는 이모지·특수 기호는 resvg에서 네모(□)로 나오므로 제거한다.
-function toRenderable( str ) {
+export function toRenderable( str ) {
 	return cleanXmlChars( str || '' )
 		.replace( /[\u{10000}-\u{10FFFF}]/gu, '' )
 		.replace( /[\u2190-\u2BFF\uFE00-\uFE0F\u200B-\u200F\u2060\u20A9]/g, '' )
@@ -277,7 +277,7 @@ function toRenderable( str ) {
 		.trim();
 }
 
-const FONT = "Noto Sans KR, Pretendard, 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif";
+export const FONT = "Noto Sans KR, Pretendard, 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif";
 
 // 프롬프트에 색이 명시되면 씬의 주조색으로 삼는다.
 const COLOR_WORDS = [
@@ -291,7 +291,7 @@ const COLOR_WORDS = [
 	[ 332, /(?:^|[^a-z])(?:pink|rose|magenta)(?:$|[^a-z])|분홍|핑크/ ],
 ];
 
-function hueFromText( text ) {
+export function hueFromText( text ) {
 	const t = String( text || '' ).toLowerCase();
 	for ( const [ hue, re ] of COLOR_WORDS ) if ( re.test( t ) ) return hue;
 	return null;
@@ -335,6 +335,14 @@ function motifSvg( kind, cx, cy, r, color, alpha, rand, W, H ) {
 // 4. 씬 합성
 // ──────────────────────────────────────────────────────────────
 const DARK_STYLES = new Set( [ 'photo_realistic', 'typography', 'poster' ] );
+
+/**
+ * composeSceneSvg / composeStyledSvg 가 이미지 안에 제목 텍스트를 실제로 그리는지 여부.
+ * (플러그인이 같은 제목을 캔버스로 한 번 더 합성하지 않도록 image-core가 text_included 로 알려준다.)
+ */
+export function hasSceneTitle( opts ) {
+	return !! ( toRenderable( opts && opts.topic ) || toRenderable( opts && opts.subtitle ) );
+}
 
 /**
  * @param {{hero:string, supports:string[]}} plan
@@ -518,7 +526,7 @@ export function composeSceneSvg( plan, opts ) {
 	const label = escapeXml( title || heroDef.label );
 	return `<svg xmlns="http://www.w3.org/2000/svg" width="${ W }" height="${ H }" viewBox="0 0 ${ W } ${ H }" role="img" aria-label="${ label }">
 <title>${ label }</title>
-<desc>${ escapeXml( `${ heroDef.label } 중심 일러스트 (${ style })` ) }</desc>
+<desc>${ escapeXml( `${ heroDef.label } 일러스트 (${ style })` ) }</desc>
 <defs>${ defs.join( '' ) }</defs>
 ${ layers.join( '\n' ) }
 </svg>`;

@@ -10,6 +10,13 @@ Cloudflare Workers / Pages Functions 무료 플랜에 배포 가능한, API 키 
 - `POST /api/research` — 검색 결과 기반 주제 조사 JSON
 - `GET/POST /api/image` — 전달된 프롬프트를 그대로 그린 SVG 썸네일 생성. 1순위는 LLM이 프롬프트를 읽고 직접 그리는 방식(`image-core.js`), 실패 시 주제에 맞는 오브젝트 씬 합성(`svg-scene.js`, `svg-objects.js`)으로 폴백하며 결과는 `svg-safe.js`로 검증·복구 후 가능하면 PNG로 변환합니다. `provider`: `svg-scene`(LLM 생략) / `ai-model`(FLUX 등 이미지 모델 우선).
 
+`/api/image` 요청 필드와 스타일:
+
+- `topic` — 이미지에 제목으로 그려지는 유일한 문구. `subtitle` — 오브젝트·색을 고르는 **참고용 장면 설명**(화면에 그리지 않음). `display_subtitle` — 화면에 실제로 그릴 부제(선택).
+- 응답의 `text_included`가 `true`면 제목이 이미지 안에 이미 그려져 있으니 호출자는 제목을 다시 합성하면 안 됩니다(SVG→PNG 변환 후에도 유지).
+- `style` 기본 5종: `poster` `minimal` `photo_realistic` `typography` `branding`
+- `style` 디자인 6종 (`svg-styles.js`, 같은 주제라도 배경·구도·텍스트 처리가 완전히 다름): `gradient`(오로라 메시 + 글래스 카드) · `infographic`(헤더 + 번호 카드 + 미니 차트) · `isometric`(등각 3D 플랫폼) · `neon`(발광 링 + 원근 그리드) · `papercut`(종이 레이어 + 종이 라벨) · `blueprint`(청사진 도면 + 치수선). 이 6종은 기본적으로 LLM 자유 작화 없이 스타일 전용 합성기가 직접 그리며(`provider:"svg-llm"`으로 명시할 때만 LLM 시도), 주제 매칭(오브젝트 선택)은 기존과 같은 `planScene`을 씁니다.
+
 상세 내용은 이 디렉토리의 각 소스 파일(`search-core.js`, `research-core.js`, `image-core.js`, `worker-search.js`, `functions/`)과 `search.html`을 참조하세요. 배포는 루트의 `wrangler.toml`(Worker 이름: `cloudpress-search-endpoint`) 또는 `wrangler-search.toml`을 사용합니다.
 
 ```bash

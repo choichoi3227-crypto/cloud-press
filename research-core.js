@@ -103,7 +103,8 @@ export function buildRuleBasedResearch(topic, providers) {
   return {
     actual_meaning: actualMeaning.slice(0, 160),
     visual_context: visualContext || topic,
-    hero_shot: keyVisuals[0] ? `${keyVisuals[0]}을(를) 중심으로 한 상징적 장면` : `${topic}을(를) 상징하는 오브젝트 중심 장면`,
+    // 이미지 프롬프트/오브젝트 선택용 내부 메모다(화면에 표시하지 않는다). 설명문 어투("~을 중심으로 한 …") 대신 명사구로 둔다.
+    hero_shot: keyVisuals[0] ? `${keyVisuals[0]} 장면` : `${topic} 장면`,
     color_mood: colorEntry ? colorEntry.mood : "주제와 어울리는 현대적이고 선명한 톤",
     key_visuals: keyVisuals.length ? keyVisuals : [topic],
     category: categoryEntry ? categoryEntry.category : "일반",

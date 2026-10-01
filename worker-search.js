@@ -6,15 +6,17 @@
  * Routes:
  *   GET  /api/search?q={query}&engine=all|google|naver&start=0
  *   POST /api/research   { query, max_results?, country? }  (X-AIBP-Secret optional)
- *   GET/POST /api/image   { prompt, topic?, subtitle?, display_subtitle?, style?, width?, height? }
+ *   GET/POST /api/image   { topic, style?, research?, prompt?, custom_direction?, width?, height? }
  *   GET  / or /search    - minimal endpoint documentation
  *
  * Cloudflare Workers AI (recommended, see wrangler.toml [ai] binding):
  *   - /api/research works fully without the AI binding (rule-based). If bound,
  *     it makes at most ONE short AI call per request to lightly polish results.
- *   - /api/image tries flux-1-schnell once per request when the AI binding is
- *     present; on any failure (or when not bound) it falls back to a
- *     self-contained SVG "headless card" renderer that always succeeds.
+ *   - /api/image REQUIRES the AI binding: a style-specific AI art director
+ *     (see image-styles.js) designs the image — colours, objects and layout are
+ *     chosen by the model from the topic, never by code. The headline is drawn
+ *     once inside the image (text_included=true). If every attempt fails it
+ *     returns an error (502/503) instead of a canned fallback card.
  */
 
 import { CORS_HEADERS, json, handleSearch, docsHtml } from "./search-core.js";

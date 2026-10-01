@@ -14,8 +14,14 @@ enabled = false
 # ── (선택) X-AIBP-Secret 인증 ──
 #   npx wrangler secret put AIBP_SHARED_SECRET -c wrangler-search.toml
 
-# ── (선택, 비추천) Cloudflare Workers AI 바인딩 ──
-# /api/research는 이 바인딩 없이도 100% 동작합니다. 켜면 요청당 최대 1회만
-# 짧게 호출해 결과를 보강합니다. 특별한 이유가 없다면 켜지 마세요.
-# [ai]
-# binding = "AI"
+# ── Cloudflare Workers AI 바인딩 (/api/image 필수) ──
+# /api/image는 스타일별 AI 아트 디렉터(LLM)가 이미지를 디자인하므로 이 바인딩이 필요합니다.
+# (/api/research는 바인딩 없이도 동작하며, 있으면 요청당 최대 1회 결과를 보강합니다.)
+[ai]
+binding = "AI"
+
+# ── SVG → PNG 변환용 한글 폰트(TTF)를 Data 모듈로 번들 ──
+[[rules]]
+type = "Data"
+globs = ["**/*.ttf"]
+fallthrough = true

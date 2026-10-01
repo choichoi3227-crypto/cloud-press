@@ -8,16 +8,37 @@ Cloudflare Workers / Pages Functions 무료 플랜에 배포 가능한, API 키 
 
 - `GET /api/search` — Google + 네이버 검색 결과를 JSON으로 반환
 - `POST /api/research` — 검색 결과 기반 주제 조사 JSON
-- `GET/POST /api/image` — 전달된 프롬프트를 그대로 그린 SVG 썸네일 생성. 1순위는 LLM이 프롬프트를 읽고 직접 그리는 방식(`image-core.js`), 실패 시 주제에 맞는 오브젝트 씬 합성(`svg-scene.js`, `svg-objects.js`)으로 폴백하며 결과는 `svg-safe.js`로 검증·복구 후 가능하면 PNG로 변환합니다. `provider`: `svg-scene`(LLM 생략) / `ai-model`(FLUX 등 이미지 모델 우선).
+- `GET/POST /api/image` — **스타일별 AI 아트 디렉터**가 주제에 맞는 이미지를 디자인합니다(`image-core.js` + `image-styles.js`). Workers AI 바인딩(`[ai]`)이 필수입니다.
 
-`/api/image` 요청 필드와 스타일:
+### `/api/image`
 
-- `topic` — 이미지에 제목으로 그려지는 유일한 문구. `subtitle` — 오브젝트·색을 고르는 **참고용 장면 설명**(화면에 그리지 않음). `display_subtitle` — 화면에 실제로 그릴 부제(선택).
-- 응답의 `text_included`가 `true`면 제목이 이미지 안에 이미 그려져 있으니 호출자는 제목을 다시 합성하면 안 됩니다(SVG→PNG 변환 후에도 유지).
-- `style` 기본 5종: `poster` `minimal` `photo_realistic` `typography` `branding`
-- `style` 디자인 6종 (`svg-styles.js`, 같은 주제라도 배경·구도·텍스트 처리가 완전히 다름): `gradient`(오로라 메시 + 글래스 카드) · `infographic`(헤더 + 번호 카드 + 미니 차트) · `isometric`(등각 3D 플랫폼) · `neon`(발광 링 + 원근 그리드) · `papercut`(종이 레이어 + 종이 라벨) · `blueprint`(청사진 도면 + 치수선). 이 6종은 기본적으로 LLM 자유 작화 없이 스타일 전용 합성기가 직접 그리며(`provider:"svg-llm"`으로 명시할 때만 LLM 시도), 주제 매칭(오브젝트 선택)은 기존과 같은 `planScene`을 씁니다.
+요청: `{ topic, style?, research?, prompt?, custom_direction?, width?, height? }`
 
-상세 내용은 이 디렉토리의 각 소스 파일(`search-core.js`, `research-core.js`, `image-core.js`, `worker-search.js`, `functions/`)과 `search.html`을 참조하세요. 배포는 루트의 `wrangler.toml`(Worker 이름: `cloudpress-search-endpoint`) 또는 `wrangler-search.toml`을 사용합니다.
+- `topic` — 이미지에 **제목으로 그려지는 유일한 문구**입니다. 없으면 글자 없는 이미지를 만듭니다.
+- `research` — `/api/research` 결과(`actual_meaning` `visual_context` `emotional_tone` `key_visuals` …). AI가 주제 의미를 읽어 색·소재·구도를 정하는 근거입니다.
+- `style` — 11종, **스타일마다 지시서의 형식 자체가 다릅니다**(`image-styles.js`).
+
+| style | AI에게 주는 지시서 형식 | 시각 언어(색·오브젝트는 지정하지 않음) |
+|---|---|---|
+| `poster` | 번호 매긴 ZONE 스펙시트 | 거대한 제목 + 틀 장치 + 가장자리 도형(실제 인쇄 포스터) |
+| `minimal` | 규칙집(계율) | 65% 이상 여백, 도형 5개 이하 |
+| `typography` | 활자 견본 브리프(기법 T1~T6) | 글자가 곧 그림 |
+| `branding` | 캠페인 브리프(포지셔닝/위계/CTA) | 키비주얼 + 카피 + CTA |
+| `gradient` | 7단계 레시피 | 메시 그라디언트 + 유리 패널 |
+| `infographic` | ASCII 와이어프레임 + 슬롯 | 헤더·번호 카드·형태만 있는 미니 차트 |
+| `isometric` | 기하 스펙(투영 수식) | 정확한 30° 등각, 3톤 면 |
+| `neon` | 라이트 레시피 | 겹쳐 그린 3겹 발광 선, 어두운 바탕 |
+| `papercut` | 레이어 스택 표 | 겹겹의 종이 + 그림자 복제 규칙 |
+| `blueprint` | 제도 규격(DS-01) | 방안지·치수선·지시선·표제란 |
+| `photo_realistic` | LLM이 영문 사진 프롬프트 작성 → FLUX/SDXL | 글자 없는 사진 |
+
+- **색상·오브젝트는 코드나 스타일이 정하지 않습니다.** 과거의 오브젝트 라이브러리, 스타일별 고정 팔레트, 조립식 폴백 카드는 제거되었습니다.
+- **제목은 이미지 안에 정확히 한 번만** 그려집니다(`text_included: true`). 호출자는 canvas 등으로 다시 합성하면 안 됩니다. `svg-audit.js`가 결과를 검수해 제목 누락·오타·중복이면 사유를 알려 재시도하고, 글자가 캔버스를 넘으면 크기를 줄입니다.
+- 시도 순서: 1순위 LLM → 같은 LLM(거절 사유 전달) → 2순위 LLM(`SVG_MODELS`로 변경 가능). 모두 실패하면 **기본 카드로 얼버무리지 않고** HTTP 502(`design_failed`)를 돌려줍니다. AI 바인딩이 없으면 503(`ai_binding_missing`).
+- 환경 변수(선택): `SVG_MODELS`(쉼표 구분 LLM ID), `IMAGE_BUDGET_MS`(기본 110000), `FORCE_SVG_ONLY`(`true`면 PNG 변환 생략).
+- 응답: `{ data_url, mime_type, format, width, height, provider, model_used, style, text_included, fallback_used, attempts }`
+
+상세 내용은 이 디렉토리의 각 소스 파일(`search-core.js`, `research-core.js`, `image-core.js`, `image-styles.js`, `svg-audit.js`, `worker-search.js`, `functions/`)과 `search.html`을 참조하세요. 배포는 루트의 `wrangler.toml`(Worker 이름: `cloudpress-search-endpoint`) 또는 `wrangler-search.toml`을 사용합니다.
 
 ```bash
 npm install

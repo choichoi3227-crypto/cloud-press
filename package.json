@@ -8,7 +8,7 @@
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
     "deploy:search": "wrangler deploy",
-    "check": "node --check search-core.js && node --check research-core.js && node --check research-handler.js && node --check svg-safe.js && node --check svg-objects.js && node --check svg-scene.js && node --check svg-styles.js && node --check image-core.js && node --check worker-search.js && node --check functions/api/search.js && node --check functions/api/research.js && node --check functions/api/image.js"
+    "check": "node --check search-core.js && node --check research-core.js && node --check research-handler.js && node --check svg-safe.js && node --check image-styles.js && node --check svg-audit.js && node --check image-core.js && node --check worker-search.js && node --check functions/api/search.js && node --check functions/api/research.js && node --check functions/api/image.js"
   },
   "devDependencies": {
     "wrangler": "^4.0.0"

@@ -32,6 +32,7 @@ import { auditTitle, fitTextOverflow, stripAllText } from './svg-audit.js';
 import {
 	STYLE_KEYS, isSvgStyle, planTitle, buildDesignMessages, buildPhotoPromptMessages,
 	STYLE_MIN_DRAWN, STYLE_TEMPERATURE, PHOTO_NEGATIVE_PROMPT,
+	engineFor, buildArtPromptMessages, ART_NEGATIVE_PROMPT, composeHybridSvg,
 } from './image-styles.js';
 import KOREAN_FONT_TTF from './assets/fonts/NotoSansKR-Bold.ttf';
 
@@ -172,7 +173,7 @@ function pickModelOrder() {
  * 실패 시 { ok: false, nsfw: boolean } 반환해 호출부가 다음 모델로 넘어가거나,
  * NSFW 오탐이면 완화된 프롬프트로 재시도할지 판단할 수 있게 한다.
  */
-async function callOneModel( env, modelKey, prompt, width, height ) {
+async function callOneModel( env, modelKey, prompt, width, height, negativeOverride ) {
 	const model = IMAGE_MODELS[ modelKey ];
 	if ( ! model ) return { ok: false, nsfw: false };
 
@@ -196,7 +197,7 @@ async function callOneModel( env, modelKey, prompt, width, height ) {
 			result = await env.AI.run( model.id, { multipart: { body: formStream, contentType: formContentType } } );
 		} else {
 			// JSON 계열(SDXL/DreamShaper/Leonardo/FLUX schnell).
-			const negative = model.supportsNegative ? PHOTO_NEGATIVE_PROMPT : undefined;
+			const negative = model.supportsNegative ? ( negativeOverride || PHOTO_NEGATIVE_PROMPT ) : undefined;
 			const input = model.buildInput( prompt, width, height, negative );
 			result = await env.AI.run( model.id, input );
 		}
@@ -500,6 +501,69 @@ async function generateDesigned( env, ctx ) {
 	throw new ImageError( 'design_failed', 502, 'AI가 조건에 맞는 이미지를 만들지 못했습니다. 잠시 후 다시 시도해 주세요.', log );
 }
 
+
+/**
+ * 하이브리드: 이미지 모델이 '글자 없는 배경 아트'를 그리고, 제목은 SVG 텍스트로 얹는다.
+ * (확산 모델은 한글을 못 그리므로 글자는 항상 SVG/resvg + Noto Sans KR 담당)
+ */
+async function generateHybrid( env, ctx ) {
+	const { style, width, height, started, budget } = ctx;
+	const models = svgModels( env );
+	const log = [];
+	let prompt = '';
+
+	for ( let i = 0; i < 2 && ! prompt; i++ ) {
+		const remaining = budget - ( Date.now() - started );
+		if ( remaining < 8000 ) break;
+		try {
+			const raw = await runLlm( env, models[ Math.min( i, models.length - 1 ) ], buildArtPromptMessages( style, {
+				title: ctx.title, research: ctx.research, brief: ctx.brief, customDirection: ctx.customDirection,
+				note: i ? 'It was too short or not English.' : '',
+			} ), { temperature: 0.8, maxTokens: 400, timeoutMs: Math.min( 30000, remaining ) } );
+			const cleaned = sanitizeImageText( String( raw ).replace( /^["'`\s]+|["'`\s]+$/g, '' ), 700 );
+			if ( cleaned.length >= 40 && /[A-Za-z]{3,}/.test( cleaned ) ) prompt = cleaned;
+			else log.push( { step: 'art_prompt', attempt: i + 1, rejected: 'too_short_or_not_english' } );
+		} catch ( err ) {
+			log.push( { step: 'art_prompt', attempt: i + 1, error: String( err && err.message ? err.message : err ).slice( 0, 160 ) } );
+		}
+	}
+	if ( ! prompt ) {
+		const brief = sanitizeImageText( ctx.brief, 700 );
+		if ( brief && /[A-Za-z]{3,}/.test( brief ) ) prompt = brief;
+	}
+	if ( ! prompt ) throw new ImageError( 'art_prompt_failed', 502, 'AI가 배경 아트 설명을 만들지 못했습니다. 다시 시도해 주세요.', log );
+
+	const order = pickModelOrder();
+	let hit = null;
+	for ( const modelKey of order ) {
+		if ( budget - ( Date.now() - started ) < 6000 ) break;
+		const picked = await callOneModel( env, modelKey, prompt, width, height, ART_NEGATIVE_PROMPT );
+		if ( picked.ok ) { hit = picked; break; }
+		log.push( { step: 'art_model', model: modelKey, failed: true } );
+	}
+	if ( ! hit ) throw new ImageError( 'art_model_failed', 502, '이미지 모델이 모두 실패했습니다. 잠시 후 다시 시도해 주세요.', log );
+
+	const svg = composeHybridSvg( {
+		imageDataUrl: `data:${ hit.mime };base64,${ hit.base64 }`,
+		width, height, title: ctx.title,
+	} );
+	return {
+		data_url: svgToDataUrl( svg ),
+		mime_type: 'image/svg+xml',
+		format: 'svg',
+		width,
+		height,
+		provider: 'workers-ai-hybrid:' + hit.modelKey.toLowerCase(),
+		model_used: `${ hit.modelLabel } + SVG 제목`,
+		fallback_used: order[ 0 ] !== hit.modelKey,
+		style,
+		text_included: !! ctx.title,
+		image_prompt: prompt,
+		attempts: log,
+		raw_svg: svg,
+	};
+}
+
 /** 사실적 사진: LLM이 영문 사진 프롬프트를 쓰고, 이미지 모델이 그린다(글자 없음). */
 async function generatePhoto( env, ctx ) {
 	const { width, height, started, budget } = ctx;
@@ -598,8 +662,24 @@ export async function generateImage( env, body ) {
 		budget: Math.max( 30000, parseInt( env && env.IMAGE_BUDGET_MS, 10 ) || DEFAULT_BUDGET_MS ),
 	};
 
-	if ( ! isSvgStyle( style ) ) return generatePhoto( env, ctx );
-	return tryConvertToPng( env, await generateDesigned( env, ctx ) );
+	const engine = engineFor( style, env, body.engine && String( body.engine ).toLowerCase() );
+	if ( 'photo' === engine ) return generatePhoto( env, ctx );
+
+	// 1순위 엔진이 실패하면 다른 엔진으로 한 번 더(둘 다 AI 생성이며, 기본 카드로 얼버무리지 않는다).
+	const runners = 'hybrid' === engine ? [ generateHybrid, generateDesigned ] : [ generateDesigned, generateHybrid ];
+	let firstErr = null;
+	for ( let i = 0; i < runners.length; i++ ) {
+		if ( i > 0 && ctx.budget - ( Date.now() - ctx.started ) < 15000 ) break;
+		try {
+			const r = await runners[ i ]( env, ctx );
+			if ( i > 0 ) r.fallback_used = true;
+			return tryConvertToPng( env, r );
+		} catch ( err ) {
+			if ( ! ( err instanceof ImageError ) ) throw err;
+			if ( ! firstErr ) firstErr = err;
+		}
+	}
+	throw firstErr;
 }
 
 /**

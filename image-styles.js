@@ -625,3 +625,116 @@ export function buildPhotoPromptMessages( ctx ) {
 export const PHOTO_NEGATIVE_PROMPT =
 	'text, letters, numbers, watermark, logo, signature, caption, blurry, low quality, distorted, deformed, ' +
 	'extra limbs, bad anatomy, jpeg artifacts, oversaturated, noisy, cropped, duplicate, illustration, cartoon, 3d render, cgi';
+
+// ──────────────────────────────────────────────────────────────
+// 스타일별 1순위 엔진 (2026-10 개편)
+//   svg    : LLM이 SVG를 직접 작도(구조·평면·선 중심 스타일에 적합)
+//   hybrid : 이미지 모델이 "글자 없는 배경 아트"를 그리고, 제목은 SVG 텍스트로 얹는다
+//            (확산 모델은 한글을 못 그리므로 글자는 항상 SVG/resvg+Noto Sans KR가 담당)
+//   photo  : 사실적 사진(글자 없음) — 기존 동작 유지
+// 판단 근거: LLM이 손으로 쓴 SVG는 '의미 있는 사물'(제품·장면·3D·조명·질감)을 거의 그리지 못하고
+//   원/선 같은 추상 도형으로 수렴한다. 사물·질감·광원이 핵심인 스타일은 이미지 모델이 훨씬 낫고,
+//   평면 도형/그라디언트/제도선처럼 벡터가 본래 맞는 스타일만 SVG를 1순위로 유지한다.
+// 환경 변수 STYLE_ENGINE(JSON, 예: {"neon":"svg"}) 또는 요청 파라미터 engine=svg|hybrid 로 덮어쓸 수 있다.
+// ──────────────────────────────────────────────────────────────
+export const STYLE_ENGINE = {
+	poster: 'hybrid', branding: 'hybrid', isometric: 'hybrid', neon: 'hybrid', papercut: 'hybrid',
+	minimal: 'svg', typography: 'svg', gradient: 'svg', infographic: 'svg', blueprint: 'svg',
+	photo_realistic: 'photo',
+};
+
+export function engineFor( style, env, override ) {
+	const ok = ( v ) => ( v === 'svg' || v === 'hybrid' ) ? v : '';
+	if ( style === 'photo_realistic' ) return 'photo';
+	let fromEnv = '';
+	try {
+		const map = env && env.STYLE_ENGINE ? JSON.parse( String( env.STYLE_ENGINE ) ) : null;
+		if ( map && typeof map === 'object' ) fromEnv = ok( map[ style ] );
+	} catch ( e ) { /* 잘못된 JSON은 무시 */ }
+	return ok( override ) || fromEnv || STYLE_ENGINE[ style ] || 'hybrid';
+}
+
+const ART_LOOK = {
+	poster: 'bold graphic poster illustration, flat vector-like shapes with crisp edges, one strong focal object, limited 3-4 colour palette',
+	branding: 'premium brand key visual, one iconic symbolic object with clean geometric forms on a calm softly-lit background, refined and minimal',
+	isometric: 'isometric 3D render of a miniature diorama, 30-degree isometric view, soft studio lighting, clean pastel backdrop, smooth clay and plastic materials',
+	neon: 'neon light art, the subject drawn with glowing neon tubes and outlines against a dark backdrop, strong bloom and reflections, vivid saturated glow',
+	papercut: 'layered paper-cut artwork, five stacked paper layers with soft drop shadows between them, visible depth, subtle craft-paper texture',
+	minimal: 'minimalist composition, a single simple subject, flat muted colours, vast clean empty space',
+	typography: 'abstract textured background with soft gradients and subtle grain, no focal clutter',
+	gradient: 'smooth fluid mesh gradient with a few soft organic shapes, glassy and luminous',
+	infographic: 'flat vector illustration of related icons and simple chart-like shapes arranged cleanly, no readable writing',
+	blueprint: 'technical blueprint line drawing, white thin lines on deep blue grid paper, precise engineering look, no readable writing',
+};
+
+/** 이미지 모델용 영문 "글자 없는 배경 아트" 프롬프트를 LLM이 쓰게 하는 메시지. */
+export function buildArtPromptMessages( style, ctx ) {
+	const s = signalsOf( ctx );
+	const look = ART_LOOK[ style ] || ART_LOOK.poster;
+	const system = ln( [
+		'You are an art director writing ONE English prompt for a text-to-image model (FLUX class).',
+		`Required visual look: ${ look }.`,
+		'Format: a single flowing paragraph of 40-70 words, no lists, no quotes, no markdown.',
+		'Describe the concrete subject that makes this topic instantly understandable, the composition, the lighting and the colour palette. Decide subject and colours from the meaning of the topic; a different topic must give a different picture.',
+		'Composition rule: keep the lower-left third of the frame calm and uncluttered (a title will be placed there); put the main subject toward the upper-right.',
+		'The picture contains no text, letters, numbers, logos, signage with writing, watermarks or screens with readable writing. Avoid recognisable people and faces unless the topic is about people.',
+		'Output only the paragraph.',
+	] );
+	const user = ln( [
+		`Topic: ${ s.topic }`,
+		opt( 'Meaning', s.meaning ),
+		opt( 'Visual context', s.visual ),
+		opt( 'Mood', s.mood ),
+		opt( 'Do not misread as', s.wrong ),
+		opt( 'Notes', s.brief ),
+		ctx.note ? `Previous output was unusable: ${ ctx.note }` : '',
+		ctx.customDirection ? `Owner's extra direction: ${ String( ctx.customDirection ).slice( 0, 500 ) }` : '',
+	] );
+	return [ { role: 'system', content: system }, { role: 'user', content: user } ];
+}
+
+/** 아트 스타일용 negative prompt — 사진용과 달리 일러스트/3D/CGI를 배제하지 않는다. */
+export const ART_NEGATIVE_PROMPT =
+	'text, letters, numbers, watermark, logo, signature, caption, blurry, low quality, distorted, deformed, jpeg artifacts, cropped, duplicate, extra limbs, bad anatomy';
+
+const xmlEsc = ( v ) => String( v ).replace( /&/g, '&amp;' ).replace( /</g, '&lt;' ).replace( />/g, '&gt;' ).replace( /"/g, '&quot;' );
+
+/**
+ * 배경 이미지(data URL) 위에 제목을 SVG 텍스트로 얹은 SVG 문자열을 만든다.
+ * 글자는 항상 SVG 텍스트(→ resvg + Noto Sans KR로 래스터)이므로 한글이 깨지지 않는다.
+ * 좌하단 스크림(어두운 그라디언트)으로 어떤 배경에서도 가독성을 보장한다.
+ */
+export function composeHybridSvg( { imageDataUrl, width, height, title } ) {
+	const plan = planTitle( title, width, height );
+	const lines = plan.lines;
+	const margin = Math.round( width * 0.06 );
+	let fs = 0;
+	if ( lines.length ) {
+		fs = Math.min( plan.safeMaxSize, Math.round( height * 0.15 ) );
+		fs = Math.min( fs, Math.floor( ( height * 0.5 ) / ( lines.length * 1.25 ) ) );
+		fs = Math.max( fs, 32 );
+	}
+	const lh = Math.round( fs * 1.25 );
+	const blockH = lines.length * lh;
+	const firstBase = height - margin - blockH + Math.round( fs * 0.95 );
+	const out = [];
+	out.push( `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="${ width }" height="${ height }" viewBox="0 0 ${ width } ${ height }">` );
+	out.push( '<defs>' );
+	out.push( '<linearGradient id="scrim" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#000" stop-opacity="0"/><stop offset="1" stop-color="#000" stop-opacity="0.78"/></linearGradient>' );
+	out.push( '</defs>' );
+	out.push( `<image x="0" y="0" width="${ width }" height="${ height }" preserveAspectRatio="xMidYMid slice" xlink:href="${ imageDataUrl }" href="${ imageDataUrl }"/>` );
+	if ( lines.length ) {
+		const scrimTop = Math.max( 0, height - margin * 2 - blockH - Math.round( height * 0.12 ) );
+		out.push( `<rect x="0" y="${ scrimTop }" width="${ width }" height="${ height - scrimTop }" fill="url(#scrim)"/>` );
+		const barY = firstBase - Math.round( fs * 0.95 ) - Math.round( fs * 0.35 );
+		out.push( `<rect x="${ margin }" y="${ barY }" width="${ Math.round( width * 0.08 ) }" height="${ Math.max( 6, Math.round( fs * 0.1 ) ) }" rx="3" fill="#ffffff" fill-opacity="0.95"/>` );
+		lines.forEach( ( ln_, i ) => {
+			const y = firstBase + i * lh;
+			const t = xmlEsc( ln_ );
+			out.push( `<text x="${ margin + 3 }" y="${ y + 3 }" font-family="Noto Sans KR" font-weight="700" font-size="${ fs }" fill="#000000" fill-opacity="0.45">${ t }</text>` );
+			out.push( `<text x="${ margin }" y="${ y }" font-family="Noto Sans KR" font-weight="700" font-size="${ fs }" fill="#ffffff">${ t }</text>` );
+		} );
+	}
+	out.push( '</svg>' );
+	return out.join( '' );
+}

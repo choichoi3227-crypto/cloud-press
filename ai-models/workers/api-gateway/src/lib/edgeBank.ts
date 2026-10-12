@@ -8,7 +8,7 @@ import { Env } from "../env";
 export const BANK_KEY = (color: string, shape: string) => `edge-bank:nta:v1:${color}:${shape}`;
 
 export async function bankPick(
-  env: Env, color: string, shape: string
+  env: Pick<Env, "CACHE_KV">, color: string, shape: string
 ): Promise<{ model: string; image_base64: string; format: "png" } | null> {
   // cacheTtl: 같은 PoP에서 KV 재조회를 줄여 무료 KV 읽기 한도(일 10만)를 아낀다.
   const text = await env.CACHE_KV.get(BANK_KEY(color, shape), { type: "text", cacheTtl: 3600 });

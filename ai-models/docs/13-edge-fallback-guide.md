@@ -52,3 +52,7 @@ curl -i -X POST https://<워커주소>/v1/image/generate \
 - **실시간 생성(`EDGE_LIVE=1`, `EDGE_BACKEND=vgpu`)은 켜지 마세요.** 유료 플랜 전용입니다(CPU 0.2초 / 7초).
 - **폴백 대상**: 색·도형 조건 요청(`prompt_type=condition`)만. 텍스트 요청은 폴백 없이 원래 오류를 반환합니다.
 - **GAN 결과로 교체**: `export_edge_weights.py`(torch 필요) → `build_edge_bank.py --weights nta-edge-v1.bin` → 3단계 반복. Colab 노트북 6-1~6-3 참고.
+
+## 추론 서버를 Cloudflare Worker로 (선택)
+추론 서버 주소 자리에 Cloudflare Worker를 쓰고 싶다면 `ai-models/workers/inference-edge/`를 배포하세요.
+이미지 생성은 무료 플랜에서 동작하고, 텍스트 생성은 501을 반환합니다. 자세한 내용은 `workers/inference-edge/README.md`.

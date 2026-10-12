@@ -51,7 +51,7 @@ export function parseWeights(buf: ArrayBuffer): Net {
   return { noiseDim: header.noise_dim, condDim: header.cond_dim, layers };
 }
 
-export async function loadNet(env: Env): Promise<Net | null> {
+export async function loadNet(env: Pick<Env, "CACHE_KV">): Promise<Net | null> {
   if (cached) return cached;
   const buf = await env.CACHE_KV.get(EDGE_WEIGHTS_KEY, "arrayBuffer");
   if (!buf) return null;
@@ -212,7 +212,7 @@ export function tensorToPng(data: Float32Array, size: number): Uint8Array {
 
 /** 폴백 진입점. 가중치가 KV에 없으면 null. */
 export async function edgeGenerate(
-  env: Env, color: string, shape: string, seed?: number
+  env: Pick<Env, "CACHE_KV" | "EDGE_BACKEND">, color: string, shape: string, seed?: number
 ): Promise<{ model: string; image_base64: string; format: "png" } | null> {
   const net = await loadNet(env);
   if (!net) return null;

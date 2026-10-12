@@ -18,6 +18,10 @@ export interface Env {
   // 실제 배포 승인 자체는 WordPress cloud-press-deploy 플러그인의 다중 승인 로직이
   // 담당하며, 이 화이트리스트는 그 앞단의 2차 방어선이다 (docs/12 5절 참조).
   DEPLOY_REPO_WHITELIST: string;
+  // 엣지 폴백 연산 백엔드: "vgpu"(vgpu ISA 커널) | 그 외 "native"(직접 루프). 기본 native.
+  EDGE_BACKEND?: string;
+  // "1"이면 뱅크가 비었을 때 Worker에서 cGAN을 실시간 생성(약 0.2초 CPU → 유료 플랜 전용, 무료 플랜 금지).
+  EDGE_LIVE?: string;
 }
 
 export interface AuthVars {

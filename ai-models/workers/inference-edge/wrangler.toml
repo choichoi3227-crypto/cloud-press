@@ -1,0 +1,20 @@
+name = "cloud-press-inference-edge"
+main = "src/index.ts"
+compatibility_date = "2026-01-01"
+compatibility_flags = ["nodejs_compat"]
+
+# 이 Worker는 추론 서버(FastAPI)와 같은 API 계약(/v1/health, /v1/image/generate, /v1/text/generate)을
+# Cloudflare 위에서 제공합니다. api-gateway의 INFERENCE_SERVER_URL에 이 Worker의 주소를 넣으면 됩니다.
+# 무료 플랜 안전 모드: 이미지는 사전 생성 뱅크에서 선택(CPU≈0). 텍스트는 501 (docs: inference-edge/README.md).
+
+[vars]
+# "1"이면 뱅크가 비었을 때 Worker에서 cGAN을 실시간 생성합니다(CPU 약 0.2초 → 유료 플랜 전용, 무료 플랜 금지).
+EDGE_LIVE = "0"
+
+# api-gateway와 같은 CACHE_KV를 공유합니다 (뱅크는 한 번만 올리면 둘 다 사용).
+[[kv_namespaces]]
+binding = "CACHE_KV"
+id = "39c4bf548f954ffabc6f9f5cdb449fd5"
+
+# secrets (파일에 값 쓰지 말 것):
+# npx wrangler secret put INTERNAL_API_KEY    (api-gateway의 INTERNAL_API_KEY와 같은 값)

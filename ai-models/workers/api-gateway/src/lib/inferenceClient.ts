@@ -1,5 +1,11 @@
 import { Env } from "../env";
 
+/** 서비스 바인딩(INFERENCE_EDGE)이 있으면 그것으로, 없으면 INFERENCE_SERVER_URL로 호출한다. */
+export function inferenceFetch(env: Env, path: string, init?: RequestInit): Promise<Response> {
+  if (env.INFERENCE_EDGE) return env.INFERENCE_EDGE.fetch(`http://inference-edge${path}`, init);
+  return fetch(`${env.INFERENCE_SERVER_URL}${path}`, init);
+}
+
 /**
  * 추론 서버(FastAPI, Cloudflare 바깥에 호스팅됨)로 요청을 프록시한다.
  * 이 함수가 이 저장소에서 유일하게 "실제 모델 연산이 일어나는 곳"과 통신하는 지점이다.
@@ -11,7 +17,7 @@ export async function callInferenceServer(
   body: unknown
 ): Promise<{ ok: boolean; status: number; data: unknown }> {
   try {
-    const res = await fetch(`${env.INFERENCE_SERVER_URL}${path}`, {
+    const res = await inferenceFetch(env, path, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",

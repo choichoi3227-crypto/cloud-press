@@ -31,3 +31,10 @@ id = "39c4bf548f954ffabc6f9f5cdb449fd5"
 # npx wrangler secret put ADMIN_SECRET        (WordPress connector <-> Worker, 사용자 API 키 발급용)
 # npx wrangler secret put DEPLOY_PROXY_KEY    (WordPress deploy 플러그인 <-> Worker, GitHub 프록시용)
 # npx wrangler secret put GITHUB_TOKEN        (Worker -> GitHub API 조회용, repo 읽기 권한만 부여)
+
+# (선택) Cloudflare 위 추론 서버(workers/inference-edge)를 서비스 바인딩으로 연결.
+# inference-edge를 먼저 배포한 뒤에만 주석을 해제하세요 (없는 Worker를 바인딩하면 deploy가 실패합니다).
+# 바인딩이 있으면 INFERENCE_SERVER_URL보다 우선합니다.
+# [[services]]
+# binding = "INFERENCE_EDGE"
+# service = "cloud-press-inference-edge"

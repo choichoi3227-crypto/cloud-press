@@ -5,6 +5,9 @@ export interface Env {
   RATE_LIMIT_KV: KVNamespace;
   CACHE_KV: KVNamespace;
   INFERENCE_SERVER_URL: string;
+  // 선택: inference-edge Worker(Cloudflare 위 추론 서버)에 대한 서비스 바인딩. 바인딩이 있으면
+  // INFERENCE_SERVER_URL 대신 이 바인딩으로 호출한다 (wrangler.toml의 [[services]] 참고).
+  INFERENCE_EDGE?: Fetcher;
   INTERNAL_API_KEY: string;
   // WordPress(cloud-press-connector)가 사용자 가입 시 API 키를 발급받기 위해 호출하는
   // POST /v1/keys 관리자 엔드포인트를 보호하는 시크릿. 텍스트/이미지 생성용 API 키

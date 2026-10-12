@@ -4,7 +4,7 @@ compatibility_date = "2026-01-01"
 compatibility_flags = ["nodejs_compat"]
 
 [vars]
-INFERENCE_SERVER_URL = "http://localhost:8000"
+INFERENCE_SERVER_URL = "https://cloudpress-inference-edge.jiji15899.workers.dev/"
 # WordPress cloud-press-deploy 플러그인이 조회할 수 있는 저장소 화이트리스트.
 # owner/repo 형식, 쉼표로 구분. 실제 배포 승인은 WordPress 쪽 다중 승인 로직이 담당하며
 # 이건 그 앞단의 2차 방어선일 뿐이다 (docs/12-github-deploy-plugin-spec.md 참조).
@@ -16,15 +16,15 @@ DEPLOY_REPO_WHITELIST = "choichoi3227-crypto/cloud-press"
 [[d1_databases]]
 binding = "DB"
 database_name = "cloud-press-db"
-database_id = "a3e039c2-bd82-4ae5-a5ea-ec477015b487"
+database_id = "ece00019-1599-41f9-8fa7-208244098665"
 
 [[kv_namespaces]]
 binding = "RATE_LIMIT_KV"
-id = "c9a9ea8a771849d7adfaaa91c46bf9a9"
+id = "8b6150983ee44749ba939f93e9602f45"
 
 [[kv_namespaces]]
 binding = "CACHE_KV"
-id = "39c4bf548f954ffabc6f9f5cdb449fd5"
+id = "9b1dfc61087e44da877e6b49e5083237"
 
 # secrets (파일에 값 쓰지 말 것 — 아래 명령으로 각각 설정)
 # npx wrangler secret put INTERNAL_API_KEY    (Worker <-> 추론 서버)

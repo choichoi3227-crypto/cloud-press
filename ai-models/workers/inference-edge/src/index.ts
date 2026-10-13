@@ -14,7 +14,7 @@
 import { Hono } from "hono";
 import { bankPick, BANK_KEY } from "../../api-gateway/src/lib/edgeBank";
 import { edgeGenerate } from "../../api-gateway/src/lib/edgeGenerator";
-import { AiUnavailableError, generateImage, generateText, streamText, imageModel, textModel, AiEnv } from "./ai";
+import { AiUnavailableError, generateImage, generateText, streamText, imageModel, resolveText, textProfiles, AiEnv } from "./ai";
 
 interface Env extends AiEnv {
   CACHE_KV: KVNamespace;
@@ -83,7 +83,12 @@ app.get("/v1/health", async (c) => {
       nano_tech_artist: { version: VERSION, ready: bankReady },
     },
     workers_ai: aiEnabled(c.env)
-      ? { enabled: true, image_model: imageModel(c.env), text_model: textModel(c.env) }
+      ? {
+          enabled: true,
+          image_model: imageModel(c.env),
+          text_default: resolveText(c.env),
+          text_profiles: textProfiles(c.env),
+        }
       : { enabled: false },
   });
 });
@@ -141,7 +146,13 @@ app.post("/v1/text/generate", async (c) => {
   }
   const max_tokens = Math.min(1024, Math.max(1, Number.isFinite(body.max_tokens) ? Math.floor(body.max_tokens) : 128));
   const temperature = Math.min(2, Math.max(0, Number.isFinite(body.temperature) ? body.temperature : 0.8));
-  const params = { prompt, max_tokens, temperature };
+  const params = {
+    prompt,
+    max_tokens,
+    temperature,
+    profile: typeof body.profile === "string" ? body.profile : undefined,
+    mode: typeof body.mode === "string" ? body.mode : undefined,
+  };
 
   try {
     if (body.stream === true) {

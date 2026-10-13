@@ -1,0 +1,7 @@
+# Colab에서는 torch가 미리 설치되어 있으므로 아래만 설치합니다 (노트북 3번 셀과 동일).
+transformers
+peft
+bitsandbytes
+accelerate
+safetensors
+huggingface_hub

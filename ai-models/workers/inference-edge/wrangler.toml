@@ -15,7 +15,10 @@ binding = "AI"
 [vars]
 # Workers AI 모델 ID (카탈로그가 바뀌면 여기서 교체: https://developers.cloudflare.com/workers-ai/models/ )
 IMAGE_MODEL = "@cf/black-forest-labs/flux-1-schnell"
-TEXT_MODEL = "@cf/meta/llama-3.1-8b-instruct-fast"
+# 텍스트: 아래 TEXT_MODEL을 지정하면 "고정 모델"(프로필 무시). 지운 채로 두면 LoRA 프로필(quality/general/fast)을 씁니다.
+# LoRA 어댑터를 올리기 전에는 자동으로 기반 모델만 호출됩니다(응답 lora=null). 어댑터 이름은 src/ai.ts DEFAULT_TEXT_PROFILES 참고.
+TEXT_PROFILE_DEFAULT = "quality"
+# TEXT_MODEL = "@cf/meta/llama-3.1-8b-instruct-fast"
 # "0"이면 Workers AI를 사용하지 않음
 ENABLE_AI = "1"
 # "1"이면 뱅크가 비었을 때 Worker에서 cGAN을 실시간 생성합니다(CPU 약 0.2초 → 유료 플랜 전용, 무료 플랜 금지).

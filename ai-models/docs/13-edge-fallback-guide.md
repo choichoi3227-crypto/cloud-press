@@ -60,3 +60,6 @@ curl -i -X POST https://<워커주소>/v1/image/generate \
 ## 무료 플랜 한도 요약 (KV 쓰기 주의)
 - KV **쓰기 하루 1,000회**: api-gateway의 속도 제한(요청마다 1회)과 응답 캐시가 여기에 쓰입니다. 한도를 넘으면 캐시·속도 제한이 자동으로 꺼지고(fail-open) API는 계속 응답합니다. 요청이 하루 1,000회를 넘을 규모면 Workers Paid($5/월) 또는 D1 기반 카운터로 교체하세요.
 - Workers AI **하루 10,000 Neurons**(이미지·텍스트 합산). 자세한 내용과 모델 교체법은 `workers/inference-edge/README.md`.
+
+## 텍스트 모델 LoRA 파인튜닝 (선택)
+Workers AI의 LoRA 지원 모델 3종(Gemma 7B / Mistral 7B / Gemma 2B)을 직접 파인튜닝해 쓰려면 `ai-models/training/text-lora/README.md`와 `train_text_lora_colab.ipynb`를 따르세요.

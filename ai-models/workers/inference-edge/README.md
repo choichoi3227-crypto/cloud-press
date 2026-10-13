@@ -9,7 +9,7 @@ Cloudflare Worker로 제공합니다. api-gateway는 코드 수정 없이 이 Wo
 |---|---|---|
 | 이미지: 색·도형 조건 (`prompt_type=condition`) | 미리 만든 이미지 뱅크에서 선택 | CPU ≈ 0, Workers AI 사용 안 함 |
 | 이미지: 자유 문장 (`prompt_type=text`) | **Workers AI — FLUX.1 schnell** (실제 AI 이미지 생성) | Workers AI 한도 사용 |
-| 텍스트 생성 (`/v1/text/generate`, `stream` 지원) | **Workers AI — Llama 3.1 8B fast** | Workers AI 한도 사용 |
+| 텍스트 생성 (`/v1/text/generate`, `stream` 지원) | **Workers AI — LoRA 파인튜닝 3종** (Gemma 7B / Mistral 7B / Gemma 2B) | Workers AI 한도 사용 |
 
 > Workers AI 모델은 **Cloudflare가 호스팅하는 범용 모델**입니다. 직접 학습한 모델(Nano-Tech Artist cGAN, Flash Texter)이 아니며,
 > 직접 학습한 가중치를 Workers AI에 올릴 수는 없습니다. 직접 학습한 모델 서빙은 GPU/컨테이너가 필요합니다(아래 "직접 학습 모델" 참고).
@@ -23,13 +23,26 @@ Cloudflare Worker로 제공합니다. api-gateway는 코드 수정 없이 이 Wo
   KV 쓰기 한도(1,000회/일)를 넘으면 캐시·속도 제한이 **자동으로 건너뛰어지고**(fail-open) 요청 자체는 계속 성공합니다.
 - 무료 플랜에서는 일부 리소스가 큰 모델의 접근이 제한될 수 있습니다. **배포 후 실제로 한 번 호출해 확인**하세요(아래 5번).
 
+### 텍스트: LoRA 파인튜닝 프로필 3종
+`training/text-lora/`에서 학습해 Workers AI에 올린 어댑터를 요청마다 골라 씁니다.
+
+| 프로필 | 기반 모델 | 어댑터(finetune) 이름 | 선택 방법 |
+|---|---|---|---|
+| `quality` (기본) | `@cf/google/gemma-7b-it-lora` | `cp-gemma7b` | `"profile":"quality"` 또는 `"mode":"thinking"` |
+| `general` | `@cf/mistral/mistral-7b-instruct-v0.2-lora` | `cp-mistral7b` | `"profile":"general"` |
+| `fast` | `@cf/google/gemma-2b-it-lora` | `cp-gemma2b` | `"profile":"fast"` 또는 `"mode":"fast"` |
+
+- 응답의 `profile`·`lora`로 어떤 모델/어댑터가 쓰였는지 알 수 있습니다. 어댑터를 아직 올리지 않았다면 **자동으로 기반 모델로 폴백**하고 `lora`는 `null`입니다.
+- 이 모델들은 system 역할이 없는 채팅 템플릿을 쓰므로, 시스템 지시를 첫 user 메시지 앞에 합쳐 보냅니다(학습 때와 같은 형식).
+- 어댑터 이름을 바꿨다면 `wrangler.toml`의 `[vars]`에 `TEXT_PROFILES = '{"quality":{"model":"@cf/google/gemma-7b-it-lora","lora":"새이름"}}'`처럼 지정하세요(일부 프로필만 적어도 됩니다).
+- `TEXT_MODEL`을 지정하면 요청에 profile/mode가 없을 때 그 모델 하나만 쓰는 "고정 모델" 모드가 됩니다(예: 파인튜닝 없는 일반 모델).
+
 ### 모델 교체
 Workers AI 카탈로그는 자주 바뀝니다(구형 모델 폐기 예고 있음). 코드를 고치지 않고 `wrangler.toml`의 `[vars]`에서 바꿉니다.
 ```toml
 IMAGE_MODEL = "@cf/black-forest-labs/flux-1-schnell"
-TEXT_MODEL  = "@cf/meta/llama-3.1-8b-instruct-fast"
 ```
-모델 목록: https://developers.cloudflare.com/workers-ai/models/ (한국어 품질이 더 좋은 모델이 있으면 `TEXT_MODEL`만 바꾸면 됩니다.)
+모델 목록: https://developers.cloudflare.com/workers-ai/models/
 `ENABLE_AI = "0"`으로 두면 Workers AI를 끄고(텍스트·자유 문장 이미지는 501) 뱅크 이미지만 제공합니다.
 
 ## 배포 (초보자용)
@@ -73,9 +86,9 @@ curl -s -X POST $GW/v1/image/generate -H "Authorization: Bearer $KEY" -H "Conten
 curl -s -X POST $GW/v1/image/generate -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" \
   -d '{"prompt_type":"text","prompt":"a cozy desk with a laptop, blog thumbnail, flat illustration"}' | head -c 200
 
-# 4) 텍스트
+# 4) 텍스트 — 응답의 profile/lora 확인 (lora가 null이면 어댑터 미적용=기반 모델)
 curl -s -X POST $GW/v1/text/generate -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" \
-  -d '{"prompt":"블로그 글 제목 5개 추천해줘","max_tokens":200}'
+  -d '{"prompt":"블로그 글 제목 5개 추천해줘","max_tokens":200,"profile":"quality"}'
 
 # 5) 3·4번이 502/503이면: 대시보드 → Workers AI 에서 모델 접근/한도를 확인하고 wrangler.toml의 IMAGE_MODEL/TEXT_MODEL 교체
 ```

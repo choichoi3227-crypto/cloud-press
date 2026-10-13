@@ -14,7 +14,7 @@ EDGE_LIVE = "0"
 # api-gateway와 같은 CACHE_KV를 공유합니다 (뱅크는 한 번만 올리면 둘 다 사용).
 [[kv_namespaces]]
 binding = "CACHE_KV"
-id = "9b1dfc61087e44da877e6b49e5083237"
+id = "39c4bf548f954ffabc6f9f5cdb449fd5"
 
 # secrets (파일에 값 쓰지 말 것):
 # npx wrangler secret put INTERNAL_API_KEY    (api-gateway의 INTERNAL_API_KEY와 같은 값)

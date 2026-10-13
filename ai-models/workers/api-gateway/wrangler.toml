@@ -4,7 +4,7 @@ compatibility_date = "2026-01-01"
 compatibility_flags = ["nodejs_compat"]
 
 [vars]
-INFERENCE_SERVER_URL = "https://cloudpress-inference-edge.jiji15899.workers.dev/"
+INFERENCE_SERVER_URL = "https://cloud-press-inference-edge.choichoi3227.workers.dev/"
 # WordPress cloud-press-deploy 플러그인이 조회할 수 있는 저장소 화이트리스트.
 # owner/repo 형식, 쉼표로 구분. 실제 배포 승인은 WordPress 쪽 다중 승인 로직이 담당하며
 # 이건 그 앞단의 2차 방어선일 뿐이다 (docs/12-github-deploy-plugin-spec.md 참조).

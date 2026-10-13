@@ -17,16 +17,23 @@ export async function rateLimit(c: Context<HonoBindings>, next: Next) {
   const minuteEpoch = Math.floor(Date.now() / 60000);
   const windowKey = `rl:${apiKeyId}:${minuteEpoch}`;
 
-  const currentRaw = await c.env.RATE_LIMIT_KV.get(windowKey);
-  const current = currentRaw ? parseInt(currentRaw, 10) : 0;
+  // 무료 플랜 KV는 쓰기 하루 1,000회 제한이 있다. 한도를 넘으면 put이 예외를 던지는데,
+  // 그 때문에 모든 요청이 500이 되면 안 되므로 KV 오류 시에는 제한을 건너뛴다(fail-open).
+  // (유료 플랜이거나 트래픽이 크면 D1/Durable Objects 기반 카운터로 교체하는 것을 권장 — docs/13 참고)
+  try {
+    const currentRaw = await c.env.RATE_LIMIT_KV.get(windowKey);
+    const current = currentRaw ? parseInt(currentRaw, 10) : 0;
 
-  if (current >= limit) {
-    return c.json({ error: "rate_limit_exceeded", limit, plan }, 429);
+    if (current >= limit) {
+      return c.json({ error: "rate_limit_exceeded", limit, plan }, 429);
+    }
+
+    await c.env.RATE_LIMIT_KV.put(windowKey, String(current + 1), {
+      expirationTtl: 60,
+    });
+  } catch (err) {
+    console.warn("rate limit KV unavailable (free-plan write limit?) — skipping rate limit:", String(err));
   }
-
-  await c.env.RATE_LIMIT_KV.put(windowKey, String(current + 1), {
-    expirationTtl: 60,
-  });
 
   await next();
 }

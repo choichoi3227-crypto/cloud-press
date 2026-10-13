@@ -56,3 +56,7 @@ curl -i -X POST https://<워커주소>/v1/image/generate \
 ## 추론 서버를 Cloudflare Worker로 (선택)
 추론 서버 주소 자리에 Cloudflare Worker를 쓰고 싶다면 `ai-models/workers/inference-edge/`를 배포하세요.
 이미지 생성은 무료 플랜에서 동작하고, 텍스트 생성은 501을 반환합니다. 자세한 내용은 `workers/inference-edge/README.md`.
+
+## 무료 플랜 한도 요약 (KV 쓰기 주의)
+- KV **쓰기 하루 1,000회**: api-gateway의 속도 제한(요청마다 1회)과 응답 캐시가 여기에 쓰입니다. 한도를 넘으면 캐시·속도 제한이 자동으로 꺼지고(fail-open) API는 계속 응답합니다. 요청이 하루 1,000회를 넘을 규모면 Workers Paid($5/월) 또는 D1 기반 카운터로 교체하세요.
+- Workers AI **하루 10,000 Neurons**(이미지·텍스트 합산). 자세한 내용과 모델 교체법은 `workers/inference-edge/README.md`.

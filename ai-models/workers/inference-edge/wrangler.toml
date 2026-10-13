@@ -5,9 +5,19 @@ compatibility_flags = ["nodejs_compat"]
 
 # 이 Worker는 추론 서버(FastAPI)와 같은 API 계약(/v1/health, /v1/image/generate, /v1/text/generate)을
 # Cloudflare 위에서 제공합니다. api-gateway의 INFERENCE_SERVER_URL에 이 Worker의 주소를 넣으면 됩니다.
-# 무료 플랜 안전 모드: 이미지는 사전 생성 뱅크에서 선택(CPU≈0). 텍스트는 501 (docs: inference-edge/README.md).
+# 무료 플랜: 조건 이미지=뱅크(CPU≈0), 자유 문장 이미지·텍스트=Workers AI(일 10,000 Neurons).
+
+# Workers AI 바인딩 — Cloudflare 호스팅 실제 생성 AI(이미지 FLUX.1 schnell, 텍스트 Llama 등).
+# 무료 플랜: 하루 10,000 Neurons(모든 모델 합산). 이 줄을 지우면 이미지(조건)만 뱅크로 동작합니다.
+[ai]
+binding = "AI"
 
 [vars]
+# Workers AI 모델 ID (카탈로그가 바뀌면 여기서 교체: https://developers.cloudflare.com/workers-ai/models/ )
+IMAGE_MODEL = "@cf/black-forest-labs/flux-1-schnell"
+TEXT_MODEL = "@cf/meta/llama-3.1-8b-instruct-fast"
+# "0"이면 Workers AI를 사용하지 않음
+ENABLE_AI = "1"
 # "1"이면 뱅크가 비었을 때 Worker에서 cGAN을 실시간 생성합니다(CPU 약 0.2초 → 유료 플랜 전용, 무료 플랜 금지).
 EDGE_LIVE = "0"
 

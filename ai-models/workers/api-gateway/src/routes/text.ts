@@ -1,6 +1,6 @@
 import { Context, Hono } from "hono";
 import { Env, HonoBindings } from "../env";
-import { callInferenceServer } from "../lib/inferenceClient";
+import { callInferenceServer, inferenceFetch } from "../lib/inferenceClient";
 import { makeCacheKey } from "../lib/cache";
 
 const text = new Hono<HonoBindings>();
@@ -48,9 +48,14 @@ text.post("/generate", async (c) => {
   }
 
   if (cacheKey) {
-    await c.env.CACHE_KV.put(cacheKey, JSON.stringify(result.data), {
-      expirationTtl: 3600,
-    });
+    try {
+      await c.env.CACHE_KV.put(cacheKey, JSON.stringify(result.data), {
+        expirationTtl: 3600,
+      });
+    } catch (err) {
+      // 무료 플랜 KV 쓰기 한도(일 1,000회) 초과 등 — 캐시 저장 실패가 응답 실패로 이어지면 안 된다.
+      console.warn("cache put failed:", String(err));
+    }
   }
 
   return c.json(result.data);
@@ -65,10 +70,9 @@ async function proxyStreamingResponse(
   c: Context<HonoBindings>,
   body: { prompt: string; max_tokens?: number; temperature?: number; mode?: string; stream?: boolean }
 ) {
-  const upstreamUrl = `${c.env.INFERENCE_SERVER_URL}/v1/text/generate`;
   let upstream: Response;
   try {
-    upstream = await fetch(upstreamUrl, {
+    upstream = await inferenceFetch(c.env, "/v1/text/generate", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",

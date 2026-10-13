@@ -35,6 +35,6 @@ id = "9b1dfc61087e44da877e6b49e5083237"
 # (선택) Cloudflare 위 추론 서버(workers/inference-edge)를 서비스 바인딩으로 연결.
 # inference-edge를 먼저 배포한 뒤에만 주석을 해제하세요 (없는 Worker를 바인딩하면 deploy가 실패합니다).
 # 바인딩이 있으면 INFERENCE_SERVER_URL보다 우선합니다.
-# [[services]]
-# binding = "INFERENCE_EDGE"
-# service = "cloud-press-inference-edge"
+[[services]]
+binding = "INFERENCE_EDGE"
+service = "cloud-press-inference-edge"
